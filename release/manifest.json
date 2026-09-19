@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "openlia": "0.1.0",
+  "hermes": {
+    "tag": "v2026.9.14",
+    "image_digest": "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294"
+  },
+  "locho": {
+    "version": "1.2.0-beta.1",
+    "linux_x86_64_sha256": "9d257c856f0a9c8220285db45c28c6227dfa76017d160f74490cfef7bd784ad4",
+    "linux_arm64_sha256": "1c0e67b130734467783e5e48a69d3003d218a4da624ba5841f3c5e6840f19c18"
+  },
+  "secret_policy": "credentials and capabilities are supplied out of band"
+}

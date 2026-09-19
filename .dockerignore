@@ -1,0 +1,15 @@
+.git
+local
+runtime
+backups
+**/.env
+**/.env.*
+**/auth.json
+**/state.db*
+**/sessions
+**/memories
+**/logs
+**/*.secret.toml
+docker/compose.generated.yaml
+tests
+cli/*_test.go

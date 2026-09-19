@@ -1,0 +1,58 @@
+# Conservative, secret-free defaults for the OpenLia Personal OS profile.
+# Set HERMES_WRITE_SAFE_ROOT=/opt/data in the runtime environment.
+
+model:
+  provider: ${OPENLIA_PROVIDER}
+  default: ${OPENLIA_MODEL}
+
+terminal:
+  backend: local
+  cwd: /opt/data/workspace
+  timeout: 180
+  home_mode: profile
+  docker_mount_cwd_to_workspace: false
+  env_passthrough: []
+  credential_files: []
+
+approvals:
+  mode: manual
+  timeout: 300
+  cron_mode: deny
+  single_query_mode: deny
+  unattended_mode: deny
+  mcp_reload_confirm: true
+  destructive_slash_confirm: true
+  deny:
+    - 'rm -rf *'
+    - 'git push --force*'
+    - '* | sh'
+    - '* | bash'
+
+skills:
+  write_approval: true
+  guard_agent_created: true
+  project_discovery: false
+
+cron:
+  preflight: true
+  allow_agent_scheduling: false
+  catch_up_missed: false
+  require_restart_safe_scope: true
+  wrap_response: true
+  mirror_delivery: false
+
+gateway:
+  allow_all_users: false
+
+unauthorized_dm_behavior: ignore
+
+security:
+  allow_private_urls: false
+  protected_instruction_files: true
+
+secrets:
+  command:
+    enabled: true
+    command: /usr/local/bin/openlia-secret-source
+    helper_timeout_seconds: 3
+    override_existing: true

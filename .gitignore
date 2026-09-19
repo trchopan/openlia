@@ -1,0 +1,40 @@
+local/
+
+# Deployment runtime state and secrets
+runtime/
+.env
+.env.*
+!.env.example
+docker/.env
+docker/.env.*
+!docker/.env.example
+
+# Hermes credentials and mutable profile state
+auth.json
+profile/auth.json
+profile/.env
+profile/.env.*
+!profile/.env.example
+state.db
+state.db-*
+sessions/
+memories/
+logs/
+cache/
+home/
+backups/
+
+# Locho capabilities and generated host configuration
+locho/hosts/*/attachments.toml
+locho/hosts/*/*.secret.toml
+docker/compose.generated.yaml
+
+# Go build and test artifacts
+/openlia
+*.test
+coverage.out
+__pycache__/
+*.pyc
+
+# Local smoke evidence
+smoke-report*.json
