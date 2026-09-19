@@ -1,5 +1,5 @@
 # Copy this file to the VM as:
-# /srv/openlia/runtime/locho/<host>/attachments.toml
+# <install-root>/runtime/locho/<host>/attachments.toml
 # Replace every placeholder out of band. Capability values must never enter Git.
 host_id = "<locho-host-id>"
 listen_host = "0.0.0.0"

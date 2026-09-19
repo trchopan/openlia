@@ -107,15 +107,16 @@ func configOrError(options Options) (Config, int) {
 		return config, ExitOK
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		return Config{}, fail(options, ExitPrereq, "OpenLia is not initialized; run `openlia init --target user@host`", map[string]any{"config": configPath()})
+		return Config{}, fail(options, ExitPrereq, "OpenLia is not initialized; run `openlia init --local` or `openlia init --target user@host`", map[string]any{"config": configPath()})
 	}
 	return Config{}, fail(options, ExitFailure, err.Error(), nil)
 }
 
 func commandInit(options Options, args []string, assets fs.FS) int {
 	set := newFlagSet("init")
+	local := set.Bool("local", false, "deploy on this machine")
 	target := set.String("target", "", "SSH destination such as user@host")
-	remoteRoot := set.String("remote-root", "", "remote OpenLia root")
+	root := set.String("root", "", "OpenLia installation root")
 	project := set.String("project", "", "Compose project name")
 	timezone := set.String("timezone", "", "IANA timezone for the Hermes agent")
 	model := set.String("model", "", "Hermes model identifier")
@@ -130,17 +131,32 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 		return fail(options, ExitUsage, "init does not accept positional arguments", nil)
 	}
 	config := defaultConfig()
+	previousMode := config.Mode
 	if existing, err := loadConfig(); err == nil {
 		config = existing
+		previousMode = existing.Mode
 	}
-	if *target != "" {
+	if *local && *target != "" {
+		return fail(options, ExitUsage, "--local and --target are mutually exclusive", nil)
+	}
+	if *local {
+		config.Mode = "local"
+		config.Target = ""
+	} else if *target != "" {
+		config.Mode = "ssh"
 		config.Target = *target
 	}
-	if config.Target == "" {
-		return fail(options, ExitUsage, "--target is required on first initialization", nil)
+	if config.Target == "" && config.Mode != "local" {
+		return fail(options, ExitUsage, "--local or --target is required on first initialization", nil)
 	}
-	if *remoteRoot != "" {
-		config.RemoteRoot = *remoteRoot
+	if *root != "" {
+		config.InstallRoot = *root
+	} else if config.Mode != previousMode {
+		if config.Mode == "local" {
+			config.InstallRoot = defaultLocalInstallRoot()
+		} else {
+			config.InstallRoot = defaultRemoteRoot
+		}
 	}
 	if *project != "" {
 		config.Project = *project
@@ -177,24 +193,24 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	if err != nil {
 		return fail(options, ExitInternal, err.Error(), nil)
 	}
-	remote := Remote{Config: config}
+	deployment := newDeployment(config)
 	ctx, cancel := remoteContext()
 	defer cancel()
 	if sourcePath != "" {
-		if err := remote.uploadFile(ctx, sourcePath, remote.rootPath("runtime", "secrets", "hermes.env"), 0o600); err != nil {
+		if err := deployment.uploadFile(ctx, sourcePath, deployment.rootPath("runtime", "secrets", "hermes.env"), 0o600); err != nil {
 			return fail(options, ExitFailure, "could not stage secret source: "+err.Error(), nil)
 		}
 	}
-	if err := remote.uploadRelease(ctx, archive, digest); err != nil {
+	if err := deployment.uploadRelease(ctx, archive, digest); err != nil {
 		return fail(options, ExitPrereq, err.Error(), nil)
 	}
-	if err := remote.activateRelease(ctx); err != nil {
+	if err := deployment.activateRelease(ctx); err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
-	if _, err := remote.bootstrap(ctx); err != nil {
+	if _, err := deployment.bootstrap(ctx); err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
-	if _, err := remote.deploy(ctx, "deploy", true, "all"); err != nil {
+	if _, err := deployment.deploy(ctx, "deploy", true, "all"); err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
 	if err := saveConfig(config); err != nil {
@@ -204,12 +220,13 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 		"schema":         1,
 		"ok":             true,
 		"action":         "init",
+		"mode":           config.Mode,
 		"target":         config.Target,
-		"remote_root":    config.RemoteRoot,
+		"root":           config.InstallRoot,
 		"release":        config.Version,
 		"release_sha256": digest,
 		"workspace":      "initialized_only_when_empty",
-	}, fmt.Sprintf("openlia init: deployed %s to %s; workspace preserved when non-empty", config.Version, config.Target))
+	}, fmt.Sprintf("openlia init: deployed %s in %s mode at %s; workspace preserved when non-empty", config.Version, config.Mode, config.InstallRoot))
 }
 
 func commandHealth(options Options, args []string, strict bool) int {
@@ -222,10 +239,10 @@ func commandHealth(options Options, args []string, strict bool) int {
 	}
 	ctx, cancel := remoteContext()
 	defer cancel()
-	raw, err := (Remote{Config: config}).health(ctx, !strict, options.ProviderCheck)
+	raw, err := newDeployment(config).health(ctx, !strict, options.ProviderCheck)
 	if err != nil {
 		if len(raw) == 0 {
-			return fail(options, ExitFailure, err.Error(), map[string]any{"target": config.Target})
+			return fail(options, ExitFailure, err.Error(), map[string]any{"mode": config.Mode, "target": config.Target, "root": config.InstallRoot})
 		}
 		if options.JSON {
 			var health any
@@ -233,8 +250,10 @@ func commandHealth(options Options, args []string, strict bool) int {
 				health = map[string]any{"output": redact(string(raw))}
 			}
 			returnCode := ExitFailure
-			return failWithPayload(options, returnCode, "remote health checks failed", map[string]any{
+			return failWithPayload(options, returnCode, "deployment health checks failed", map[string]any{
+				"mode":   config.Mode,
 				"target": config.Target,
+				"root":   config.InstallRoot,
 				"health": health,
 			})
 		}
@@ -249,14 +268,16 @@ func commandHealth(options Options, args []string, strict bool) int {
 		return writeResult(options, map[string]any{
 			"schema":  1,
 			"ok":      true,
+			"mode":    config.Mode,
 			"target":  config.Target,
+			"root":    config.InstallRoot,
 			"openlia": config.Version,
 			"hermes":  map[string]any{"tag": config.HermesTag, "digest": config.HermesDigest},
 			"locho":   map[string]any{"version": config.LochoVersion},
 			"health":  health,
 		}, fmt.Sprintf("target=%s\n%s", config.Target, redact(string(raw))))
 	}
-	return writeResult(options, nil, fmt.Sprintf("target=%s\n%s", config.Target, redact(string(raw))))
+	return writeResult(options, nil, fmt.Sprintf("mode=%s root=%s\n%s", config.Mode, config.InstallRoot, redact(string(raw))))
 }
 
 func failWithPayload(options Options, code int, message string, fields map[string]any) int {
@@ -285,14 +306,14 @@ func commandLifecycle(options Options, action string, args []string) int {
 	}
 	ctx, cancel := remoteContext()
 	defer cancel()
-	remote := Remote{Config: config}
+	deployment := newDeployment(config)
 	if action == "deploy" {
-		if _, err := remote.operation(ctx, "ops/attachments.sh", nil, "generate", "--json"); err != nil {
+		if _, err := deployment.operation(ctx, "ops/attachments.sh", nil, "generate", "--json"); err != nil {
 			return fail(options, ExitFailure, "attachment Compose generation failed: "+err.Error(), nil)
 		}
 	}
 	start := action == "start" || action == "restart"
-	raw, err := remote.deploy(ctx, action, start, "all")
+	raw, err := deployment.deploy(ctx, action, start, "all")
 	if err != nil {
 		return fail(options, ExitFailure, err.Error(), map[string]any{"action": action})
 	}
@@ -301,8 +322,9 @@ func commandLifecycle(options Options, action string, args []string) int {
 
 func commandUninstall(options Options, args []string) int {
 	set := newFlagSet("uninstall")
+	local := set.Bool("local", false, "uninstall a local deployment")
 	target := set.String("target", "", "SSH destination such as user@host")
-	remoteRoot := set.String("remote-root", "", "specific remote OpenLia installation root")
+	root := set.String("root", "", "specific OpenLia installation root")
 	project := set.String("project", "", "Compose project name")
 	if err := set.Parse(args); err != nil {
 		return ExitUsage
@@ -310,19 +332,24 @@ func commandUninstall(options Options, args []string) int {
 	if set.NArg() != 0 {
 		return fail(options, ExitUsage, "uninstall does not accept positional arguments", nil)
 	}
-	if *target == "" || *remoteRoot == "" || *project == "" {
-		return fail(options, ExitUsage, "uninstall requires --target, --remote-root, and --project", nil)
+	if (*local && *target != "") || (!*local && *target == "") || *root == "" || *project == "" {
+		return fail(options, ExitUsage, "uninstall requires either --local or --target, plus --root and --project", nil)
 	}
 	config := defaultConfig()
-	config.Target = *target
-	config.RemoteRoot = *remoteRoot
+	if *local {
+		config.Mode = "local"
+	} else {
+		config.Mode = "ssh"
+		config.Target = *target
+	}
+	config.InstallRoot = *root
 	config.Project = *project
 	if err := validateConfig(config); err != nil {
 		return fail(options, ExitUsage, err.Error(), nil)
 	}
 	if !options.NonInteractive {
-		expected := "uninstall " + config.RemoteRoot
-		fmt.Fprintf(os.Stderr, "Permanently remove OpenLia from %s at %s? Type %q to continue: ", config.Target, config.RemoteRoot, expected)
+		expected := "uninstall " + config.InstallRoot
+		fmt.Fprintf(os.Stderr, "Permanently remove OpenLia from %s at %s? Type %q to continue: ", config.Mode, config.InstallRoot, expected)
 		answer, readErr := bufio.NewReader(os.Stdin).ReadString('\n')
 		if readErr != nil || strings.TrimSpace(answer) != expected {
 			return fail(options, ExitFailure, "uninstall cancelled", nil)
@@ -330,9 +357,9 @@ func commandUninstall(options Options, args []string) int {
 	}
 	ctx, cancel := remoteContext()
 	defer cancel()
-	raw, err := (Remote{Config: config}).uninstall(ctx)
+	raw, err := newDeployment(config).uninstall(ctx)
 	if err != nil {
-		return fail(options, ExitFailure, err.Error(), map[string]any{"target": config.Target, "remote_root": config.RemoteRoot})
+		return fail(options, ExitFailure, err.Error(), map[string]any{"mode": config.Mode, "target": config.Target, "root": config.InstallRoot})
 	}
 	return renderRemote(options, raw, "openlia uninstall: "+redact(string(raw)))
 }
@@ -347,7 +374,7 @@ func commandLogs(options Options, args []string) int {
 	}
 	ctx, cancel := remoteContext()
 	defer cancel()
-	raw, err := (Remote{Config: config}).composeLogs(ctx, options.Follow)
+	raw, err := newDeployment(config).composeLogs(ctx, options.Follow)
 	if err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
@@ -385,19 +412,19 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 	}
 	ctx, cancel := remoteContext()
 	defer cancel()
-	remote := Remote{Config: config}
+	deployment := newDeployment(config)
 	if component == "openlia" {
 		archive, digest, err := releaseArchive(assets)
 		if err != nil {
 			return fail(options, ExitInternal, err.Error(), nil)
 		}
-		if err := remote.uploadRelease(ctx, archive, digest); err != nil {
+		if err := deployment.uploadRelease(ctx, archive, digest); err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
-		if err := remote.activateRelease(ctx); err != nil {
+		if err := deployment.activateRelease(ctx); err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
-		raw, err := remote.operation(ctx, "ops/deploy.sh", nil, "profile", "--json")
+		raw, err := deployment.operation(ctx, "ops/deploy.sh", nil, "profile", "--json")
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
@@ -407,11 +434,11 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 	// The command does not silently change a tag or digest; operators update the
 	// desired pin in their operator config before invoking this boundary.
 	if component == "locho" {
-		if _, err := remote.operation(ctx, "ops/attachments.sh", nil, "generate", "--json"); err != nil {
+		if _, err := deployment.operation(ctx, "ops/attachments.sh", nil, "generate", "--json"); err != nil {
 			return fail(options, ExitFailure, "attachment Compose generation failed: "+err.Error(), nil)
 		}
 	}
-	raw, err := remote.deploy(ctx, "deploy", true, component)
+	raw, err := deployment.deploy(ctx, "deploy", true, component)
 	if err != nil {
 		return fail(options, ExitFailure, err.Error(), map[string]any{"component": component})
 	}
@@ -477,7 +504,7 @@ func commandSkills(options Options, args []string, assets fs.FS) int {
 		if config.Target != "" {
 			ctx, cancel := remoteContext()
 			defer cancel()
-			if _, err := (Remote{Config: config}).operation(ctx, "ops/profile.sh", nil, "sync", "--json"); err != nil {
+			if _, err := newDeployment(config).operation(ctx, "ops/profile.sh", nil, "sync", "--json"); err != nil {
 				return fail(options, ExitFailure, err.Error(), nil)
 			}
 		}
@@ -503,7 +530,7 @@ func commandAuth(options Options, args []string) int {
 		}
 		ctx, cancel := remoteContext()
 		defer cancel()
-		raw, err := (Remote{Config: config}).operation(ctx, "ops/auth.sh", nil, "list", "--json")
+		raw, err := newDeployment(config).operation(ctx, "ops/auth.sh", nil, "list", "--json")
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
@@ -546,12 +573,12 @@ func commandAttachments(options Options, args []string) int {
 	}
 	ctx, cancel := remoteContext()
 	defer cancel()
-	remote := Remote{Config: config}
+	deployment := newDeployment(config)
 	if action == "list" {
 		if len(args) != 0 {
 			return fail(options, ExitUsage, "attachments list takes no positional arguments", nil)
 		}
-		raw, err := remote.operation(ctx, "ops/attachments.sh", nil, "list", "--json")
+		raw, err := deployment.operation(ctx, "ops/attachments.sh", nil, "list", "--json")
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
@@ -579,13 +606,13 @@ func commandBackup(options Options, args []string) int {
 	}
 	ctx, cancel := remoteContext()
 	defer cancel()
-	remote := Remote{Config: config}
+	deployment := newDeployment(config)
 	switch action {
 	case "create":
 		if len(args) != 0 {
 			return fail(options, ExitUsage, "backup create takes no positional arguments", nil)
 		}
-		raw, err := remote.operation(ctx, "ops/backup.sh", nil, "create", "--json")
+		raw, err := deployment.operation(ctx, "ops/backup.sh", nil, "create", "--json")
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
@@ -603,7 +630,7 @@ func commandBackup(options Options, args []string) int {
 			}
 		}
 		if archive == "" {
-			raw, err := remote.operation(ctx, "ops/backup.sh", nil, "restore", "--json")
+			raw, err := deployment.operation(ctx, "ops/backup.sh", nil, "restore", "--json")
 			if err != nil {
 				return fail(options, ExitFailure, err.Error(), nil)
 			}
@@ -615,12 +642,12 @@ func commandBackup(options Options, args []string) int {
 		if isInsideWorkingTree(archive) {
 			return fail(options, ExitUsage, "backup archive must be outside the OpenLia checkout", nil)
 		}
-		remoteArchive := remote.rootPath("runtime", "backups", filepath.Base(archive))
-		if err := remote.uploadFile(ctx, archive, remoteArchive, 0o600); err != nil {
+		remoteArchive := deployment.rootPath("runtime", "backups", filepath.Base(archive))
+		if err := deployment.uploadFile(ctx, archive, remoteArchive, 0o600); err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
-		defer remote.removeFile(context.Background(), remoteArchive)
-		raw, err := remote.operation(ctx, "ops/backup.sh", nil, "restore", "--archive", remoteArchive, "--json")
+		defer deployment.removeFile(context.Background(), remoteArchive)
+		raw, err := deployment.operation(ctx, "ops/backup.sh", nil, "restore", "--archive", remoteArchive, "--json")
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
@@ -663,18 +690,18 @@ func rotateRemoteFile(options Options, kind, source string) int {
 	}
 	ctx, cancel := remoteContext()
 	defer cancel()
-	remote := Remote{Config: config}
-	remotePath := remote.rootPath("runtime", "meta", ".openlia-incoming")
-	if err := remote.uploadFile(ctx, source, remotePath, 0o600); err != nil {
+	deployment := newDeployment(config)
+	remotePath := deployment.rootPath("runtime", "meta", ".openlia-incoming")
+	if err := deployment.uploadFile(ctx, source, remotePath, 0o600); err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
-	defer remote.removeFile(context.Background(), remotePath)
+	defer deployment.removeFile(context.Background(), remotePath)
 	var raw []byte
 	if strings.HasPrefix(kind, "attachments:") {
 		host := strings.TrimPrefix(kind, "attachments:")
-		raw, err = remote.operation(ctx, "ops/attachments.sh", nil, "rotate", host, "--source", remotePath, "--json")
+		raw, err = deployment.operation(ctx, "ops/attachments.sh", nil, "rotate", host, "--source", remotePath, "--json")
 	} else {
-		raw, err = remote.operation(ctx, "ops/auth.sh", nil, "rotate", "--source", remotePath, "--json")
+		raw, err = deployment.operation(ctx, "ops/auth.sh", nil, "rotate", "--source", remotePath, "--json")
 	}
 	if err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)

@@ -46,6 +46,36 @@ func TestConfigDefaultsTimezoneForLegacyConfig(t *testing.T) {
 	}
 }
 
+func TestLocalConfigRoundTrip(t *testing.T) {
+	temporary := t.TempDir()
+	path := filepath.Join(temporary, "config.toml")
+	t.Setenv("OPENLIA_CONFIG", path)
+	want := defaultConfig()
+	want.Mode = "local"
+	want.Target = ""
+	want.InstallRoot = filepath.Join(temporary, "runtime")
+	if err := saveConfig(want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Mode != "local" || got.Target != "" || got.InstallRoot != want.InstallRoot {
+		t.Fatalf("local config mismatch: got %#v want %#v", got, want)
+	}
+}
+
+func TestLegacyRemoteRootConfigIsReadable(t *testing.T) {
+	got, err := parseConfig("[openlia]\nschema = 1\nremote_root = \"/srv/openlia-test\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Mode != "ssh" || got.InstallRoot != "/srv/openlia-test" {
+		t.Fatalf("legacy config mismatch: got %#v", got)
+	}
+}
+
 func TestConfigRejectsInvalidTimezone(t *testing.T) {
 	for _, timezone := range []string{"", "Local", "../UTC", "Mars/Olympus", "Asia/Ho Chi Minh"} {
 		config := defaultConfig()
@@ -80,9 +110,18 @@ func TestConfigRejectsUnsafeTargetAndRoot(t *testing.T) {
 		t.Fatal("unsafe target was accepted")
 	}
 	config = defaultConfig()
-	config.RemoteRoot = "/srv"
+	config.InstallRoot = "/srv"
 	if err := validateConfig(config); err == nil {
-		t.Fatal("broad remote root was accepted")
+		t.Fatal("broad installation root was accepted")
+	}
+}
+
+func TestLocalConfigRejectsTarget(t *testing.T) {
+	config := defaultConfig()
+	config.Mode = "local"
+	config.Target = "operator@example.test"
+	if err := validateConfig(config); err == nil {
+		t.Fatal("local config accepted an SSH target")
 	}
 }
 

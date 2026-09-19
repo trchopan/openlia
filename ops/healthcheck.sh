@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=ops/lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 
@@ -28,7 +28,7 @@ openlia_validate_paths
 openlia_require_command python3
 openlia_require_command docker
 openlia_require_command tar
-openlia_require_command sha256sum
+openlia_sha256 /dev/null >/dev/null
 
 checks=''
 failed=0
@@ -61,7 +61,12 @@ if command -v findmnt >/dev/null 2>&1; then
         *) add_check data_filesystem true "$filesystem" ;;
     esac
 else
-    add_check data_filesystem false findmnt_unavailable
+    filesystem=$(stat -f '%T' "$OPENLIA_DATA_ROOT" 2>/dev/null || true)
+    case "$filesystem" in
+        nfs|smbfs|cifs|fuse.*) add_check data_filesystem false "unsupported:${filesystem}" ;;
+        '') add_check data_filesystem true unverified ;;
+        *) add_check data_filesystem true "$filesystem" ;;
+    esac
 fi
 
 if [[ -f "$OPENLIA_COMPOSE_FILE" ]] && openlia_compose config --quiet >/dev/null 2>&1; then
@@ -184,7 +189,7 @@ else
 fi
 
 if [[ -f "$OPENLIA_SECRET_FILE" ]]; then
-    if [[ "$(stat -c '%a' "$OPENLIA_SECRET_FILE" 2>/dev/null || printf 600)" == 600 ]]; then
+    if [[ "$(openlia_file_mode "$OPENLIA_SECRET_FILE")" == 600 ]]; then
         add_check secret_source true mode_0600
     else
         add_check secret_source false mode_not_0600

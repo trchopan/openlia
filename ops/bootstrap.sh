@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=ops/lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 
@@ -28,10 +28,9 @@ openlia_validate_paths
 openlia_require_command python3
 openlia_require_command docker
 openlia_require_command tar
-openlia_require_command sha256sum
-
-if [[ "$(uname -s)" != Linux ]]; then
-    openlia_die 'the deployment target must be Linux'
+openlia_sha256 /dev/null >/dev/null
+if [[ "$(docker info --format '{{.OSType}}' 2>/dev/null || true)" != linux ]]; then
+    openlia_die 'the Docker engine must provide a Linux runtime'
 fi
 
 if ! docker compose version >/dev/null 2>&1; then
@@ -52,7 +51,7 @@ openlia_ensure_dir "$OPENLIA_RUNTIME_ROOT" 700
 openlia_ensure_dir "$OPENLIA_DATA_ROOT" 700
 openlia_ensure_dir "$OPENLIA_LOCHO_ROOT" 700
 openlia_ensure_dir "${OPENLIA_RUNTIME_ROOT}/secrets" 700
-chown 10000:10000 "${OPENLIA_RUNTIME_ROOT}/secrets"
+    openlia_set_runtime_owner "${OPENLIA_RUNTIME_ROOT}/secrets"
 openlia_ensure_dir "$OPENLIA_BACKUP_ROOT" 700
 openlia_ensure_dir "$OPENLIA_META_ROOT" 700
 
@@ -64,7 +63,7 @@ else
     [[ -f "$OPENLIA_SECRET_FILE" ]] || openlia_die 'secret source path is not a regular file'
     chmod 600 "$OPENLIA_SECRET_FILE"
 fi
-chown 10000:10000 "$OPENLIA_SECRET_FILE"
+openlia_set_runtime_owner "$OPENLIA_SECRET_FILE"
 chmod 600 "$OPENLIA_SECRET_FILE"
 
 # This is only Hermes orchestration configuration. It contains no provider
@@ -72,7 +71,7 @@ chmod 600 "$OPENLIA_SECRET_FILE"
 # overwriting an operator's later config changes.
 if [[ ! -e "${OPENLIA_DATA_ROOT}/config.yaml" ]]; then
     if [[ -f "${OPENLIA_REPO_ROOT}/profile/config.yaml" ]]; then
-        cp -- "${OPENLIA_REPO_ROOT}/profile/config.yaml" "${OPENLIA_DATA_ROOT}/config.yaml"
+        cp "${OPENLIA_REPO_ROOT}/profile/config.yaml" "${OPENLIA_DATA_ROOT}/config.yaml"
         chmod 600 "${OPENLIA_DATA_ROOT}/config.yaml"
     else
         openlia_atomic_stdin "${OPENLIA_DATA_ROOT}/config.yaml" 600 <<'EOF'
@@ -90,21 +89,21 @@ fi
 # an empty directory is the only condition under which the template is copied.
 for profile_file in SOUL.md AGENTS.md; do
     if [[ ! -e "${OPENLIA_DATA_ROOT}/${profile_file}" && -f "${OPENLIA_REPO_ROOT}/profile/${profile_file}" ]]; then
-        cp -- "${OPENLIA_REPO_ROOT}/profile/${profile_file}" "${OPENLIA_DATA_ROOT}/${profile_file}"
+        cp "${OPENLIA_REPO_ROOT}/profile/${profile_file}" "${OPENLIA_DATA_ROOT}/${profile_file}"
         chmod 600 "${OPENLIA_DATA_ROOT}/${profile_file}"
     fi
 done
 workspace_dir="${OPENLIA_DATA_ROOT}/workspace"
-mkdir -p -- "$workspace_dir"
-if [[ -z "$(find "$workspace_dir" -mindepth 1 -maxdepth 1 -print -quit)" && -d "${OPENLIA_REPO_ROOT}/workspace-template" ]]; then
-    cp -a -- "${OPENLIA_REPO_ROOT}/workspace-template/." "$workspace_dir/"
+mkdir -p "$workspace_dir"
+if openlia_directory_empty "$workspace_dir" && [[ -d "${OPENLIA_REPO_ROOT}/workspace-template" ]]; then
+    cp -a "${OPENLIA_REPO_ROOT}/workspace-template/." "$workspace_dir/"
     find "$workspace_dir" -type d -exec chmod 700 {} +
     find "$workspace_dir" -type f -exec chmod 600 {} +
 fi
 # Adding missing category directories is non-destructive and repairs releases
 # created before marker files were included in the embedded archive.
 for workspace_category in inbox goals areas projects knowledge ideas decisions monitors tasks calendar people shopping travel finance archive; do
-    mkdir -p -- "${workspace_dir}/${workspace_category}"
+    mkdir -p "${workspace_dir}/${workspace_category}"
 done
 
 if [[ -x "${SCRIPT_DIR}/profile.sh" ]]; then
@@ -119,7 +118,7 @@ if [[ ! -e "$OPENLIA_STATE_FILE" ]]; then
 fi
 
 openlia_atomic_stdin "${OPENLIA_META_ROOT}/runtime.json" 600 <<EOF
-{"schema":1,"runtime_root":$(openlia_json_quote "$OPENLIA_RUNTIME_ROOT"),"hermes_data":$(openlia_json_quote "$OPENLIA_DATA_ROOT"),"locho_root":$(openlia_json_quote "$OPENLIA_LOCHO_ROOT"),"secret_source":"docker-secret","created_at":$(openlia_json_quote "$(date -u +%Y-%m-%dT%H:%M:%SZ)")}
+{"schema":1,"install_root":$(openlia_json_quote "$OPENLIA_INSTALL_ROOT"),"project":$(openlia_json_quote "$OPENLIA_PROJECT_NAME"),"network":$(openlia_json_quote "${OPENLIA_NETWORK_NAME:-${OPENLIA_PROJECT_NAME}-private}"),"runtime_root":$(openlia_json_quote "$OPENLIA_RUNTIME_ROOT"),"hermes_data":$(openlia_json_quote "$OPENLIA_DATA_ROOT"),"locho_root":$(openlia_json_quote "$OPENLIA_LOCHO_ROOT"),"secret_source":"docker-secret","created_at":$(openlia_json_quote "$(date -u +%Y-%m-%dT%H:%M:%SZ)")}
 EOF
 
 openlia_record_change bootstrap ok '' 'runtime initialized'

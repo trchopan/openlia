@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=ops/lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 
@@ -45,7 +45,7 @@ openlia_validate_paths
 openlia_require_command python3
 if [[ "$action" != list ]]; then
     openlia_require_command tar
-    openlia_require_command sha256sum
+    openlia_sha256 /dev/null >/dev/null
     openlia_ensure_dir "$OPENLIA_LOCHO_ROOT" 700
     openlia_ensure_dir "$OPENLIA_META_ROOT" 700
 fi
@@ -156,7 +156,7 @@ write_generated_compose() {
         fi
     } >"$tmp"
     chmod 600 "$tmp"
-    mv -f -- "$tmp" "$output"
+    mv -f "$tmp" "$output"
 }
 
 if [[ "$action" == list ]]; then
@@ -236,19 +236,19 @@ else
     generated_was_present=false
 fi
 openlia_ensure_dir "$target_directory" 700
-chown 10000:10000 "$target_directory"
+    openlia_set_runtime_owner "$target_directory"
 chmod 700 "$target_directory"
 
 restore_previous_attachment() {
     if [[ -n "$config_backup" ]]; then
         openlia_atomic_copy "$config_backup" "$target_file" 600
     else
-        rm -f -- "$target_file"
+        rm -f "$target_file"
     fi
     if [[ -n "$generated_backup" ]]; then
         openlia_atomic_copy "$generated_backup" "$OPENLIA_GENERATED_COMPOSE" 600
     elif [[ "$generated_was_present" == false ]]; then
-        rm -f -- "$OPENLIA_GENERATED_COMPOSE"
+        rm -f "$OPENLIA_GENERATED_COMPOSE"
     fi
 }
 
@@ -261,7 +261,7 @@ if ! openlia_atomic_copy "$source_file" "$target_file" 600; then
     openlia_record_change "locho-${host}-rotate" failed "$config_backup" 'attachment replacement failed'
     openlia_die 'attachment replacement failed'
 fi
-chown 10000:10000 "$target_file"
+openlia_set_runtime_owner "$target_file"
 chmod 600 "$target_file"
 if ! write_generated_compose "$OPENLIA_GENERATED_COMPOSE"; then
     restore_previous_attachment
