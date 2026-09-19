@@ -17,6 +17,15 @@ func TestConfigRoundTrip(t *testing.T) {
 	want.Timezone = "Asia/Tokyo"
 	want.SecretSource = filepath.Join(temporary, "hermes.env")
 	want.EnabledSkills = []string{"daily-briefing", "deep-research"}
+	want.WorkspaceGit = WorkspaceGitConfig{
+		Enabled:     true,
+		Provider:    "github",
+		Remote:      "https://github.com/example/private-vault.git",
+		Branch:      "main",
+		Schedule:    "every 5m",
+		AuthorName:  "OpenLia Agent",
+		AuthorEmail: "openlia@example.test",
+	}
 	if err := saveConfig(want); err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +33,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Target != want.Target || got.Model != want.Model || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 {
+	if got.Target != want.Target || got.Model != want.Model || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || got.WorkspaceGit != want.WorkspaceGit {
 		t.Fatalf("round trip mismatch: got %#v want %#v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -130,6 +139,31 @@ func TestConfigRejectsRelativeSecretSource(t *testing.T) {
 	config.SecretSource = "hermes.env"
 	if err := validateConfig(config); err == nil {
 		t.Fatal("relative secret source was accepted")
+	}
+}
+
+func TestWorkspaceGitRejectsUnsafeRemote(t *testing.T) {
+	for _, remote := range []string{
+		"https://github.com/example/private-vault.git?token=secret",
+		"https://github.com/example/private-vault/extra.git",
+		"http://github.com/example/private-vault.git",
+		"git@github.com:example/private-vault.git",
+	} {
+		config := defaultConfig()
+		config.WorkspaceGit.Enabled = true
+		config.WorkspaceGit.Remote = remote
+		if err := validateConfig(config); err == nil {
+			t.Fatalf("workspace Git remote %q was accepted", remote)
+		}
+	}
+}
+
+func TestWorkspaceGitAcceptsConfiguredRemote(t *testing.T) {
+	config := defaultConfig()
+	config.WorkspaceGit.Enabled = true
+	config.WorkspaceGit.Remote = "https://github.com/example/private-vault.git"
+	if err := validateConfig(config); err != nil {
+		t.Fatalf("valid workspace Git config was rejected: %v", err)
 	}
 }
 

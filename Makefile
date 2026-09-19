@@ -19,11 +19,12 @@ test:
 	python3 -m py_compile tests/smoke.py
 	for script in profile/skills/*/scripts/*.py; do python3 "$$script" --self-test; done
 	./tests/ops_test.sh
+	./tests/workspace_git_test.sh
 
 lint:
 	gofmt -d main.go cli
-	bash -n docker/secret-source.sh ops/*.sh ops/lib/*.sh tests/ops_test.sh
-	shellcheck docker/secret-source.sh ops/*.sh ops/lib/*.sh tests/ops_test.sh
+	bash -n docker/*.sh ops/*.sh ops/lib/*.sh profile/cron/scripts/*.sh tests/ops_test.sh tests/workspace_git_test.sh
+	shellcheck docker/*.sh ops/*.sh ops/lib/*.sh profile/cron/scripts/*.sh tests/ops_test.sh tests/workspace_git_test.sh
 
 compose-config:
 	docker compose -f docker/compose.yaml config --quiet

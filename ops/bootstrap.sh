@@ -100,6 +100,12 @@ if openlia_directory_empty "$workspace_dir" && [[ -d "${OPENLIA_REPO_ROOT}/works
     find "$workspace_dir" -type d -exec chmod 700 {} +
     find "$workspace_dir" -type f -exec chmod 600 {} +
 fi
+# Existing deployments may predate workspace Git support. Add only the
+# distribution-owned ignore rules when the user has not supplied their own.
+if [[ ! -e "${workspace_dir}/.gitignore" && -f "${OPENLIA_REPO_ROOT}/workspace-template/.gitignore" ]]; then
+    cp "${OPENLIA_REPO_ROOT}/workspace-template/.gitignore" "${workspace_dir}/.gitignore"
+    chmod 600 "${workspace_dir}/.gitignore"
+fi
 # Adding missing category directories is non-destructive and repairs releases
 # created before marker files were included in the embedded archive.
 for workspace_category in inbox goals areas projects knowledge ideas decisions monitors tasks calendar people shopping travel finance archive; do

@@ -1,0 +1,20 @@
+# Credentials and private runtime artifacts must never enter the workspace Git
+# history, even if they are accidentally created below this directory.
+.env
+.env.*
+*.env
+*.secret
+*.secret.*
+*.pem
+*.key
+*.p12
+*.pfx
+auth.json
+*/auth.json
+sessions/
+logs/
+cache/
+browser-profile/
+mcp-tokens/
+pairing/
+.DS_Store

@@ -59,6 +59,8 @@ func Run(args []string, assets fs.FS) int {
 		return commandAttachments(options, remaining[1:])
 	case "backup":
 		return commandBackup(options, remaining[1:])
+	case "workspace":
+		return commandWorkspace(options, remaining[1:])
 	default:
 		return fail(options, ExitUsage, fmt.Sprintf("unknown command %q", remaining[0]), map[string]any{"hint": "run openlia --help"})
 	}
@@ -124,6 +126,11 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	externalNetwork := set.String("external-network", "", "Existing Docker network for internal services")
 	apiEnabled := set.Bool("api", false, "enable the private API listener")
 	apiHost := set.String("api-host", "", "API bind address when --api is enabled")
+	workspaceGitRemote := set.String("workspace-git-remote", "", "HTTPS GitHub repository for workspace backup")
+	workspaceGitBranch := set.String("workspace-git-branch", "", "workspace Git branch")
+	workspaceGitSchedule := set.String("workspace-git-schedule", "", "workspace Git automatic pull schedule")
+	workspaceGitAuthorName := set.String("workspace-git-author-name", "", "workspace Git commit author name")
+	workspaceGitAuthorEmail := set.String("workspace-git-author-email", "", "workspace Git commit author email")
 	if err := set.Parse(args); err != nil {
 		return ExitUsage
 	}
@@ -179,6 +186,26 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	if *apiHost != "" {
 		config.APIHost = *apiHost
 	}
+	if *workspaceGitRemote != "" {
+		config.WorkspaceGit.Enabled = true
+		config.WorkspaceGit.Remote = *workspaceGitRemote
+		config.EnabledSkills = setSkill(config.EnabledSkills, "workspace-git", true)
+	}
+	if *workspaceGitBranch != "" {
+		config.WorkspaceGit.Branch = *workspaceGitBranch
+	}
+	if *workspaceGitSchedule != "" {
+		config.WorkspaceGit.Schedule = *workspaceGitSchedule
+	}
+	if *workspaceGitAuthorName != "" {
+		config.WorkspaceGit.AuthorName = *workspaceGitAuthorName
+	}
+	if *workspaceGitAuthorEmail != "" {
+		config.WorkspaceGit.AuthorEmail = *workspaceGitAuthorEmail
+	}
+	if config.WorkspaceGit.Enabled {
+		config.EnabledSkills = setSkill(config.EnabledSkills, "workspace-git", true)
+	}
 	sourcePath := config.SecretSource
 	if sourcePath != "" {
 		if err := validateProtectedSourcePath(sourcePath, "secret source"); err != nil {
@@ -213,6 +240,11 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	if _, err := deployment.deploy(ctx, "deploy", true, "all"); err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
+	if config.WorkspaceGit.Enabled {
+		if _, err := deployment.workspaceGit(ctx, "setup", config.WorkspaceGit); err != nil {
+			return fail(options, ExitFailure, "workspace Git setup failed: "+err.Error(), nil)
+		}
+	}
 	if err := saveConfig(config); err != nil {
 		return fail(options, ExitInternal, "deployment succeeded but operator config could not be saved: "+err.Error(), nil)
 	}
@@ -226,7 +258,8 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 		"release":        config.Version,
 		"release_sha256": digest,
 		"workspace":      "initialized_only_when_empty",
-	}, fmt.Sprintf("openlia init: deployed %s in %s mode at %s; workspace preserved when non-empty", config.Version, config.Mode, config.InstallRoot))
+		"workspace_git":  config.WorkspaceGit.Enabled,
+	}, fmt.Sprintf("openlia init: deployed %s in %s mode at %s; workspace preserved when non-empty; workspace_git=%t", config.Version, config.Mode, config.InstallRoot, config.WorkspaceGit.Enabled))
 }
 
 func commandHealth(options Options, args []string, strict bool) int {
@@ -316,6 +349,14 @@ func commandLifecycle(options Options, action string, args []string) int {
 	raw, err := deployment.deploy(ctx, action, start, "all")
 	if err != nil {
 		return fail(options, ExitFailure, err.Error(), map[string]any{"action": action})
+	}
+	if action == "deploy" && config.WorkspaceGit.Enabled {
+		if _, err := deployment.operation(ctx, "ops/profile.sh", nil, "sync", "--json"); err != nil {
+			return fail(options, ExitFailure, "workspace Git profile synchronization failed: "+err.Error(), map[string]any{"action": action})
+		}
+		if _, err := deployment.workspaceGit(ctx, "ensure", config.WorkspaceGit); err != nil {
+			return fail(options, ExitFailure, "workspace Git reconciliation failed: "+err.Error(), map[string]any{"action": action})
+		}
 	}
 	return renderRemote(options, raw, "openlia "+action+": "+redact(string(raw)))
 }
@@ -654,6 +695,90 @@ func commandBackup(options Options, args []string) int {
 		return renderRemote(options, raw, redact(string(raw)))
 	default:
 		return fail(options, ExitUsage, "unknown backup action "+action, nil)
+	}
+}
+
+func commandWorkspace(options Options, args []string) int {
+	if len(args) == 0 || args[0] != "git" {
+		return fail(options, ExitUsage, "workspace requires the git subcommand", nil)
+	}
+	args = args[1:]
+	if len(args) == 0 {
+		return fail(options, ExitUsage, "workspace git requires setup or status", nil)
+	}
+	action := args[0]
+	args = args[1:]
+	config, code := configOrError(options)
+	if code != ExitOK {
+		return code
+	}
+
+	set := newFlagSet("workspace git " + action)
+	remote := set.String("remote", "", "HTTPS GitHub repository URL")
+	branch := set.String("branch", "", "workspace Git branch")
+	schedule := set.String("schedule", "", "workspace Git automatic pull schedule")
+	authorName := set.String("author-name", "", "workspace Git commit author name")
+	authorEmail := set.String("author-email", "", "workspace Git commit author email")
+	if err := set.Parse(args); err != nil {
+		return ExitUsage
+	}
+	if set.NArg() != 0 {
+		return fail(options, ExitUsage, "workspace git does not accept positional arguments", nil)
+	}
+
+	ctx, cancel := remoteContext()
+	defer cancel()
+	deployment := newDeployment(config)
+	switch action {
+	case "status":
+		if len(args) != 0 || !config.WorkspaceGit.Enabled {
+			return fail(options, ExitUsage, "workspace Git is not configured", nil)
+		}
+		raw, err := deployment.workspaceGit(ctx, "status", config.WorkspaceGit)
+		if err != nil {
+			return fail(options, ExitFailure, err.Error(), nil)
+		}
+		return renderRemote(options, raw, redact(string(raw)))
+	case "setup":
+		if *remote != "" {
+			config.WorkspaceGit.Remote = *remote
+			config.WorkspaceGit.Enabled = true
+			config.EnabledSkills = setSkill(config.EnabledSkills, "workspace-git", true)
+		}
+		if *branch != "" {
+			config.WorkspaceGit.Branch = *branch
+		}
+		if *schedule != "" {
+			config.WorkspaceGit.Schedule = *schedule
+		}
+		if *authorName != "" {
+			config.WorkspaceGit.AuthorName = *authorName
+		}
+		if *authorEmail != "" {
+			config.WorkspaceGit.AuthorEmail = *authorEmail
+		}
+		if config.WorkspaceGit.Enabled {
+			config.EnabledSkills = setSkill(config.EnabledSkills, "workspace-git", true)
+		}
+		if !config.WorkspaceGit.Enabled {
+			return fail(options, ExitUsage, "workspace git setup requires --remote or an existing workspace_git.remote setting", nil)
+		}
+		if err := validateConfig(config); err != nil {
+			return fail(options, ExitUsage, err.Error(), nil)
+		}
+		if _, err := deployment.operation(ctx, "ops/profile.sh", nil, "sync", "--json"); err != nil {
+			return fail(options, ExitFailure, "workspace Git skill synchronization failed: "+err.Error(), nil)
+		}
+		raw, err := deployment.workspaceGit(ctx, "setup", config.WorkspaceGit)
+		if err != nil {
+			return fail(options, ExitFailure, err.Error(), nil)
+		}
+		if err := saveConfig(config); err != nil {
+			return fail(options, ExitInternal, "workspace Git setup succeeded but operator config could not be saved: "+err.Error(), nil)
+		}
+		return renderRemote(options, raw, "openlia workspace git: setup completed")
+	default:
+		return fail(options, ExitUsage, "unknown workspace git action "+action, nil)
 	}
 }
 

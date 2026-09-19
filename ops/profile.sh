@@ -27,21 +27,23 @@ openlia_validate_paths
 openlia_require_safe_component "$OPENLIA_PROJECT_NAME" project-name
 openlia_ensure_dir "$OPENLIA_DATA_ROOT" 700
 openlia_ensure_dir "${OPENLIA_DATA_ROOT}/skills" 700
+openlia_ensure_dir "${OPENLIA_DATA_ROOT}/scripts" 700
 openlia_ensure_dir "${OPENLIA_META_ROOT}/managed" 700
 
 sync_file() {
     local source=$1
     local destination=$2
     local marker=$3
+    local mode=${4:-644}
     local source_hash destination_hash previous_hash
     [[ -f "$source" ]] || return 0
     mkdir -p "$(dirname "$destination")"
     source_hash=$(openlia_sha256 "$source" | awk '{print $1}')
     if [[ ! -e "$destination" ]]; then
-        openlia_atomic_copy "$source" "$destination" 644
+        openlia_atomic_copy "$source" "$destination" "$mode"
         printf '%s\n' "$source_hash" >"$marker"
         chmod 600 "$marker"
-        chmod 644 "$destination"
+        chmod "$mode" "$destination"
         return
     fi
     previous_hash=''
@@ -50,18 +52,19 @@ sync_file() {
     if [[ -z "$previous_hash" && "$destination_hash" == "$source_hash" ]]; then
         printf '%s\n' "$source_hash" >"$marker"
         chmod 600 "$marker"
-        chmod 644 "$destination"
+        chmod "$mode" "$destination"
     elif [[ -n "$previous_hash" && "$destination_hash" == "$previous_hash" ]]; then
-        openlia_atomic_copy "$source" "$destination" 644
+        openlia_atomic_copy "$source" "$destination" "$mode"
         printf '%s\n' "$source_hash" >"$marker"
         chmod 600 "$marker"
-        chmod 644 "$destination"
+        chmod "$mode" "$destination"
     fi
 }
 
 sync_file "${OPENLIA_REPO_ROOT}/profile/SOUL.md" "${OPENLIA_DATA_ROOT}/SOUL.md" "${OPENLIA_META_ROOT}/managed/SOUL.md.sha256"
 sync_file "${OPENLIA_REPO_ROOT}/profile/AGENTS.md" "${OPENLIA_DATA_ROOT}/AGENTS.md" "${OPENLIA_META_ROOT}/managed/AGENTS.md.sha256"
 sync_file "${OPENLIA_REPO_ROOT}/profile/config.yaml" "${OPENLIA_DATA_ROOT}/config.yaml" "${OPENLIA_META_ROOT}/managed/config.yaml.sha256"
+sync_file "${OPENLIA_REPO_ROOT}/profile/cron/scripts/openlia-workspace-git-sync.sh" "${OPENLIA_DATA_ROOT}/scripts/openlia-workspace-git-sync.sh" "${OPENLIA_META_ROOT}/managed/openlia-workspace-git-sync.sh.sha256" 700
 
 enabled_skills=()
 if [[ -n "${OPENLIA_ENABLED_SKILLS:-}" ]]; then

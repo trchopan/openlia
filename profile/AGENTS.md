@@ -18,6 +18,20 @@ Personal OS workspace is a separate runtime directory at
 
 Credentials belong in Hermes' runtime secret source or environment, never in
 this profile, the workspace template, prompts, helper input, or reports.
-Skill writes are staged for review. Cron jobs are opt-in and must fail closed
-when a human approval is unavailable. Manage cron jobs through Hermes' cron
-interface rather than editing its generated state files directly.
+Skill writes are staged for review. The bundled workspace Git pull is a
+no-agent cron job with no model or approval prompt; other cron jobs remain
+opt-in and must fail closed when a human approval is unavailable. Manage cron
+jobs through Hermes' cron interface rather than editing its generated state
+files directly.
+
+## Workspace Git backup
+
+- The workspace Git remote is configured by OpenLia during `init`; non-secret
+  settings belong in the operator `config.toml`.
+- The repository PAT belongs only in the protected secret source as
+  `OPENLIA_GIT_TOKEN`. Never place it in workspace files, remote URLs, Git
+  config, prompts, reports, or command output.
+- Use the `workspace-git` skill for manual pushes and structural changes. The
+  bundled no-agent cron job performs the routine pull only.
+- Do not use hard resets, force-pushes, destructive conflict resolution, or
+  pulls over dirty files. Stop and report the exact Git state instead.

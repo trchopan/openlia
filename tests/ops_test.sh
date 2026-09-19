@@ -24,6 +24,8 @@ export OPENLIA_LOCAL_MODE=true
 mkdir -p "$OPENLIA_RUNTIME_ROOT"
 "${ROOT}/ops/bootstrap.sh" --json >/dev/null
 [[ -d "${OPENLIA_DATA_ROOT}/workspace/inbox" ]]
+[[ -f "${OPENLIA_DATA_ROOT}/workspace/.gitignore" ]]
+[[ -x "${OPENLIA_DATA_ROOT}/scripts/openlia-workspace-git-sync.sh" ]]
 sentinel="${OPENLIA_DATA_ROOT}/workspace/inbox/sentinel.md"
 printf '%s\n' 'keep me' >"$sentinel"
 "${ROOT}/ops/profile.sh" sync --json >/dev/null

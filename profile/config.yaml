@@ -24,6 +24,8 @@ approvals:
   destructive_slash_confirm: true
   deny:
     - 'rm -rf *'
+    - 'git reset --hard*'
+    - 'git clean *'
     - 'git push --force*'
     - '* | sh'
     - '* | bash'

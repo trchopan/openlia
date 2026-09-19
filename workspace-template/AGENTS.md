@@ -25,3 +25,13 @@ Reading and analysis are safe defaults. Creating or changing a workspace record
 requires an explicit user request or approval. Never send messages, purchase
 items, change calendar entries, move money, or delete records from a routine
 review. Explain proposed consequential actions before asking for approval.
+
+## Workspace Git backup
+
+OpenLia may configure this workspace as a Git repository backed by a private
+GitHub repository. Never store credentials, tokens, OAuth files, private keys,
+or raw service exports here. Automatic pulls only fast-forward a clean branch;
+manual pushes require an explicit request. Review `git status --short --branch`
+before manual pulls, never pull over dirty files, and never use hard resets or
+force-pushes. Conflicts must be reported and resolved without discarding either
+side.

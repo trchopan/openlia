@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -28,6 +29,7 @@ var defaultSkills = []string{
 	"decision-analysis",
 	"deep-research",
 	"personal-finance",
+	"workspace-git",
 }
 
 type Config struct {
@@ -51,6 +53,17 @@ type Config struct {
 	SecretSource    string
 	ReleaseSource   string
 	EnabledSkills   []string
+	WorkspaceGit    WorkspaceGitConfig
+}
+
+type WorkspaceGitConfig struct {
+	Enabled     bool
+	Provider    string
+	Remote      string
+	Branch      string
+	Schedule    string
+	AuthorName  string
+	AuthorEmail string
 }
 
 func defaultConfig() Config {
@@ -70,6 +83,13 @@ func defaultConfig() Config {
 		LochoVersion:  "1.2.0-beta.1",
 		APIHost:       "127.0.0.1",
 		EnabledSkills: append([]string(nil), defaultSkills...),
+		WorkspaceGit: WorkspaceGitConfig{
+			Provider:    "github",
+			Branch:      "main",
+			Schedule:    "every 5m",
+			AuthorName:  "OpenLia Agent",
+			AuthorEmail: "openlia@localhost",
+		},
 	}
 }
 
@@ -177,6 +197,20 @@ func parseConfig(data string) (Config, error) {
 			config.SecretSource, err = parseString(value)
 		case "skills.enabled":
 			config.EnabledSkills, err = parseStringArray(value)
+		case "workspace_git.enabled":
+			config.WorkspaceGit.Enabled, err = parseBool(value)
+		case "workspace_git.provider":
+			config.WorkspaceGit.Provider, err = parseString(value)
+		case "workspace_git.remote":
+			config.WorkspaceGit.Remote, err = parseString(value)
+		case "workspace_git.branch":
+			config.WorkspaceGit.Branch, err = parseString(value)
+		case "workspace_git.schedule":
+			config.WorkspaceGit.Schedule, err = parseString(value)
+		case "workspace_git.author_name":
+			config.WorkspaceGit.AuthorName, err = parseString(value)
+		case "workspace_git.author_email":
+			config.WorkspaceGit.AuthorEmail, err = parseString(value)
 		default:
 			return Config{}, fmt.Errorf("line %d contains unknown setting %q", lineNumber, section+"."+key)
 		}
@@ -289,7 +323,80 @@ func validateConfig(config Config) error {
 			return fmt.Errorf("invalid skill name %q", skill)
 		}
 	}
+	if err := validateWorkspaceGit(config.WorkspaceGit); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateWorkspaceGit(gitConfig WorkspaceGitConfig) error {
+	if gitConfig.Provider == "" {
+		gitConfig.Provider = "github"
+	}
+	if gitConfig.Provider != "github" {
+		return errors.New("workspace Git provider must be github")
+	}
+	if gitConfig.Remote == "" {
+		if gitConfig.Enabled {
+			return errors.New("workspace Git remote is required when workspace Git is enabled")
+		}
+		return nil
+	}
+	if !gitConfig.Enabled {
+		return errors.New("workspace Git must be enabled when a remote is configured")
+	}
+	if err := validateGitHubRemote(gitConfig.Remote); err != nil {
+		return err
+	}
+	if !safeGitBranch(gitConfig.Branch) {
+		return errors.New("workspace Git branch is invalid")
+	}
+	if gitConfig.Schedule == "" || len(gitConfig.Schedule) > 120 || strings.ContainsAny(gitConfig.Schedule, "\r\n") {
+		return errors.New("workspace Git schedule is invalid")
+	}
+	if gitConfig.AuthorName == "" || len(gitConfig.AuthorName) > 200 || strings.ContainsAny(gitConfig.AuthorName, "\r\n") {
+		return errors.New("workspace Git author name is invalid")
+	}
+	if gitConfig.AuthorEmail == "" || len(gitConfig.AuthorEmail) > 254 || strings.ContainsAny(gitConfig.AuthorEmail, "\r\n") || !strings.Contains(gitConfig.AuthorEmail, "@") {
+		return errors.New("workspace Git author email is invalid")
+	}
+	return nil
+}
+
+func validateGitHubRemote(remote string) error {
+	parsed, err := url.Parse(remote)
+	if err != nil || parsed.Scheme != "https" || parsed.Host != "github.com" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("workspace Git remote must be an HTTPS GitHub repository URL")
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) != 2 || !safeGitHubSegment(parts[0]) || !safeGitHubSegment(strings.TrimSuffix(parts[1], ".git")) {
+		return errors.New("workspace Git remote must use https://github.com/OWNER/REPOSITORY[.git]")
+	}
+	return nil
+}
+
+func safeGitHubSegment(value string) bool {
+	if value == "" || value == "." || value == ".." {
+		return false
+	}
+	for _, character := range value {
+		if !(character >= 'a' && character <= 'z') && !(character >= 'A' && character <= 'Z') && !(character >= '0' && character <= '9') && !strings.ContainsRune("._-", character) {
+			return false
+		}
+	}
+	return true
+}
+
+func safeGitBranch(value string) bool {
+	if value == "" || strings.HasPrefix(value, ".") || strings.HasPrefix(value, "-") || strings.Contains(value, "..") || strings.ContainsAny(value, " ~^:?*[\\\"\r\n") {
+		return false
+	}
+	for _, character := range value {
+		if !(character >= 'a' && character <= 'z') && !(character >= 'A' && character <= 'Z') && !(character >= '0' && character <= '9') && !strings.ContainsRune("._/-", character) {
+			return false
+		}
+	}
+	return true
 }
 
 func validateTarget(target string) error {
@@ -427,5 +534,6 @@ func renderConfig(config Config) string {
 		fmt.Fprintf(&builder, "%q", skill)
 	}
 	builder.WriteString("]\n")
+	fmt.Fprintf(&builder, "\n[workspace_git]\nenabled = %t\nprovider = %q\nremote = %q\nbranch = %q\nschedule = %q\nauthor_name = %q\nauthor_email = %q\n", config.WorkspaceGit.Enabled, config.WorkspaceGit.Provider, config.WorkspaceGit.Remote, config.WorkspaceGit.Branch, config.WorkspaceGit.Schedule, config.WorkspaceGit.AuthorName, config.WorkspaceGit.AuthorEmail)
 	return builder.String()
 }

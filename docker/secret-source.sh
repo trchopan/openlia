@@ -40,5 +40,11 @@ while IFS= read -r line || [[ -n "$line" ]]; do
             *) exit 1 ;;
         esac
     fi
+    if [[ "$key" == OPENLIA_GIT_TOKEN ]]; then
+        case "$value" in
+            ghp_*|gho_*|ghu_*|github_pat_*) ;;
+            *) exit 1 ;;
+        esac
+    fi
     printf '%s=%s\n' "$key" "$value"
 done < "$secret_file"
