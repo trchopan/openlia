@@ -15,6 +15,7 @@ const (
 	configSchema      = 1
 	defaultVersion    = "0.1.0"
 	defaultRemoteRoot = "/srv/openlia"
+	defaultLocalRoot  = ".openlia"
 	defaultProject    = "openlia"
 	defaultTimezone   = "Asia/Ho_Chi_Minh"
 )
@@ -32,8 +33,9 @@ var defaultSkills = []string{
 type Config struct {
 	Schema          int
 	Version         string
+	Mode            string
 	Target          string
-	RemoteRoot      string
+	InstallRoot     string
 	Project         string
 	Model           string
 	Timezone        string
@@ -55,7 +57,8 @@ func defaultConfig() Config {
 	return Config{
 		Schema:        configSchema,
 		Version:       defaultVersion,
-		RemoteRoot:    defaultRemoteRoot,
+		Mode:          "ssh",
+		InstallRoot:   defaultRemoteRoot,
 		Project:       defaultProject,
 		Model:         "gpt-5.6-luna",
 		Timezone:      defaultTimezone,
@@ -68,6 +71,14 @@ func defaultConfig() Config {
 		APIHost:       "127.0.0.1",
 		EnabledSkills: append([]string(nil), defaultSkills...),
 	}
+}
+
+func defaultLocalInstallRoot() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return defaultLocalRoot
+	}
+	return filepath.Join(home, defaultLocalRoot)
 }
 
 func configPath() string {
@@ -128,10 +139,14 @@ func parseConfig(data string) (Config, error) {
 			config.Schema, err = parseInt(value)
 		case "openlia.version":
 			config.Version, err = parseString(value)
+		case "openlia.mode":
+			config.Mode, err = parseString(value)
 		case "openlia.target":
 			config.Target, err = parseString(value)
+		case "openlia.root":
+			config.InstallRoot, err = parseString(value)
 		case "openlia.remote_root":
-			config.RemoteRoot, err = parseString(value)
+			config.InstallRoot, err = parseString(value)
 		case "openlia.project":
 			config.Project, err = parseString(value)
 		case "openlia.model":
@@ -229,10 +244,17 @@ func validateConfig(config Config) error {
 	if err := validateTimezone(config.Timezone); err != nil {
 		return err
 	}
-	if err := validateTarget(config.Target); err != nil && config.Target != "" {
+	if config.Mode != "local" && config.Mode != "ssh" {
+		return fmt.Errorf("mode must be local or ssh")
+	}
+	if config.Mode == "local" {
+		if config.Target != "" {
+			return errors.New("local mode cannot have a target")
+		}
+	} else if err := validateTarget(config.Target); err != nil && config.Target != "" {
 		return err
 	}
-	if err := validateAbsoluteRoot(config.RemoteRoot, "remote_root"); err != nil {
+	if err := validateAbsoluteRoot(config.InstallRoot, "root"); err != nil {
 		return err
 	}
 	if !safeComponent(config.Project) {
@@ -293,7 +315,7 @@ func validateTimezone(value string) error {
 }
 
 func validateAbsoluteRoot(root, label string) error {
-	if !strings.HasPrefix(root, "/") || strings.ContainsAny(root, "\r\n\t ") || strings.Contains(root, "/../") || strings.HasSuffix(root, "/..") {
+	if !strings.HasPrefix(root, "/") || strings.ContainsAny(root, "\r\n\t'\";$&|()<>`") || strings.Contains(root, "/../") || strings.HasSuffix(root, "/..") {
 		return fmt.Errorf("%s must be a safe absolute path", label)
 	}
 	if root == "/" || root == "/srv" || root == "/opt" || root == "/var" || root == "/home" {
@@ -392,7 +414,7 @@ func saveConfig(config Config) error {
 
 func renderConfig(config Config) string {
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "[openlia]\nschema = %d\nversion = %q\ntarget = %q\nremote_root = %q\nproject = %q\nmodel = %q\ntimezone = %q\nprovider = %q\nexternal_network = %q\n\n", config.Schema, config.Version, config.Target, config.RemoteRoot, config.Project, config.Model, config.Timezone, config.Provider, config.ExternalNetwork)
+	fmt.Fprintf(&builder, "[openlia]\nschema = %d\nversion = %q\nmode = %q\ntarget = %q\nroot = %q\nproject = %q\nmodel = %q\ntimezone = %q\nprovider = %q\nexternal_network = %q\n\n", config.Schema, config.Version, config.Mode, config.Target, config.InstallRoot, config.Project, config.Model, config.Timezone, config.Provider, config.ExternalNetwork)
 	fmt.Fprintf(&builder, "[release]\nsource = %q\n\n", config.ReleaseSource)
 	fmt.Fprintf(&builder, "[components]\nhermes_image = %q\nhermes_tag = %q\nhermes_digest = %q\nlocho_image = %q\nlocho_version = %q\n\n", config.HermesImage, config.HermesTag, config.HermesDigest, config.LochoImage, config.LochoVersion)
 	fmt.Fprintf(&builder, "[api]\nenabled = %t\nhost = %q\n\n", config.APIEnabled, config.APIHost)

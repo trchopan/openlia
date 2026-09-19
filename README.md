@@ -10,8 +10,8 @@ Hermes remains the upstream agent runtime.
 
 ## Repository Purpose
 
-The first milestone is a reproducible single-user deployment on a remote Linux
-VM:
+The first milestone is a reproducible single-user deployment on a local machine
+or a remote Linux VM:
 
 - Docker runs the Hermes gateway with persistent state.
 - A workspace template organizes personal information around durable concepts.
@@ -33,17 +33,17 @@ OpenLia repository/release
 Operator machine
         |
         | openlia CLI: deployment, operations, diagnostics
-        | SSH / Git
-        v
-Remote Linux VM
-        |
-        +-- Docker Compose (runtime plane)
-        |     +-- Hermes gateway container
-        |     `-- one Locho attachment container per host
-        |
-        +-- persistent Hermes data (/opt/data)
-        +-- runtime-only secrets
-        `-- Personal OS workspace
+        +-- Local Docker engine
+        |     `-- Docker Compose (runtime plane)
+        `-- SSH / Git -> Remote Linux VM
+              `-- Docker Compose (runtime plane)
+
+Both runtime planes contain:
+  +-- Hermes gateway container
+  +-- one Locho attachment container per host
+  +-- persistent Hermes data (/opt/data)
+  +-- runtime-only secrets
+  `-- Personal OS workspace
 ```
 
 The default deployment uses one Hermes profile and one supervised gateway
@@ -52,12 +52,11 @@ through SSH or a private network such as Tailscale. Locho services are exposed
 to Hermes over an internal Docker network, not the public VM interface.
 
 OpenLia itself is the operator control plane, not a long-running Compose
-service. The `openlia` CLI runs on the operator machine and uses SSH to invoke
-remote operations, inspect Docker Compose, run Hermes checks, and perform
-backups or updates. The default Compose stack contains only the Hermes and
-Locho runtime services. A future `openlia-tools` Compose profile may provide a
-pinned, one-shot diagnostic image, but it must not be started by normal stack
-startup or manage updates independently.
+service. The `openlia` CLI runs on the operator machine and either invokes local
+operations directly or uses SSH for a remote target. The default Compose stack
+contains only the Hermes and Locho runtime services. A future `openlia-tools`
+Compose profile may provide a pinned, one-shot diagnostic image, but it must not
+be started by normal stack startup or manage updates independently.
 
 The target repository layout is:
 
@@ -297,10 +296,10 @@ underlying personal model consistent.
 
 ## Project Status
 
-The first implementation is a thin remote-VM operations layer, not a new agent
-runtime. It provides a Go operator CLI, pinned Docker/Compose assets, a
-file-based Personal OS template, seven workflow skills, credential rotation,
-Locho attachments, and backup/recovery operations.
+The first implementation is a thin operations layer, not a new agent runtime.
+It provides a Go operator CLI, pinned Docker/Compose assets, a file-based
+Personal OS template, seven workflow skills, credential rotation, Locho
+attachments, and backup/recovery operations for local or remote deployments.
 
 The initial implementation will establish:
 
@@ -346,31 +345,67 @@ The practical first step is an opinionated Hermes deployment that can be
 recreated, updated, backed up, and moved to another VM without losing the
 Personal OS structure or its durable state.
 
+## Prerequisites
+
+| Use case | Required runtime |
+| --- | --- |
+| CLI/static smoke | Go 1.26+, Python 3, Bash, Docker CLI for Compose validation |
+| Local deployment on Linux | Go 1.26+, Python 3, Bash, Docker Engine with Compose v2 |
+| Local deployment on macOS | Go 1.26+, Python 3, Bash, Docker Desktop with a Linux engine |
+| Remote deployment | Go 1.26+ locally; SSH, Linux, Python 3, Bash, Docker, and Compose v2 on the target |
+
+The first deployment builds pinned Linux images and therefore requires network
+access to the configured image registries and release downloads. The pinned
+images and bundled binaries support `amd64` and `arm64`. Local Docker roots must
+be on a filesystem shared with Docker Desktop on macOS.
+
 ## Quick Start
 
 Build the operator CLI with Go 1.26 or newer:
 
 ```sh
 go build -o openlia .
-./openlia init --target user@host
+./openlia init --local --root "$HOME/.openlia"
 ```
 
-`init` uploads the pinned OpenLia release to the target, creates runtime
-directories under `/srv/openlia`, initializes the workspace only when it is
-empty, starts the Compose stack, and runs the health checks. Provider
-credentials are never accepted as command-line values. Configure a protected
-dotenv source path in the operator config:
+On macOS, Docker Desktop provides the Linux container engine used by the local
+deployment. On Linux, a local Docker Engine with Compose v2 is supported.
+Remote deployment remains available:
+
+```sh
+./openlia init --target user@host --root /srv/openlia
+```
+
+`init` installs the pinned OpenLia release at the selected root, initializes the
+workspace only when it is empty, starts the Compose stack, and runs health
+checks. Provider credentials are never accepted as command-line values.
+Configure a protected dotenv source path in the operator config:
 
 ```toml
 [secrets]
 source = "/path/outside/this/repository/hermes.env"
 ```
 
+The source must already exist as a regular file outside the checkout with mode
+`0600`:
+
+```sh
+chmod 600 "$HOME/.config/openlia/dev/openlia_dev.env"
+```
+
+Local deployments preserve host-file ownership; the Linux containers normalize
+their runtime ownership internally. No host-side `chown` to the container UID
+is required for local mode.
+
 The configured source is used by `init` and subsequent credential rotations:
 
 ```sh
 ./openlia auth rotate
 ```
+
+Credential rotation keeps the previous secret in a protected runtime backup so
+it can be restored if container recreation fails. Remove the deployment or its
+runtime backups when that recovery point is no longer needed.
 
 `init` and `auth rotate` use the configured source; source paths are not accepted
 as command-line arguments.
@@ -402,7 +437,8 @@ openlia logs --follow
 openlia stop
 openlia start
 openlia restart
-openlia uninstall --target user@host --project NAME --remote-root /path
+openlia uninstall --local --project NAME --root /path
+openlia uninstall --target user@host --project NAME --root /path
 openlia backup create
 openlia backup restore --non-interactive --archive /path/to/backup.tar.gz
 ```
@@ -436,19 +472,33 @@ openlia skills test deep-research
 go test ./...
 go vet ./...
 python3 tests/smoke.py --mode cli
+python3 tests/smoke.py --mode local --root /tmp/openlia_smoke
+make smoke-local-live \
+  OPENLIA_SMOKE_ENV_FILE="$HOME/.config/openlia/dev/openlia_dev.env" \
+  OPENLIA_SMOKE_ATTACHMENTS_FILE="$HOME/.config/openlia/dev/locho-attachments.toml" \
+  OPENLIA_SMOKE_LOCHO_HOST=genai
 ./tests/ops_test.sh
 docker compose -f docker/compose.yaml config --quiet
 ```
 
-The local smoke gate uses synthetic data. Provider requests, OAuth, Locho
-connectivity, VM reboot behavior, external exposure scans, and recovery tests
-require a disposable Linux target and disposable credentials. They must be
-reported as `N/A` when those prerequisites are absent.
+The CLI smoke gate uses synthetic data. The local deployment smoke starts the
+real Compose stack, checks the local lifecycle, and removes its disposable root
+when complete. Its root must not already exist; an existing root is never
+cleaned automatically. Provider requests, OAuth, Locho connectivity, VM reboot
+behavior, external exposure scans, and recovery tests require disposable
+credentials or a disposable target. They must be reported as `N/A` when those
+prerequisites are absent.
+
+For a credential-backed local deployment that remains available for manual
+conversation, use `--mode live --local` and omit `--cleanup`. Telegram checks
+are `N/A` without an interactive terminal; they do not claim that Telegram was
+tested. See [`tests/README.md`](tests/README.md) for the complete command and
+the explicit uninstall command.
 
 For the explicit live Telegram and Personal Finance smoke test, see
 [`tests/README.md`](tests/README.md). It requires all deployment paths and
-identifiers as arguments and leaves the remote development target running
-unless `--cleanup` is supplied.
+identifiers as arguments and leaves the development target running unless
+`--cleanup` is supplied.
 
 ## Contributing and License
 

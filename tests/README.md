@@ -1,11 +1,18 @@
 # Smoke Tests
 
-The smoke runner has two separate purposes:
+The smoke runner has three documented purposes:
 
 - `--mode cli` exercises the local CLI, bundled skills, Compose syntax, and
   shell syntax with synthetic data.
+- `--mode local` deploys the current checkout locally, exercises the lifecycle,
+  and removes the disposable installation.
 - `--mode live` deploys the current checkout to an explicitly named disposable
-  Linux target and waits for manual Telegram confirmation.
+  target and waits for manual Telegram confirmation. Add `--local` to use the
+  local CLI backend.
+
+The runner reports `PASS`, `FAIL`, or `N/A`. `N/A` means a prerequisite or
+interactive confirmation was unavailable; it is not evidence that the check
+passed. The process exit code fails only when a case is `FAIL`.
 
 ## Local Smoke
 
@@ -17,24 +24,45 @@ python3 tests/smoke.py --mode cli
 
 The local gate does not contact a provider, Telegram, or Locho.
 
+Run the real local deployment smoke with Docker Engine on Linux or Docker
+Desktop on macOS:
+
+```sh
+python3 tests/smoke.py --mode local \
+  --root /tmp/openlia_smoke \
+  --project openlia_smoke
+```
+
+This invokes `openlia init --local`, checks health, stops and starts the stack,
+checks the bundled helper and the installed runtime skill inside Hermes, and
+invokes `openlia uninstall --local`. It uses an empty synthetic secret source
+and does not contact a provider or Telegram.
+
+The root must not already exist. Local mode always attempts cleanup after the
+run; if initialization or uninstall fails, the root is left in place for
+inspection rather than being removed by the Python harness. Docker images and
+build cache are preserved.
+
 ## Live Smoke
 
-Live mode requires every deployment input. It has no target, project, path, or
-Locho-host defaults. The only optional behavior is `--cleanup`, which defaults
-to `false`.
+Live mode requires every deployment input. It has no target, project, root, or
+Locho-host defaults. Remote mode requires `--target`; local mode requires
+`--local`. The only optional behavior is `--cleanup`, which defaults to `false`.
 
 The source files contain credentials and Locho capabilities. The runner changes
 both source files to mode `0600`, stages protected temporary copies outside the
-checkout, and never prints their values.
+checkout, and never prints their values. The source files must be regular files
+outside the checkout. Reports are redacted but may still contain operational
+data; keep them outside the repository.
 
 Run against a disposable Linux target with external local inputs. Replace the
-target and remote-root placeholders with values for your own environment:
+target and root placeholders with values for your own environment:
 
 ```sh
 python3 tests/smoke.py --mode live \
   --target user@example.invalid \
   --project openlia_smoke \
-  --remote-root /srv/openlia-smoke \
+  --root /srv/openlia-smoke \
   --env-file "$HOME/.config/openlia/dev/openlia_dev.env" \
   --attachments-file "$HOME/.config/openlia/dev/locho-attachments.toml" \
   --locho-host genai
@@ -45,17 +73,39 @@ can be answered. A non-interactive invocation records those manual cases as
 `N/A` rather than claiming that Telegram was tested.
 
 The `--locho-host` value must match the host and service names in your
-attachment configuration. The remote root must not already exist; this keeps
-the optional cleanup operation scoped to a deployment created by this run.
+attachment configuration. The installation root must not already exist; this
+keeps the optional cleanup operation scoped to a deployment created by this run.
 
 The runner performs these live checks:
 
 - Upload and initialize the current OpenLia release.
 - Rotate the `genai` Locho attachment and reconcile its sidecar.
 - Run the provider-backed Hermes health check.
-- Confirm the `personal-finance` skill exists in the remote runtime.
+- Confirm the `personal-finance` skill exists in the runtime.
 - Ask for manual confirmation that Telegram delivered a reply.
 - Ask for manual confirmation that the reply followed the finance workflow.
+
+The same provider-backed checks can use the local backend. Omit `--cleanup` to
+leave the local agent running for manual conversation:
+
+```sh
+python3 tests/smoke.py --mode live --local \
+  --project openlia_smoke \
+  --root /tmp/openlia_smoke \
+  --env-file "$HOME/.config/openlia/dev/openlia_dev.env" \
+  --attachments-file "$HOME/.config/openlia/dev/locho-attachments.toml" \
+  --locho-host genai
+```
+
+The equivalent Make target accepts credential paths through environment
+variables and also leaves the deployment running:
+
+```sh
+make smoke-local-live \
+  OPENLIA_SMOKE_ENV_FILE="$HOME/.config/openlia/dev/openlia_dev.env" \
+  OPENLIA_SMOKE_ATTACHMENTS_FILE="$HOME/.config/openlia/dev/locho-attachments.toml" \
+  OPENLIA_SMOKE_LOCHO_HOST=genai
+```
 
 When prompted, send this exact message to the configured Telegram bot:
 
@@ -68,11 +118,13 @@ message does not identify a journal, a safe response may request the journal
 path or approval before making a write.
 
 The report is written to a temporary directory outside the checkout unless
-`--report` is supplied. Reports redact credential-shaped output.
+`--report` is supplied. Reports redact credential-shaped output, but reports may
+still contain paths, project names, health details, and other operational data.
+Report files are written with mode `0600`.
 
 ## Optional Cleanup
 
-The default live command leaves the specified remote root running for manual
+The default live command leaves the specified installation root running for manual
 inspection. To uninstall the deployment after the interactive checks, add
 `--cleanup`. This invokes the same root-aware uninstall operation described
 below:
@@ -81,17 +133,18 @@ below:
 python3 tests/smoke.py --mode live \
   --target user@example.invalid \
   --project openlia_smoke \
-  --remote-root /srv/openlia-smoke \
+  --root /srv/openlia-smoke \
   --env-file "$HOME/.config/openlia/dev/openlia_dev.env" \
   --attachments-file "$HOME/.config/openlia/dev/locho-attachments.toml" \
   --locho-host genai \
   --cleanup
 ```
 
-Cleanup is not attempted when the remote root pre-exists or cannot be proven
-to be reachable before deployment.
+Cleanup is not attempted when the installation root pre-exists or cannot be
+proven to be reachable before deployment. A failed cleanup is reported as a
+failed case and the root is retained for manual inspection.
 
-## Remote Uninstall
+## Deployment Uninstall
 
 Use `openlia uninstall` when removing an existing deployment outside a smoke
 run. It removes Compose containers, the project network, and the marked
@@ -103,7 +156,7 @@ The command requires every deployment identifier and asks for confirmation:
 go run . uninstall \
   --target user@example.invalid \
   --project openlia_smoke \
-  --remote-root /srv/openlia-smoke
+  --root /srv/openlia-smoke
 ```
 
 For an approved non-interactive removal:
@@ -112,7 +165,18 @@ For an approved non-interactive removal:
 go run . uninstall \
   --target user@example.invalid \
   --project openlia_smoke \
-  --remote-root /srv/openlia-smoke \
+  --root /srv/openlia-smoke \
+  --non-interactive \
+  --json
+```
+
+For a local deployment, use the same command with `--local`:
+
+```sh
+go run . uninstall \
+  --local \
+  --project openlia_smoke \
+  --root /tmp/openlia_smoke \
   --non-interactive \
   --json
 ```

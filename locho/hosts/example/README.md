@@ -1,9 +1,9 @@
 # Locho Host Attachments
 
-Copy `attachments.toml.example` to the runtime path on the VM:
+Copy `attachments.toml.example` to the runtime path on the selected deployment:
 
 ```text
-/srv/openlia/runtime/locho/<host-name>/attachments.toml
+<install-root>/runtime/locho/<host-name>/attachments.toml
 ```
 
 The runtime file must contain the host ID, `listen_host = "0.0.0.0"`, and one

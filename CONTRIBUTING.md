@@ -23,10 +23,26 @@ make test
 make lint
 make compose-config
 python3 tests/smoke.py --mode cli
+python3 tests/smoke.py --mode local --root /tmp/openlia_smoke
+make smoke-local-live \
+  OPENLIA_SMOKE_ENV_FILE="$HOME/.config/openlia/dev/openlia_dev.env" \
+  OPENLIA_SMOKE_ATTACHMENTS_FILE="$HOME/.config/openlia/dev/locho-attachments.toml" \
+  OPENLIA_SMOKE_LOCHO_HOST=genai
 ```
 
-The local smoke mode uses synthetic data and must not require provider
-credentials, Telegram, Locho, SSH, or a remote target.
+The CLI smoke mode uses synthetic data and must not require provider
+credentials, Telegram, Locho, SSH, or a remote target. The local deployment
+smoke additionally requires a working Linux Docker engine, provided directly by
+Docker Engine on Linux or Docker Desktop on macOS.
+
+`make test` skips Docker-dependent operations checks when no Docker engine is
+available; run `make smoke-local` separately for an actual local Compose
+deployment check.
+
+The credential-backed local target is intentionally not part of the default
+test suite. It starts a real agent with external credentials and leaves the
+installation running unless `--cleanup` is supplied. Do not put those paths or
+values in repository files.
 
 ## Changes
 

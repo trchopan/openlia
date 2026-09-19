@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=ops/lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 
@@ -24,6 +24,7 @@ while (($#)); do
 done
 
 openlia_validate_paths
+openlia_require_command python3
 openlia_require_command docker
 
 install_root=${OPENLIA_INSTALL_ROOT:-}
@@ -50,6 +51,27 @@ fi
 
 [[ -d "$install_root" ]] || openlia_die 'install-root is not a directory'
 [[ -f "${OPENLIA_META_ROOT}/runtime.json" ]] || openlia_die 'runtime marker is missing; refusing to remove an unmarked root'
+python3 - "$install_root" "$OPENLIA_PROJECT_NAME" "$OPENLIA_NETWORK_NAME" "${OPENLIA_META_ROOT}/runtime.json" <<'PY'
+import json
+import os
+import sys
+
+install_root, project, network, marker_path = sys.argv[1:]
+with open(marker_path, encoding="utf-8") as handle:
+    marker = json.load(handle)
+if marker.get("install_root", install_root) != install_root:
+    raise SystemExit("installation marker root mismatch")
+if marker.get("project", project) != project:
+    raise SystemExit("installation marker project mismatch")
+if marker.get("network", network) != network:
+    raise SystemExit("installation marker network mismatch")
+current = os.path.join(install_root, "current")
+if os.path.lexists(current):
+    resolved = os.path.realpath(current)
+    release_root = os.path.realpath(os.path.join(install_root, "releases")) + os.sep
+    if not resolved.startswith(release_root):
+        raise SystemExit("current release points outside installation root")
+PY
 
 if [[ -f "$OPENLIA_COMPOSE_FILE" ]]; then
     openlia_compose down --remove-orphans >/dev/null
@@ -77,7 +99,7 @@ if docker network inspect "$OPENLIA_NETWORK_NAME" >/dev/null 2>&1; then
     openlia_die 'project network remains; installation root was preserved'
 fi
 
-rm -rf -- "$install_root"
+rm -rf "$install_root"
 [[ ! -e "$install_root" ]] || openlia_die 'installation root could not be removed'
 
 if [[ "$json" == true ]]; then

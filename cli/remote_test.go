@@ -17,9 +17,9 @@ func TestOperationCommandIncludesTimezone(t *testing.T) {
 func TestUninstallCommandUsesCurrentReleaseAndInstallRoot(t *testing.T) {
 	config := defaultConfig()
 	config.Target = "operator@example.test"
-	config.RemoteRoot = "/home/operator/openlia_dev"
+	config.InstallRoot = "/home/operator/openlia_dev"
 	config.Project = "openlia_dev"
-	command := (Remote{Config: config}).operationCommandForRoot(config.RemoteRoot+"/current", "ops/uninstall.sh", "--json")
+	command := (Remote{Config: config}).operationCommandForRoot(config.InstallRoot+"/current", "ops/uninstall.sh", "--json")
 	if !strings.Contains(command, "OPENLIA_INSTALL_ROOT='/home/operator/openlia_dev'") {
 		t.Fatalf("uninstall command does not include install root: %s", command)
 	}
@@ -31,9 +31,9 @@ func TestUninstallCommandUsesCurrentReleaseAndInstallRoot(t *testing.T) {
 func TestLegacyUninstallFallbackIsRootAware(t *testing.T) {
 	config := defaultConfig()
 	config.Target = "operator@example.test"
-	config.RemoteRoot = "/home/operator/openlia_dev"
+	config.InstallRoot = "/home/operator/openlia_dev"
 	config.Project = "openlia_dev"
-	command := (Remote{Config: config}).legacyUninstallCommand(config.RemoteRoot + "/current")
+	command := (Remote{Config: config}).legacyUninstallCommand(config.InstallRoot + "/current")
 	for _, expected := range []string{
 		"docker compose",
 		"down --remove-orphans",

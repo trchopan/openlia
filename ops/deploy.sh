@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=ops/lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 
@@ -48,7 +48,7 @@ openlia_validate_paths
 openlia_require_command python3
 openlia_require_command docker
 openlia_require_command tar
-openlia_require_command sha256sum
+openlia_sha256 /dev/null >/dev/null
 [[ -f "$OPENLIA_COMPOSE_FILE" ]] || openlia_die 'base Compose file is missing'
 [[ -f "$OPENLIA_SECRET_FILE" ]] || openlia_die 'Docker secret source is missing; run bootstrap first'
 

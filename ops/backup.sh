@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=ops/lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 
@@ -44,7 +44,7 @@ case "$action" in create|restore) ;; *) usage >&2; exit 2 ;; esac
 openlia_validate_paths
 openlia_require_command python3
 openlia_require_command tar
-openlia_require_command sha256sum
+openlia_sha256 /dev/null >/dev/null
 openlia_ensure_dir "$OPENLIA_BACKUP_ROOT" 700
 openlia_ensure_dir "$OPENLIA_META_ROOT" 700
 openlia_ensure_dir "$OPENLIA_LOCHO_ROOT" 700
@@ -91,7 +91,7 @@ create_backup() {
         --exclude='*.secret*' \
         hermes meta locho \
         -C "$work" manifest.json; then
-        rm -rf -- "$work"
+        rm -rf "$work"
         if [[ "$service_was_running" == true ]]; then
             openlia_compose up -d --no-deps hermes >/dev/null 2>&1 || true
         fi
@@ -99,16 +99,16 @@ create_backup() {
     fi
 
     if ! tar -tzf "$archive_tmp" >/dev/null 2>&1; then
-        rm -rf -- "$work"
+        rm -rf "$work"
         if [[ "$service_was_running" == true ]]; then
             openlia_compose up -d --no-deps hermes >/dev/null 2>&1 || true
         fi
         openlia_die 'backup archive validation failed'
     fi
 
-    digest=$(sha256sum "$archive_tmp" | awk '{print $1}')
+    digest=$(openlia_sha256 "$archive_tmp" | awk '{print $1}')
     archive="${OPENLIA_BACKUP_ROOT}/openlia-${stamp}-$$.tar.gz"
-    mv -f -- "$archive_tmp" "$archive"
+    mv -f "$archive_tmp" "$archive"
     chmod 600 "$archive"
     printf '{"schema":1,"archive":%s,"sha256":%s,"reason":%s,"created_at":%s,"secrets":"excluded"}\n' \
         "$(openlia_json_quote "$archive")" \
@@ -116,7 +116,7 @@ create_backup() {
         "$(openlia_json_quote "$why")" \
         "$(openlia_json_quote "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" >"${archive}.json"
     chmod 600 "${archive}.json"
-    rm -rf -- "$work"
+    rm -rf "$work"
     if [[ "$service_was_running" == true ]]; then
         openlia_compose up -d --no-deps hermes >/dev/null 2>&1 || openlia_die 'backup completed but Hermes could not be restarted'
     fi
@@ -154,7 +154,7 @@ esac
 listing=$(mktemp "${OPENLIA_BACKUP_ROOT}/.listing.XXXXXX")
 chmod 600 "$listing"
 if ! tar -tzf "$archive" >"$listing" 2>/dev/null; then
-    rm -f -- "$listing"
+    rm -f "$listing"
     openlia_die 'restore archive is not a readable tar archive'
 fi
 unsafe_member=false
@@ -166,7 +166,7 @@ while IFS= read -r member || [[ -n "$member" ]]; do
             ;;
     esac
 done <"$listing"
-rm -f -- "$listing"
+rm -f "$listing"
 [[ "$unsafe_member" == false ]] || openlia_die 'restore archive contains an unsafe path'
 
 # Reject links, devices, and entries outside the restore roots before any
@@ -206,28 +206,28 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$OPENLIA_COMPOSE_FILE" ]]; then
 fi
 openlia_write_state stopped
 
-parent=$(dirname -- "$OPENLIA_DATA_ROOT")
+parent=$(dirname "$OPENLIA_DATA_ROOT")
 staging=$(mktemp -d "${parent}/.restore-XXXXXX")
 chmod 700 "$staging"
 if ! tar --no-same-owner --no-same-permissions -xzf "$archive" -C "$staging" >/dev/null 2>&1 || [[ ! -d "${staging}/hermes" ]]; then
-    rm -rf -- "$staging"
+    rm -rf "$staging"
     openlia_record_change restore failed "$pre_restore_archive" 'restore extraction failed'
     openlia_die 'restore extraction failed; current state was preserved'
 fi
 
 old_data="${OPENLIA_BACKUP_ROOT}/pre-restore-hermes-$(date -u +%Y%m%dT%H%M%SZ)-$$"
-if ! mv -- "$OPENLIA_DATA_ROOT" "$old_data"; then
-    rm -rf -- "$staging"
+if ! mv "$OPENLIA_DATA_ROOT" "$old_data"; then
+    rm -rf "$staging"
     openlia_record_change restore failed "$pre_restore_archive" 'current data move failed'
     openlia_die 'current data move failed; restore was not applied'
 fi
-if ! mv -- "${staging}/hermes" "$OPENLIA_DATA_ROOT"; then
-    mv -- "$old_data" "$OPENLIA_DATA_ROOT"
-    rm -rf -- "$staging"
+if ! mv "${staging}/hermes" "$OPENLIA_DATA_ROOT"; then
+    mv "$old_data" "$OPENLIA_DATA_ROOT"
+    rm -rf "$staging"
     openlia_record_change restore failed "$pre_restore_archive" 'restore replacement failed'
     openlia_die 'restore replacement failed; current state was restored'
 fi
-rm -rf -- "$staging"
+rm -rf "$staging"
 chmod 700 "$OPENLIA_DATA_ROOT"
 openlia_record_change restore ok "$pre_restore_archive" "archive=${archive} old_data=${old_data}"
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=ops/lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 
@@ -40,7 +40,7 @@ openlia_require_command python3
 if [[ "$action" == rotate ]]; then
     openlia_require_command docker
     openlia_require_command tar
-    openlia_require_command sha256sum
+    openlia_sha256 /dev/null >/dev/null
 fi
 
 validate_secret_file() {
@@ -119,8 +119,8 @@ validate_secret_file "$source_file"
 
 openlia_ensure_dir "$OPENLIA_META_ROOT" 700
 openlia_ensure_dir "$OPENLIA_RUNTIME_ROOT" 700
-chown 10000:10000 "$(dirname -- "$OPENLIA_SECRET_FILE")"
-chmod 700 "$(dirname -- "$OPENLIA_SECRET_FILE")"
+    openlia_set_runtime_owner "$(dirname "$OPENLIA_SECRET_FILE")"
+    chmod 700 "$(dirname "$OPENLIA_SECRET_FILE")"
 "${SCRIPT_DIR}/backup.sh" create --reason auth-rotate --json >/dev/null
 previous_state=$(openlia_read_state)
 if [[ -f "$OPENLIA_SECRET_FILE" ]]; then
@@ -138,7 +138,7 @@ if ! openlia_atomic_copy "$source_file" "$OPENLIA_SECRET_FILE" 600; then
     openlia_record_change auth-rotate failed "$secret_backup" 'credential replacement failed'
     openlia_die 'credential replacement failed'
 fi
-chown 10000:10000 "$OPENLIA_SECRET_FILE"
+openlia_set_runtime_owner "$OPENLIA_SECRET_FILE"
 chmod 600 "$OPENLIA_SECRET_FILE"
 
 if [[ "$previous_state" == running ]]; then

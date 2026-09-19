@@ -77,16 +77,19 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, `openlia - a thin Hermes Agent operations control plane
 
 Usage:
-  openlia init [--target user@host] [--timezone Asia/Ho_Chi_Minh]
+  openlia init [--local|--target user@host] [--root /path] [--project NAME]
+               [--timezone Asia/Ho_Chi_Minh] [--model MODEL] [--provider PROVIDER]
+               [--external-network NAME] [--api] [--api-host 127.0.0.1]
   openlia status [--json]
   openlia doctor [--json]
   openlia deploy | start | stop | restart
-  openlia uninstall --target user@host --project NAME --remote-root /path
+  openlia uninstall [--local|--target user@host] --project NAME --root /path
   openlia logs [--follow]
   openlia update [openlia|hermes|locho]
   openlia skills list|show|enable|disable|test
   openlia auth list|setup|rotate
-  openlia attachments list|rotate <host>
+  openlia attachments list
+  openlia attachments rotate <host> --source PATH
   openlia backup create|restore
 
 Global flags: --json, --non-interactive, --version, --help

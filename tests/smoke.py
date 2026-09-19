@@ -104,18 +104,18 @@ def require_live_path(value: Path, label: str) -> Path:
 
 
 def validate_live_inputs(args: argparse.Namespace) -> tuple[Path, Path]:
-    if not args.target or any(character in args.target for character in " \t\r\n'\";$&|()<>`"):
+    if not args.local and (not args.target or any(character in args.target for character in " \t\r\n'\";$&|()<>`")):
         raise ValueError("target must be a non-empty SSH destination without shell metacharacters")
     if not args.project or not re.fullmatch(r"[A-Za-z0-9_-]+", args.project):
         raise ValueError("project must contain only letters, numbers, underscore, or hyphen")
-    remote_root = args.remote_root.rstrip("/")
+    root = args.root.rstrip("/")
     if (
-        not remote_root.startswith("/")
-        or remote_root in {"", "/", "/home", "/home/ubuntu", "/srv", "/srv/openlia"}
-        or any(part in {"", ".", ".."} for part in remote_root.split("/")[1:])
-        or any(character in remote_root for character in " \t\r\n'\";$&|()<>`")
+        not root.startswith("/")
+        or root in {"", "/", "/home", "/home/ubuntu", "/srv", "/srv/openlia", "/tmp"}
+        or any(part in {"", ".", ".."} for part in root.split("/")[1:])
+        or any(character in root for character in "\t\r\n'\";$&|()<>`")
     ):
-        raise ValueError("remote-root must be a specific safe absolute path")
+        raise ValueError("root must be a specific safe absolute path")
     if not args.locho_host or not re.fullmatch(r"[A-Za-z0-9_-]+", args.locho_host):
         raise ValueError("locho-host must contain only letters, numbers, underscore, or hyphen")
     env_file = require_live_path(args.env_file, "env-file")
@@ -173,11 +173,30 @@ def remote_skill_check(target: str, project: str, remote_root: str, skill: str) 
     return ["ssh", "--", target, command]
 
 
+def local_skill_check(root: str, project: str, skill: str) -> list[str]:
+    compose_directory = f"{root}/current/docker"
+    command = [
+        "docker",
+        "compose",
+        "--project-name",
+        project,
+        "--project-directory",
+        compose_directory,
+        "-f",
+        f"{compose_directory}/compose.yaml",
+    ]
+    generated = Path(compose_directory) / "compose.generated.yaml"
+    if generated.is_file():
+        command.extend(["-f", str(generated)])
+    command.extend(["exec", "-T", "hermes", "sh", "-c", f"test -s /opt/data/skills/{skill}/SKILL.md"])
+    return command
+
+
 def run_live(args: argparse.Namespace) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     cleanup_eligible = False
     env_file, attachments_file = validate_live_inputs(args)
-    remote_root = args.remote_root.rstrip("/")
+    root = args.root.rstrip("/")
     base_env = os.environ.copy()
 
     with tempfile.TemporaryDirectory(prefix="openlia-live-") as temporary_directory:
@@ -199,36 +218,25 @@ def run_live(args: argparse.Namespace) -> list[dict[str, Any]]:
         os.chmod(config, 0o600)
         live_env = {**base_env, "OPENLIA_CONFIG": str(config)}
 
-        root_check = run_case(
-            "LIVE-REMOTE-ROOT",
-            ["ssh", "--", args.target, "test", "!", "-e", remote_root],
-            timeout=30,
+        root_check = (
+            run_case("LIVE-LOCAL-ROOT", ["test", "!", "-e", root], timeout=30)
+            if args.local
+            else run_case("LIVE-REMOTE-ROOT", ["ssh", "--", args.target, "test", "!", "-e", root], timeout=30)
         )
         results.append(root_check)
         if root_check["status"] != "PASS":
-            results.append(live_result("LIVE-PREFLIGHT", "FAIL", "remote root already exists or is unreachable"))
+            results.append(live_result("LIVE-PREFLIGHT", "FAIL", "local root already exists or target is unreachable"))
             return results
         cleanup_eligible = True
         results.append(live_result("LIVE-PREFLIGHT", "PASS", evidence=["local inputs validated; credentials redacted"]))
 
-        init = run_case(
-            "LIVE-INIT",
-            [
-                "go",
-                "run",
-                ".",
-                "init",
-                "--target",
-                args.target,
-                "--remote-root",
-                remote_root,
-                "--project",
-                args.project,
-                "--json",
-            ],
-            timeout=1800,
-            env=live_env,
-        )
+        init_arguments = ["go", "run", ".", "init"]
+        if args.local:
+            init_arguments.extend(["--local", "--root", root])
+        else:
+            init_arguments.extend(["--target", args.target, "--root", root])
+        init_arguments.extend(["--project", args.project, "--json"])
+        init = run_case("LIVE-INIT", init_arguments, timeout=1800, env=live_env)
         results.append(init)
         if init["status"] == "PASS":
             results.append(
@@ -276,7 +284,9 @@ def run_live(args: argparse.Namespace) -> list[dict[str, Any]]:
             results.append(
                 run_case(
                     "LIVE-PERSONAL-FINANCE",
-                    remote_skill_check(args.target, args.project, remote_root, "personal-finance"),
+                    local_skill_check(root, args.project, "personal-finance")
+                    if args.local
+                    else remote_skill_check(args.target, args.project, root, "personal-finance"),
                     timeout=30,
                 )
             )
@@ -305,20 +315,96 @@ def run_live(args: argparse.Namespace) -> list[dict[str, Any]]:
                         "run",
                         ".",
                         "uninstall",
-                        "--target",
-                        args.target,
+                        "--local" if args.local else "--target",
+                        *([] if args.local else [args.target]),
                         "--project",
                         args.project,
-                        "--remote-root",
-                        remote_root,
+                        "--root",
+                        root,
                         "--non-interactive",
                         "--json",
                     ],
                     timeout=300,
+                    env=live_env,
                 )
             )
         elif args.cleanup:
             results.append(live_result("LIVE-CLEANUP", "FAIL", "cleanup was not eligible for this target"))
+    return results
+
+
+def run_local_smoke(args: argparse.Namespace) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    temporary_root: str | None = None
+    root = args.root
+    if root is None:
+        temporary_root = tempfile.mkdtemp(prefix="openlia-local-")
+        shutil.rmtree(temporary_root)
+        root = temporary_root
+    root = str(Path(root).expanduser().resolve())
+    project = args.project or "openlia_local_smoke"
+    cleanup_eligible = False
+    config_directory = tempfile.TemporaryDirectory(prefix="openlia-local-config-")
+    config = Path(config_directory.name) / "config.toml"
+    config.write_text("[openlia]\nschema = 1\n[secrets]\n", encoding="utf-8")
+    local_env = {**os.environ, "OPENLIA_CONFIG": str(config)}
+    try:
+        root_check = run_case("LOCAL-ROOT", ["test", "!", "-e", root], timeout=30)
+        results.append(root_check)
+        if root_check["status"] != "PASS":
+            results.append(live_result("LOCAL-PREFLIGHT", "FAIL", "local root already exists"))
+            return results
+        cleanup_eligible = True
+        results.append(live_result("LOCAL-PREFLIGHT", "PASS", evidence=["local root is absent; credentials are not used"]))
+
+        init = run_case(
+            "LOCAL-INIT",
+            ["go", "run", ".", "init", "--local", "--root", root, "--project", project, "--json"],
+            timeout=1800,
+            env=local_env,
+        )
+        results.append(init)
+        if init["status"] == "PASS":
+            for case_id, command, timeout in (
+                ("LOCAL-DOCTOR", ["go", "run", ".", "doctor", "--json"], 300),
+                ("LOCAL-STOP", ["go", "run", ".", "stop", "--json"], 120),
+                ("LOCAL-START", ["go", "run", ".", "start", "--json"], 300),
+                ("LOCAL-SKILL-BUNDLED", ["go", "run", ".", "skills", "test", "personal-finance"], 120),
+            ):
+                results.append(run_case(case_id, command, timeout=timeout, env=local_env))
+            results.append(
+                run_case(
+                    "LOCAL-SKILL-RUNTIME",
+                    local_skill_check(root, project, "personal-finance"),
+                    timeout=120,
+                    env=local_env,
+                )
+            )
+    finally:
+        if args.cleanup and cleanup_eligible:
+            results.append(
+                run_case(
+                    "LOCAL-UNINSTALL",
+                    [
+                        "go",
+                        "run",
+                        ".",
+                        "uninstall",
+                        "--local",
+                        "--project",
+                        project,
+                        "--root",
+                        root,
+                        "--non-interactive",
+                        "--json",
+                    ],
+                    timeout=300,
+                    env=local_env,
+                )
+            )
+        config_directory.cleanup()
+        if temporary_root is not None and not Path(root).exists():
+            shutil.rmtree(temporary_root, ignore_errors=True)
     return results
 
 
@@ -346,6 +432,11 @@ def run(mode: str, args: argparse.Namespace) -> list[dict[str, Any]]:
             results.extend(run_live(args))
         except (OSError, ValueError) as exc:
             results.append(live_result("LIVE-PREFLIGHT", "FAIL", redact(str(exc))))
+    if mode == "local":
+        try:
+            results.extend(run_local_smoke(args))
+        except (OSError, ValueError) as exc:
+            results.append(live_result("LOCAL-PREFLIGHT", "FAIL", redact(str(exc))))
     if mode in {"cli", "api", "locho", "recovery", "human"} and not os.environ.get("OPENLIA_SMOKE_TARGET"):
         results.extend(
             [
@@ -361,31 +452,39 @@ def run(mode: str, args: argparse.Namespace) -> list[dict[str, Any]]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("cli", "static", "api", "locho", "recovery", "human", "live"), default="cli")
+    parser.add_argument("--mode", choices=("cli", "static", "api", "locho", "recovery", "human", "local", "live"), default="cli")
+    parser.add_argument("--local", action="store_true", help="run live mode against the local machine")
     parser.add_argument("--target", help="SSH destination for live mode")
     parser.add_argument("--project", help="Compose project name for live mode")
-    parser.add_argument("--remote-root", help="Specific absolute remote root for live mode")
+    parser.add_argument("--root", help="Specific absolute OpenLia installation root")
     parser.add_argument("--env-file", type=Path, help="Mode-0600 dotenv source for live mode")
     parser.add_argument("--attachments-file", type=Path, help="Mode-0600 Locho attachment source for live mode")
     parser.add_argument("--locho-host", help="Locho host name matching the attachment source")
-    parser.add_argument("--cleanup", action="store_true", help="Stop and remove the live remote root after the run")
+    parser.add_argument("--cleanup", action="store_true", help="Stop and remove the live installation root after the run")
     parser.add_argument("--report", type=Path, help="Write the redacted report outside the checkout")
     args = parser.parse_args(argv)
     if args.mode == "live":
+        if args.local and args.target is not None:
+            parser.error("--local and --target are mutually exclusive")
         required_live_arguments = {
-            "--target": args.target,
             "--project": args.project,
-            "--remote-root": args.remote_root,
+            "--root": args.root,
             "--env-file": args.env_file,
             "--attachments-file": args.attachments_file,
             "--locho-host": args.locho_host,
         }
+        if not args.local:
+            required_live_arguments["--target"] = args.target
         missing = [name for name, value in required_live_arguments.items() if value is None]
         if missing:
             parser.error("live mode requires " + ", ".join(missing))
-    elif args.cleanup or any(
-        value is not None
-        for value in (args.target, args.project, args.remote_root, args.env_file, args.attachments_file, args.locho_host)
+    elif args.mode == "local":
+        if args.local or args.target or args.env_file or args.attachments_file or args.locho_host:
+            parser.error("local mode does not accept live target or credential arguments")
+        if args.cleanup is False:
+            args.cleanup = True
+    elif args.cleanup or args.local or any(
+        value is not None for value in (args.target, args.project, args.root, args.env_file, args.attachments_file, args.locho_host)
     ):
         parser.error("live deployment arguments and --cleanup require --mode live")
     report_path = args.report
@@ -406,6 +505,7 @@ def main(argv: list[str] | None = None) -> int:
     results = run(args.mode, args)
     payload = {"schema": 1, "mode": args.mode, "run_id": report_path.stem, "cases": results}
     report_path.write_text(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n", encoding="utf-8")
+    os.chmod(report_path, 0o600)
     print(json.dumps({"schema": 1, "report": str(report_path), "cases": len(results), "failed": sum(item["status"] == "FAIL" for item in results)}, ensure_ascii=True))
     return 1 if any(item["status"] == "FAIL" for item in results) else 0
 
