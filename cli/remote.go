@@ -30,6 +30,7 @@ type deployment interface {
 	deploy(ctx context.Context, action string, start bool, component string) ([]byte, error)
 	health(ctx context.Context, allowStopped, providerCheck bool) ([]byte, error)
 	operation(ctx context.Context, script string, input []byte, args ...string) ([]byte, error)
+	workspaceGit(ctx context.Context, action string, config WorkspaceGitConfig) ([]byte, error)
 	uninstall(ctx context.Context) ([]byte, error)
 	composeLogs(ctx context.Context, follow bool) ([]byte, error)
 }
@@ -121,6 +122,22 @@ func (remote Remote) operationCommandForRoot(operationRoot, script string, args 
 
 func (remote Remote) operation(ctx context.Context, script string, input []byte, args ...string) ([]byte, error) {
 	return remote.ssh(ctx, remote.operationCommand(script, args...), input)
+}
+
+func workspaceGitArguments(action string, gitConfig WorkspaceGitConfig) []string {
+	return []string{
+		action,
+		"--remote", gitConfig.Remote,
+		"--branch", gitConfig.Branch,
+		"--schedule", gitConfig.Schedule,
+		"--author-name", gitConfig.AuthorName,
+		"--author-email", gitConfig.AuthorEmail,
+		"--json",
+	}
+}
+
+func (remote Remote) workspaceGit(ctx context.Context, action string, gitConfig WorkspaceGitConfig) ([]byte, error) {
+	return remote.operation(ctx, "ops/workspace-git.sh", nil, workspaceGitArguments(action, gitConfig)...)
 }
 
 func (remote Remote) uninstall(ctx context.Context) ([]byte, error) {
@@ -285,6 +302,10 @@ func (local Local) operation(ctx context.Context, script string, input []byte, a
 		return nil, fmt.Errorf("local operations do not accept stdin")
 	}
 	return local.command(ctx, local.releasePath(), script, args...)
+}
+
+func (local Local) workspaceGit(ctx context.Context, action string, gitConfig WorkspaceGitConfig) ([]byte, error) {
+	return local.operation(ctx, "ops/workspace-git.sh", nil, workspaceGitArguments(action, gitConfig)...)
 }
 
 func (local Local) releasePath() string {

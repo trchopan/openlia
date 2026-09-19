@@ -68,6 +68,12 @@ validate_secret_file() {
                 *) openlia_die 'COPILOT_GITHUB_TOKEN must use a supported OAuth, fine-grained, or GitHub App token' ;;
             esac
         fi
+        if [[ "$key" == OPENLIA_GIT_TOKEN ]]; then
+            case "$value" in
+                ghp_*|gho_*|ghu_*|github_pat_*) ;;
+                *) openlia_die 'OPENLIA_GIT_TOKEN must use a supported GitHub personal access token' ;;
+            esac
+        fi
         count=$((count + 1))
     done <"$file"
     ((count > 0)) || openlia_die 'credential source contains no credentials'

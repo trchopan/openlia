@@ -19,7 +19,7 @@ USER root
 # The upstream image owns the entrypoint and s6 tree. Only add immutable
 # command-line runtimes, timezone data, and the OpenLia secret helper here.
 RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl hledger tzdata unzip xz-utils \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git hledger tzdata unzip xz-utils \
     && rm -rf /var/lib/apt/lists/* \
     && hledger --version \
     && set -eu; \
@@ -59,6 +59,7 @@ RUN apt-get update \
     rm -rf /tmp/bun /tmp/uv "${bun_archive}" "${uv_archive}"
 
 COPY --chmod=0755 docker/secret-source.sh /usr/local/bin/openlia-secret-source
+COPY --chmod=0755 docker/git-askpass.sh /usr/local/bin/openlia-git-askpass
 
 # Keep the upstream default USER and ENTRYPOINT unchanged. s6 must start as
 # root so the upstream volume setup can drop supervised processes to hermes.

@@ -55,6 +55,16 @@ checkout, and never prints their values. The source files must be regular files
 outside the checkout. Reports are redacted but may still contain operational
 data; keep them outside the repository.
 
+## Workspace Git
+
+The provider-free CLI and local smoke checks validate the bundled workspace Git
+skill, image tooling, profile sync script, and protected workspace template.
+Actual remote synchronization requires a repository-scoped GitHub PAT in the
+protected source and a disposable or approved private repository. The setup
+flow performs the initial push, while the scheduled job only pulls clean
+fast-forward changes. Divergent or conflicting histories are refused rather
+than overwriting local workspace files.
+
 Run against a disposable Linux target with external local inputs. Replace the
 target and root placeholders with values for your own environment:
 

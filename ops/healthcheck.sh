@@ -113,10 +113,10 @@ else
 fi
 
 if openlia_service_running hermes; then
-    if openlia_compose exec -T hermes sh -c 'command -v hermes >/dev/null && command -v bun >/dev/null && command -v uv >/dev/null' >/dev/null 2>&1; then
-        add_check hermes_runtimes true hermes_bun_uv_available
+    if openlia_compose exec -T hermes sh -c 'command -v hermes >/dev/null && command -v bun >/dev/null && command -v uv >/dev/null && command -v git >/dev/null' >/dev/null 2>&1; then
+        add_check hermes_runtimes true hermes_bun_uv_git_available
     else
-        add_check hermes_runtimes false hermes_bun_uv_missing
+        add_check hermes_runtimes false hermes_bun_uv_git_missing
     fi
     if openlia_compose exec -T hermes hermes config check >/dev/null 2>&1; then
         add_check hermes_config true valid

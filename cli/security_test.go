@@ -11,9 +11,9 @@ import (
 )
 
 func TestRedactSecrets(t *testing.T) {
-	input := "Authorization: Bearer abc.def\nOPENAI_API_KEY=sk-test-secret\nTOKEN=ghp_test-value\ncapability=host:http:secret"
+	input := "Authorization: Bearer abc.def\nOPENAI_API_KEY=sk-test-secret\nTOKEN=ghp_test-value\nOPENLIA_GIT_TOKEN=github_pat_test-value\ncapability=host:http:secret"
 	output := redact(input)
-	if strings.Contains(output, "abc.def") || strings.Contains(output, "sk-test-secret") || strings.Contains(output, "ghp_test-value") || strings.Contains(output, "host:http:secret") {
+	if strings.Contains(output, "abc.def") || strings.Contains(output, "sk-test-secret") || strings.Contains(output, "ghp_test-value") || strings.Contains(output, "github_pat_test-value") || strings.Contains(output, "host:http:secret") {
 		t.Fatalf("secret survived redaction: %q", output)
 	}
 	if !strings.Contains(output, "[REDACTED]") {

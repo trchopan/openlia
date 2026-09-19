@@ -14,6 +14,18 @@ func TestOperationCommandIncludesTimezone(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGitArgumentsDoNotContainSecrets(t *testing.T) {
+	config := defaultConfig()
+	config.WorkspaceGit.Enabled = true
+	config.WorkspaceGit.Remote = "https://github.com/example/private-vault.git"
+	args := workspaceGitArguments("setup", config.WorkspaceGit)
+	for _, arg := range args {
+		if strings.Contains(arg, "TOKEN") || strings.Contains(arg, "ghp_") || strings.Contains(arg, "github_pat_") {
+			t.Fatalf("workspace Git operation argument contains a credential: %q", arg)
+		}
+	}
+}
+
 func TestUninstallCommandUsesCurrentReleaseAndInstallRoot(t *testing.T) {
 	config := defaultConfig()
 	config.Target = "operator@example.test"

@@ -80,6 +80,7 @@ Usage:
   openlia init [--local|--target user@host] [--root /path] [--project NAME]
                [--timezone Asia/Ho_Chi_Minh] [--model MODEL] [--provider PROVIDER]
                [--external-network NAME] [--api] [--api-host 127.0.0.1]
+               [--workspace-git-remote https://github.com/OWNER/REPO.git]
   openlia status [--json]
   openlia doctor [--json]
   openlia deploy | start | stop | restart
@@ -91,6 +92,7 @@ Usage:
   openlia attachments list
   openlia attachments rotate <host> --source PATH
   openlia backup create|restore
+  openlia workspace git setup|status
 
 Global flags: --json, --non-interactive, --version, --help
 

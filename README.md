@@ -298,7 +298,7 @@ underlying personal model consistent.
 
 The first implementation is a thin operations layer, not a new agent runtime.
 It provides a Go operator CLI, pinned Docker/Compose assets, a file-based
-Personal OS template, seven workflow skills, credential rotation, Locho
+Personal OS template, eight workflow skills, credential rotation, Locho
 attachments, and backup/recovery operations for local or remote deployments.
 
 The initial implementation will establish:
@@ -308,7 +308,8 @@ The initial implementation will establish:
 2. A versioned Hermes workspace template with `SOUL.md`, `AGENTS.md`, skills,
    and optional review automations.
 3. Docker deployment with persistent state, pinned runtime dependencies, and
-   operational commands for update, backup, restore, and health checks.
+   operational commands for update, backup, restore, health checks, and
+   workspace Git synchronization.
 4. Credential rotation for OpenAI-compatible endpoints and GitHub Copilot
    without placing secrets in Git.
 5. Locho attachment management for multiple hosts and multiple services per
@@ -411,9 +412,37 @@ runtime backups when that recovery point is no longer needed.
 as command-line arguments.
 
 The source file may contain `OPENAI_API_KEY`, numbered OpenAI key siblings,
-`OPENAI_BASE_URL`, `OPENLIA_MODEL`, or a supported `COPILOT_GITHUB_TOKEN`.
+`OPENAI_BASE_URL`, `OPENLIA_MODEL`, a supported `COPILOT_GITHUB_TOKEN`, or
+`OPENLIA_GIT_TOKEN`.
 Classic `ghp_*` tokens are not valid for Copilot. Hermes reads the file through
 its `secrets.command` source; its values are never printed by OpenLia.
+
+To enable the workspace Git backup, add a repository-scoped GitHub personal
+access token to the same protected source. The token must be limited to the
+target repository and use a supported GitHub PAT format:
+
+```dotenv
+OPENLIA_GIT_TOKEN=github_pat_...
+```
+
+Configure the non-secret repository settings during initialization:
+
+```sh
+./openlia init --local --root "$HOME/.openlia" \
+  --workspace-git-remote https://github.com/OWNER/REPOSITORY.git
+```
+
+The remote URL, branch, schedule, and commit identity are stored in the
+operator `config.toml`; the PAT remains only in the protected secret source.
+OpenLia initializes the workspace Git repository, safely reconciles an existing
+remote `main` history, performs the initial push, and enables a no-agent Hermes
+pull job. The default schedule is every five minutes. Conflicting histories
+stop without discarding either side.
+
+The automatic job only fast-forwards a clean local branch from the remote. It
+does not stage, commit, rebase, or push workspace changes, and does not invoke a
+model. Use the bundled `workspace-git` skill for status checks, requested
+pushes, structural branches, and GitHub pull requests.
 
 The Hermes agent uses `Asia/Ho_Chi_Minh` by default. Set another IANA timezone
 per target during initialization:
@@ -441,6 +470,8 @@ openlia uninstall --local --project NAME --root /path
 openlia uninstall --target user@host --project NAME --root /path
 openlia backup create
 openlia backup restore --non-interactive --archive /path/to/backup.tar.gz
+openlia workspace git status
+openlia workspace git setup
 ```
 
 `openlia update` is read-only without a component. `openlia update openlia`
@@ -465,6 +496,11 @@ openlia skills test deep-research
 - Workspace initialization is copy-once; later deployments preserve user files.
 - Backups exclude secret files, OAuth state, and Locho capabilities.
 - Dangerous unattended actions are denied and skill writes are staged for review.
+- Workspace Git uses a repository-scoped GitHub PAT through a mounted askpass
+  helper; credentials are not stored in Git remotes or workspace files.
+- Automatic workspace pulls are handled by a static no-agent cron script and
+  refuse dirty-branch conflicts, instruction-file changes, hard resets, and
+  force-pushes.
 
 ## Local Verification
 

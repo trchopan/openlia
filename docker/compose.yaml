@@ -39,6 +39,10 @@ services:
       HERMES_TIMEZONE: "${HERMES_TIMEZONE:-Asia/Ho_Chi_Minh}"
       TZ: "${HERMES_TIMEZONE:-Asia/Ho_Chi_Minh}"
       OPENLIA_SECRET_FILE_IN_CONTAINER: /run/openlia-secrets/hermes.env
+      OPENLIA_GIT_SECRET_FILE_IN_CONTAINER: /run/openlia-secrets/hermes.env
+      GIT_ASKPASS: /usr/local/bin/openlia-git-askpass
+      GIT_TERMINAL_PROMPT: "0"
+      GIT_EDITOR: "true"
       HERMES_WRITE_SAFE_ROOT: /opt/data
       HERMES_CONTAINER: "1"
       HERMES_DISABLE_LAZY_INSTALLS: "1"
