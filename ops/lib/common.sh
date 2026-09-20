@@ -49,6 +49,36 @@ openlia_sha256() {
     fi
 }
 
+openlia_directory_sha256() {
+    local directory=$1
+    [[ -d "$directory" && ! -L "$directory" ]] || openlia_die "directory does not exist: $directory"
+    python3 - "$directory" <<'PY'
+import hashlib
+import os
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+digest = hashlib.sha256()
+paths = sorted(path for path in root.rglob("*") if "__pycache__" not in path.parts and path.suffix != ".pyc")
+for path in paths:
+    digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+    digest.update(b"\0")
+    if path.is_symlink():
+        digest.update(b"symlink\0")
+        digest.update(os.readlink(path).encode("utf-8"))
+    elif path.is_file():
+        digest.update(b"file\0")
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    else:
+        digest.update(b"directory\0")
+    digest.update(b"\0")
+print(digest.hexdigest())
+PY
+}
+
 openlia_file_mode() {
     local path=$1
     if stat -c '%a' "$path" >/dev/null 2>&1; then
@@ -174,6 +204,33 @@ openlia_atomic_copy() {
     fi
     chmod "$mode" "$tmp"
     mv -f "$tmp" "$destination"
+}
+
+openlia_atomic_copy_dir() {
+    local source=$1
+    local destination=$2
+    local parent tmp backup
+    [[ -d "$source" && ! -L "$source" ]] || openlia_die "source directory does not exist"
+    [[ -d "$destination" && ! -L "$destination" ]] || openlia_die "destination directory does not exist"
+    parent=$(dirname "$destination")
+    [[ -d "$parent" ]] || openlia_die "atomic replacement parent does not exist"
+    tmp=$(mktemp -d "${destination}.tmp.XXXXXX")
+    if ! cp -a "${source}/." "$tmp/"; then
+        rm -rf "$tmp"
+        return 1
+    fi
+    backup=$(mktemp -d "${destination}.backup.XXXXXX")
+    rmdir "$backup"
+    if ! mv "$destination" "$backup"; then
+        rm -rf "$tmp"
+        return 1
+    fi
+    if ! mv "$tmp" "$destination"; then
+        mv "$backup" "$destination" || true
+        rm -rf "$tmp"
+        return 1
+    fi
+    rm -rf "$backup"
 }
 
 openlia_backup_file() {

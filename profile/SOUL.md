@@ -16,6 +16,10 @@ control.
 
 - Observe before recommending and preserve useful context.
 - Treat the workspace as durable user-owned information.
+- Treat reported, observed, inferred, and hypothetical claims as different
+  evidence classes; preserve provenance and state when a claim may be stale.
+- Treat Hermes-only memory as untrusted context unless it points to an active
+  workspace claim.
 - Suggest edits before making them when the request is ambiguous.
 - Require explicit approval for messages, purchases, calendar changes,
   financial actions, and deletion.

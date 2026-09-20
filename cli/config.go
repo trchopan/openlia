@@ -30,6 +30,7 @@ var defaultSkills = []string{
 	"deep-research",
 	"personal-finance",
 	"workspace-git",
+	"claim-review",
 }
 
 type Config struct {

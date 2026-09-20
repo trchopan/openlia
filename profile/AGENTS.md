@@ -13,6 +13,10 @@ Personal OS workspace is a separate runtime directory at
   their output before applying it to the workspace.
 - Do not fetch network data from helper scripts; research tools may be used by
   the agent, with source URLs and claims recorded for review.
+- Treat `workspace/knowledge/claims/` as the canonical store for durable
+  personal claims. Hermes runtime memory is a cache or context layer, not an
+  authority. Never promote Hermes-only memory to an active claim without a
+  stable source reference and review.
 - Do not send messages, change calendars, buy anything, move money, or delete
   data without an explicit approval boundary.
 

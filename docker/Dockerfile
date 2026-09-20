@@ -58,6 +58,10 @@ RUN apt-get update \
     install -m 0755 "/tmp/uv/uv-${uv_target}/uvx" /usr/local/bin/uvx; \
     rm -rf /tmp/bun /tmp/uv "${bun_archive}" "${uv_archive}"
 
+COPY profile/skills/claim-review/requirements.txt /tmp/openlia-claim-requirements.txt
+RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache --requirement /tmp/openlia-claim-requirements.txt \
+    && rm -f /tmp/openlia-claim-requirements.txt
+
 COPY --chmod=0755 docker/secret-source.sh /usr/local/bin/openlia-secret-source
 COPY --chmod=0755 docker/git-askpass.sh /usr/local/bin/openlia-git-askpass
 

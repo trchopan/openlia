@@ -465,7 +465,11 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 		if err := deployment.activateRelease(ctx); err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
-		raw, err := deployment.operation(ctx, "ops/deploy.sh", nil, "profile", "--json")
+		profileArgs := []string{"profile"}
+		if options.JSON {
+			profileArgs = append(profileArgs, "--json")
+		}
+		raw, err := deployment.operation(ctx, "ops/deploy.sh", nil, profileArgs...)
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
@@ -488,7 +492,7 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 
 func commandSkills(options Options, args []string, assets fs.FS) int {
 	if len(args) == 0 {
-		return fail(options, ExitUsage, "skills requires list, show, enable, disable, or test", nil)
+		return fail(options, ExitUsage, "skills requires list, show, status, enable, disable, or test", nil)
 	}
 	action := args[0]
 	args = args[1:]
@@ -525,6 +529,28 @@ func commandSkills(options Options, args []string, assets fs.FS) int {
 		}
 		fmt.Fprint(os.Stdout, string(content))
 		return ExitOK
+	case "status":
+		if len(args) > 1 || (len(args) == 1 && !safeComponent(args[0])) {
+			return fail(options, ExitUsage, "skills status accepts at most one safe skill name", nil)
+		}
+		config, code := configOrError(options)
+		if code != ExitOK {
+			return code
+		}
+		statusArgs := []string{}
+		if len(args) == 1 {
+			statusArgs = append(statusArgs, "--skill", args[0])
+		}
+		if options.JSON {
+			statusArgs = append(statusArgs, "--json")
+		}
+		ctx, cancel := remoteContext()
+		defer cancel()
+		raw, err := newDeployment(config).operation(ctx, "ops/skill-status.sh", nil, statusArgs...)
+		if err != nil {
+			return fail(options, ExitFailure, err.Error(), nil)
+		}
+		return renderRemote(options, raw, "openlia skills status: read-only skill provenance inspection")
 	case "test":
 		if len(args) != 1 || !safeComponent(args[0]) || !contains(defaultSkills, args[0]) {
 			return fail(options, ExitUsage, "skills test requires a known skill name", nil)
@@ -896,40 +922,33 @@ func testSkill(options Options, assets fs.FS, name string) int {
 	if err != nil {
 		return fail(options, ExitInternal, err.Error(), nil)
 	}
+	temporary, err := os.MkdirTemp("", "openlia-skill-*")
+	if err != nil {
+		return fail(options, ExitInternal, err.Error(), nil)
+	}
+	defer os.RemoveAll(temporary)
 	var scriptName string
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".py") {
-			scriptName = entry.Name()
-			break
+			data, readErr := fs.ReadFile(assets, filepath.ToSlash(filepath.Join(directory, entry.Name())))
+			if readErr != nil {
+				return fail(options, ExitInternal, readErr.Error(), nil)
+			}
+			path := filepath.Join(temporary, entry.Name())
+			if writeErr := os.WriteFile(path, data, 0o700); writeErr != nil {
+				return fail(options, ExitInternal, writeErr.Error(), nil)
+			}
+			if scriptName == "" {
+				scriptName = path
+			}
 		}
 	}
 	if scriptName == "" {
 		return fail(options, ExitInternal, "skill has no deterministic helper", nil)
 	}
-	data, err := fs.ReadFile(assets, filepath.ToSlash(filepath.Join(directory, scriptName)))
-	if err != nil {
-		return fail(options, ExitInternal, err.Error(), nil)
-	}
-	temporary, err := os.CreateTemp("", "openlia-skill-*.py")
-	if err != nil {
-		return fail(options, ExitInternal, err.Error(), nil)
-	}
-	nameOnDisk := temporary.Name()
-	defer os.Remove(nameOnDisk)
-	if err := temporary.Chmod(0o700); err != nil {
-		temporary.Close()
-		return fail(options, ExitInternal, err.Error(), nil)
-	}
-	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
-		return fail(options, ExitInternal, err.Error(), nil)
-	}
-	if err := temporary.Close(); err != nil {
-		return fail(options, ExitInternal, err.Error(), nil)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	output, err := runLocalCommand(ctx, "python3", nameOnDisk, "--self-test")
+	output, err := runLocalCommand(ctx, "python3", scriptName, "--self-test")
 	if err != nil {
 		return fail(options, ExitFailure, "skill test failed: "+err.Error(), map[string]any{"skill": name})
 	}

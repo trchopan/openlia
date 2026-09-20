@@ -108,7 +108,7 @@ if [[ ! -e "${workspace_dir}/.gitignore" && -f "${OPENLIA_REPO_ROOT}/workspace-t
 fi
 # Adding missing category directories is non-destructive and repairs releases
 # created before marker files were included in the embedded archive.
-for workspace_category in inbox goals areas projects knowledge ideas decisions monitors tasks calendar people shopping travel finance archive; do
+for workspace_category in inbox goals areas projects knowledge/claims ideas decisions monitors tasks calendar people shopping travel finance archive; do
     mkdir -p "${workspace_dir}/${workspace_category}"
 done
 

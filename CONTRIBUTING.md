@@ -8,6 +8,7 @@ impact.
 
 - Go 1.26 or newer
 - Python 3
+- Python dependencies from `requirements-dev.txt`
 - Docker Compose v2 for Compose validation
 - Bash and ShellCheck for operations scripts
 
@@ -19,6 +20,7 @@ and private deployment identifiers must remain outside the repository.
 Run the relevant checks from the repository root:
 
 ```sh
+python3 -m pip install -r requirements-dev.txt
 make test
 make lint
 make compose-config
