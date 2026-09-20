@@ -254,33 +254,62 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 		_ = RecordChange(config, "restore", "failed", preRestore.Archive, "restore extraction failed", now)
 		return BackupResult{}, err
 	}
-	hermesInfo, hermesErr := os.Stat(filepath.Join(staging, "hermes"))
-	if hermesErr != nil || !hermesInfo.IsDir() {
-		_ = RecordChange(config, "restore", "failed", preRestore.Archive, "restore extraction failed", now)
-		return BackupResult{}, fmt.Errorf("restore extraction failed; current state was preserved")
-	}
-	oldData := filepath.Join(config.BackupRoot, fmt.Sprintf("pre-restore-hermes-%s-%d", now.UTC().Format("20060102T150405Z"), os.Getpid()))
-	for suffix := 1; ; suffix++ {
-		if _, statErr := os.Lstat(oldData); errors.Is(statErr, os.ErrNotExist) {
-			break
-		} else if statErr != nil {
-			return BackupResult{}, statErr
+	for _, root := range []string{"hermes", "meta", "locho"} {
+		info, rootErr := os.Stat(filepath.Join(staging, root))
+		if rootErr != nil || !info.IsDir() {
+			_ = RecordChange(config, "restore", "failed", preRestore.Archive, "restore extraction failed", now)
+			return BackupResult{}, fmt.Errorf("restore extraction failed; archive is missing %s", root)
 		}
-		oldData = filepath.Join(config.BackupRoot, fmt.Sprintf("pre-restore-hermes-%s-%d-%d", now.UTC().Format("20060102T150405Z"), os.Getpid(), suffix))
 	}
-	if err := os.Rename(config.DataRoot, oldData); err != nil {
-		_ = RecordChange(config, "restore", "failed", preRestore.Archive, "current data move failed", now)
-		return BackupResult{}, fmt.Errorf("current data move failed; restore was not applied")
+	oldRoots := make(map[string]string)
+	for _, root := range []string{"hermes", "meta", "locho"} {
+		oldPath := filepath.Join(config.BackupRoot, fmt.Sprintf("pre-restore-%s-%s-%d", root, now.UTC().Format("20060102T150405Z"), os.Getpid()))
+		for suffix := 1; ; suffix++ {
+			if _, statErr := os.Lstat(oldPath); errors.Is(statErr, os.ErrNotExist) {
+				break
+			} else if statErr != nil {
+				return BackupResult{}, statErr
+			}
+			oldPath = filepath.Join(config.BackupRoot, fmt.Sprintf("pre-restore-%s-%s-%d-%d", root, now.UTC().Format("20060102T150405Z"), os.Getpid(), suffix))
+		}
+		oldRoots[root] = oldPath
 	}
-	if err := os.Rename(filepath.Join(staging, "hermes"), config.DataRoot); err != nil {
-		_ = os.Rename(oldData, config.DataRoot)
-		_ = RecordChange(config, "restore", "failed", preRestore.Archive, "restore replacement failed", now)
-		return BackupResult{}, fmt.Errorf("restore replacement failed; current state was restored")
+	for _, root := range []string{"hermes", "meta", "locho"} {
+		currentPath := filepath.Join(config.RuntimeRoot, root)
+		if err := os.Rename(currentPath, oldRoots[root]); err != nil {
+			for _, movedRoot := range []string{"hermes", "meta", "locho"} {
+				if oldPath := oldRoots[movedRoot]; oldPath != "" {
+					if _, statErr := os.Lstat(oldPath); statErr == nil {
+						_ = os.Rename(oldPath, filepath.Join(config.RuntimeRoot, movedRoot))
+					}
+				}
+			}
+			return BackupResult{}, fmt.Errorf("current %s move failed; restore was not applied", root)
+		}
 	}
-	if err := EnsureDir(config.MetaRoot, 0o700); err != nil {
+	for _, root := range []string{"hermes", "meta", "locho"} {
+		if err := os.Rename(filepath.Join(staging, root), filepath.Join(config.RuntimeRoot, root)); err != nil {
+			for _, restoredRoot := range []string{"hermes", "meta", "locho"} {
+				_ = os.RemoveAll(filepath.Join(config.RuntimeRoot, restoredRoot))
+				if oldPath := oldRoots[restoredRoot]; oldPath != "" {
+					_ = os.Rename(oldPath, filepath.Join(config.RuntimeRoot, restoredRoot))
+				}
+			}
+			_ = RecordChange(config, "restore", "failed", preRestore.Archive, "restore replacement failed", now)
+			return BackupResult{}, fmt.Errorf("restore replacement failed; current state was restored")
+		}
+	}
+	if err := WriteState(config, stateStopped); err != nil {
+		for _, restoredRoot := range []string{"hermes", "meta", "locho"} {
+			_ = os.RemoveAll(filepath.Join(config.RuntimeRoot, restoredRoot))
+			if oldPath := oldRoots[restoredRoot]; oldPath != "" {
+				_ = os.Rename(oldPath, filepath.Join(config.RuntimeRoot, restoredRoot))
+			}
+		}
 		return BackupResult{}, err
 	}
-	if err := RecordChange(config, "restore", "ok", preRestore.Archive, "archive="+archivePath+" old_data="+oldData, now); err != nil {
+	if err := RecordChange(config, "restore", "ok", preRestore.Archive, "archive="+archivePath, now); err != nil {
+		_ = RecordChange(config, "restore", "failed", preRestore.Archive, "restore record failed", now)
 		return BackupResult{}, err
 	}
 	return BackupResult{OK: true, Action: "restore", Archive: archivePath, State: stateStopped, Secrets: "supplied_out_of_band"}, nil

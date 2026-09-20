@@ -35,8 +35,9 @@ func TestShellQuote(t *testing.T) {
 
 func TestReleaseArchiveContainsWorkspaceMarkers(t *testing.T) {
 	assets := fstest.MapFS{
-		"workspace-template/inbox/.gitkeep": &fstest.MapFile{Data: []byte{}},
-		"profile/SOUL.md":                   &fstest.MapFile{Data: []byte("safe")},
+		"workspace-template/inbox/.gitkeep":                      &fstest.MapFile{Data: []byte{}},
+		"profile/SOUL.md":                                        &fstest.MapFile{Data: []byte("safe")},
+		"profile/system-skills/openlia-skill-migration/SKILL.md": &fstest.MapFile{Data: []byte("protected")},
 	}
 	archive, digest, err := releaseArchive(assets)
 	if err != nil {
@@ -63,6 +64,9 @@ func TestReleaseArchiveContainsWorkspaceMarkers(t *testing.T) {
 	}
 	if !seen["workspace-template/inbox/.gitkeep"] {
 		t.Fatal("workspace marker was omitted from embedded release")
+	}
+	if !seen["profile/system-skills/openlia-skill-migration/SKILL.md"] {
+		t.Fatal("protected migration skill was omitted from release")
 	}
 }
 

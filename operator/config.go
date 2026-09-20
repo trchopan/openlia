@@ -20,6 +20,7 @@ type Config struct {
 	ComposeProjectDir string
 	GeneratedCompose  string
 	DataRoot          string
+	SystemSkillsRoot  string
 	LochoRoot         string
 	SecretDir         string
 	SecretFile        string
@@ -83,6 +84,7 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		ComposeProjectDir: getOr(values, "OPENLIA_COMPOSE_PROJECT_DIR", filepath.Join(repositoryRoot, "docker")),
 		GeneratedCompose:  getOr(values, "OPENLIA_GENERATED_COMPOSE", filepath.Join(repositoryRoot, "docker", "compose.generated.yaml")),
 		DataRoot:          getOr(values, "OPENLIA_DATA_ROOT", filepath.Join(runtimeRoot, "hermes")),
+		SystemSkillsRoot:  getOr(values, "OPENLIA_SYSTEM_SKILLS_ROOT", filepath.Join(runtimeRoot, "system-skills")),
 		LochoRoot:         getOr(values, "OPENLIA_LOCHO_ROOT", filepath.Join(runtimeRoot, "locho")),
 		SecretDir:         getOr(values, "OPENLIA_SECRET_DIR", filepath.Join(runtimeRoot, "secrets")),
 		SecretFile:        getOr(values, "OPENLIA_SECRET_FILE", filepath.Join(runtimeRoot, "secrets", "hermes.env")),
@@ -191,6 +193,7 @@ func (c Config) ValidatePaths() error {
 		path  string
 	}{
 		{"data-root", c.DataRoot},
+		{"system-skills-root", c.SystemSkillsRoot},
 		{"locho-root", c.LochoRoot},
 		{"secret-file", c.SecretFile},
 		{"backup-root", c.BackupRoot},

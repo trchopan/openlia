@@ -12,3 +12,5 @@ distribution_owned:
   - config.yaml
   - skills/
   - cron/
+system_owned:
+  - system-skills/openlia-skill-migration/

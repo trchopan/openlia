@@ -104,6 +104,7 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"OPENLIA_API_ENABLED=" + shellQuote(strconv.FormatBool(remote.Config.APIEnabled)),
 		"OPENLIA_API_HOST=" + shellQuote(remote.Config.APIHost),
 		"OPENLIA_DATA_ROOT=" + shellQuote(remote.rootPath("runtime", "hermes")),
+		"OPENLIA_SYSTEM_SKILLS_ROOT=" + shellQuote(remote.rootPath("runtime", "system-skills")),
 		"OPENLIA_LOCHO_ROOT=" + shellQuote(remote.rootPath("runtime", "locho")),
 		"OPENLIA_SECRET_FILE=" + shellQuote(remote.rootPath("runtime", "secrets", "hermes.env")),
 		"OPENLIA_SECRET_DIR=" + shellQuote(remote.rootPath("runtime", "secrets")),
@@ -149,6 +150,10 @@ func operatorArguments(operation string, args []string) ([]string, bool) {
 		command = "profile"
 	case "skill-status":
 		command = "skill-status"
+	case "skill-fork":
+		command = "skill-fork"
+	case "skill-migration":
+		command = "skill-migration"
 	case "backup":
 		command = "backup"
 	case "attachments":
@@ -197,6 +202,10 @@ func legacyOperationScript(operation string) string {
 		return "ops/profile.sh"
 	case "skill-status", "ops/skill-status.sh":
 		return "ops/skill-status.sh"
+	case "skill-fork":
+		return "ops/skill-fork.sh"
+	case "skill-migration":
+		return "ops/skill-migration.sh"
 	case "backup", "ops/backup.sh":
 		return "ops/backup.sh"
 	case "attachments", "ops/attachments.sh":
@@ -364,6 +373,7 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_API_ENABLED=" + strconv.FormatBool(config.APIEnabled),
 		"OPENLIA_API_HOST=" + config.APIHost,
 		"OPENLIA_DATA_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "hermes"),
+		"OPENLIA_SYSTEM_SKILLS_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "system-skills"),
 		"OPENLIA_LOCHO_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "locho"),
 		"OPENLIA_SECRET_FILE=" + filepath.Join(config.InstallRoot, "runtime", "secrets", "hermes.env"),
 		"OPENLIA_SECRET_DIR=" + filepath.Join(config.InstallRoot, "runtime", "secrets"),

@@ -44,6 +44,7 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 	}{
 		{config.RuntimeRoot, 0o700},
 		{config.DataRoot, 0o700},
+		{config.SystemSkillsRoot, 0o700},
 		{config.LochoRoot, 0o700},
 		{config.SecretDir, 0o700},
 		{config.BackupRoot, 0o700},

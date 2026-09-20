@@ -72,6 +72,17 @@ func RunContext(ctx context.Context, args []string, input io.Reader, output, err
 			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 		}
 		return emit(output, result, jsonOutput, "openlia skill-status: read-only skill provenance inspection")
+	case "skill-fork":
+		if len(args) != 1 {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("skill-fork requires NAME"))
+		}
+		result, err := ForkSkill(config, args[0], now)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, result, jsonOutput, "openlia skill-fork: skill forked; active files preserved")
+	case "skill-migration":
+		return runSkillMigration(config, args, output, errorOutput, jsonOutput, now)
 	case "backup":
 		return runBackup(ctx, config, args, input, output, errorOutput, jsonOutput, now)
 	case "attachments":
@@ -246,16 +257,35 @@ func runDeploy(ctx context.Context, config Config, args []string, output, errorO
 			_ = RecordChange(config, "profile", "failed", backup.Archive, "profile synchronization failed", now)
 			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 		}
+		if err := refreshProtectedSkillRuntime(ctx, config, NewCompose(config, nil)); err != nil {
+			_ = RecordChange(config, "profile", "failed", backup.Archive, "protected skill reload failed", now)
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
 		if err := RecordChange(config, "profile", "ok", backup.Archive, "profile assets synchronized", now); err != nil {
 			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 		}
-		return emit(output, map[string]any{"ok": true, "action": "profile", "backup": backup.Archive, "workspace": "preserved", "profile_sync": result}, jsonOutput, "openlia deploy: profile assets synchronized; workspace preserved")
+		human := fmt.Sprintf("openlia deploy: profile assets synchronized; workspace preserved; updated=%d; forked=%d; updates_available=%d; customized=%d; unmanaged=%d", result.Skills.Updated, result.Skills.Forked, result.Skills.UpdatesAvailable, result.Skills.Customized, result.Skills.Unmanaged)
+		return emit(output, map[string]any{"ok": true, "action": "profile", "backup": backup.Archive, "workspace": "preserved", "profile_sync": result}, jsonOutput, human)
 	}
 	result, err := Deploy(ctx, config, NewCompose(config, nil), DeployOptions{Action: action, Component: component, ForceStart: forceStart}, now)
 	if err != nil {
 		return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 	}
 	return emit(output, result, jsonOutput, fmt.Sprintf("openlia deploy: action=%s state=%s", result.Action, result.State))
+}
+
+func refreshProtectedSkillRuntime(ctx context.Context, config Config, compose Compose) error {
+	state, err := ReadState(config)
+	if err != nil {
+		return err
+	}
+	if state != stateRunning {
+		return nil
+	}
+	if _, err := compose.Run(ctx, "up", "-d", "--no-deps", "--force-recreate", "hermes"); err != nil {
+		return fmt.Errorf("reload Hermes protected skills: %w", err)
+	}
+	return nil
 }
 
 func runHealthcheck(ctx context.Context, config Config, args []string, output, errorOutput io.Writer, jsonOutput bool) int {
@@ -387,6 +417,44 @@ Usage:
   openlia-operator <subcommand> [--json]
 
 Subcommands:
-  bootstrap profile skill-status backup attachments auth deploy
+  bootstrap profile skill-status skill-fork skill-migration backup attachments auth deploy
   healthcheck workspace-git uninstall`)
+}
+
+func runSkillMigration(config Config, args []string, output, errorOutput io.Writer, jsonOutput bool, now time.Time) int {
+	if len(args) == 0 {
+		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("skill-migration requires prepare, show, apply, or reject"))
+	}
+	action := args[0]
+	if len(args) != 2 {
+		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("skill-migration %s requires one name or proposal ID", action))
+	}
+	switch action {
+	case "prepare":
+		result, err := PrepareSkillMigration(config, args[1], now)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, result, jsonOutput, "openlia skill-migration: context staged for Hermes")
+	case "show":
+		proposal, err := ReadSkillMigrationProposal(config, args[1])
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, proposal, jsonOutput, "openlia skill-migration: proposal loaded")
+	case "apply":
+		result, err := ApplySkillMigration(config, args[1], now)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, result, jsonOutput, "openlia skill-migration: proposal applied")
+	case "reject":
+		result, err := RejectSkillMigration(config, args[1], now)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, result, jsonOutput, "openlia skill-migration: proposal rejected")
+	default:
+		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("unknown skill-migration action %s", action))
+	}
 }

@@ -505,7 +505,7 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 
 func commandSkills(options Options, args []string, assets fs.FS) int {
 	if len(args) == 0 {
-		return fail(options, ExitUsage, "skills requires list, show, status, enable, disable, or test", nil)
+		return fail(options, ExitUsage, "skills requires list, show, status, fork, migrate, enable, disable, or test", nil)
 	}
 	action := args[0]
 	args = args[1:]
@@ -564,6 +564,23 @@ func commandSkills(options Options, args []string, assets fs.FS) int {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
 		return renderRemote(options, raw, "openlia skills status: read-only skill provenance inspection")
+	case "fork":
+		if len(args) != 1 || !safeComponent(args[0]) || !contains(defaultSkills, args[0]) {
+			return fail(options, ExitUsage, "skills fork requires a known user skill name", nil)
+		}
+		config, code := configOrError(options)
+		if code != ExitOK {
+			return code
+		}
+		ctx, cancel := remoteContext()
+		defer cancel()
+		raw, err := newDeployment(config).operation(ctx, "skill-fork", nil, args[0], "--json")
+		if err != nil {
+			return fail(options, ExitFailure, err.Error(), nil)
+		}
+		return renderRemote(options, raw, "openlia skills fork: active skill preserved and customization lineage recorded")
+	case "migrate":
+		return commandSkillMigration(options, args)
 	case "test":
 		if len(args) != 1 || !safeComponent(args[0]) || !contains(defaultSkills, args[0]) {
 			return fail(options, ExitUsage, "skills test requires a known skill name", nil)
@@ -592,6 +609,38 @@ func commandSkills(options Options, args []string, assets fs.FS) int {
 	default:
 		return fail(options, ExitUsage, "unknown skills action "+action, nil)
 	}
+}
+
+func commandSkillMigration(options Options, args []string) int {
+	if len(args) != 2 || !safeComponent(args[1]) {
+		return fail(options, ExitUsage, "skills migrate requires prepare, show, apply, or reject plus a safe name", nil)
+	}
+	action, identifier := args[0], args[1]
+	if action != "prepare" && action != "show" && action != "apply" && action != "reject" {
+		return fail(options, ExitUsage, "skills migrate requires prepare, show, apply, or reject", nil)
+	}
+	if action == "apply" {
+		if options.NonInteractive {
+			return fail(options, ExitUsage, "migration apply requires interactive confirmation", nil)
+		}
+		expected := "apply migration " + identifier
+		fmt.Fprintf(os.Stderr, "Apply migration proposal %s? Type %q to continue: ", identifier, expected)
+		answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil || strings.TrimSpace(answer) != expected {
+			return fail(options, ExitFailure, "migration apply cancelled", nil)
+		}
+	}
+	config, code := configOrError(options)
+	if code != ExitOK {
+		return code
+	}
+	ctx, cancel := remoteContext()
+	defer cancel()
+	raw, err := newDeployment(config).operation(ctx, "skill-migration", nil, action, identifier, "--json")
+	if err != nil {
+		return fail(options, ExitFailure, err.Error(), nil)
+	}
+	return renderRemote(options, raw, "openlia skills migrate: operation completed")
 }
 
 func commandAuth(options Options, args []string) int {
