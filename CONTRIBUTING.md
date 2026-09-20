@@ -10,7 +10,7 @@ impact.
 - Python 3
 - Python dependencies from `requirements-dev.txt`
 - Docker Compose v2 for Compose validation
-- Bash and ShellCheck for operations scripts
+- Bash and ShellCheck for the small container and cron adapters
 
 Live credentials, personal workspace data, runtime state, Locho capabilities,
 and private deployment identifiers must remain outside the repository.
@@ -37,8 +37,8 @@ credentials, Telegram, Locho, SSH, or a remote target. The local deployment
 smoke additionally requires a working Linux Docker engine, provided directly by
 Docker Engine on Linux or Docker Desktop on macOS.
 
-`make test` skips Docker-dependent operations checks when no Docker engine is
-available; run `make smoke-local` separately for an actual local Compose
+`make test` runs the Go operator and filesystem integration tests without a
+provider. Run `make smoke-local` separately for an actual local Compose
 deployment check.
 
 The credential-backed local target is intentionally not part of the default

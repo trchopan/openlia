@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"openlia/operator"
 )
 
 type Remote struct {
@@ -79,13 +81,14 @@ func (remote Remote) ssh(ctx context.Context, command string, input []byte) ([]b
 	return stdout.Bytes(), nil
 }
 
-func (remote Remote) operationCommand(script string, args ...string) string {
-	return remote.operationCommandForRoot(remote.releasePath(), script, args...)
+func (remote Remote) operationCommand(operation string, args ...string) string {
+	return remote.operationCommandForRoot(remote.releasePath(), operation, args...)
 }
 
-func (remote Remote) operationCommandForRoot(operationRoot, script string, args ...string) string {
+func (remote Remote) operationCommandForRoot(operationRoot, operation string, args ...string) string {
 	environment := []string{
 		"OPENLIA_LOCAL_MODE='false'",
+		"OPENLIA_REPO_ROOT=" + shellQuote(operationRoot),
 		"OPENLIA_RUNTIME_ROOT=" + shellQuote(remote.rootPath("runtime")),
 		"OPENLIA_INSTALL_ROOT=" + shellQuote(remote.Config.InstallRoot),
 		"OPENLIA_PROJECT_NAME=" + shellQuote(remote.Config.Project),
@@ -107,21 +110,110 @@ func (remote Remote) operationCommandForRoot(operationRoot, script string, args 
 		"OPENLIA_BACKUP_ROOT=" + shellQuote(remote.rootPath("runtime", "backups")),
 		"OPENLIA_META_ROOT=" + shellQuote(remote.rootPath("runtime", "meta")),
 		"OPENLIA_COMPOSE_FILE=" + shellQuote(filepath.Join(operationRoot, "docker", "compose.yaml")),
+		"OPENLIA_COMPOSE_PROJECT_DIR=" + shellQuote(filepath.Join(operationRoot, "docker")),
 		"OPENLIA_GENERATED_COMPOSE=" + shellQuote(filepath.Join(operationRoot, "docker", "compose.generated.yaml")),
 		"OPENLIA_ENABLED_SKILLS=" + shellQuote(strings.Join(remote.Config.EnabledSkills, ",")),
 		"OPENLIA_SKILLS_CONFIGURED='true'",
 	}
-	scriptCommand := shellQuote(filepath.Join(operationRoot, script))
+	legacyScript := legacyOperationScript(operation)
+	scriptCommand := shellQuote(filepath.Join(operationRoot, legacyScript))
+	if operatorArgs, ok := operatorArguments(operation, args); ok {
+		operatorPaths := map[string]string{
+			"amd64": filepath.Join(operationRoot, "operator", "linux-amd64", "openlia-operator"),
+			"arm64": filepath.Join(operationRoot, "operator", "linux-arm64", "openlia-operator"),
+		}
+		return "operator_path=''; case \"$(uname -m)\" in x86_64|amd64) operator_path=" + shellQuote(operatorPaths["amd64"]) + ";; aarch64|arm64) operator_path=" + shellQuote(operatorPaths["arm64"]) + ";; esac; if [ -n \"$operator_path\" ] && [ -x \"$operator_path\" ]; then " + privilegedEnvironmentCommand(environment, "\"$operator_path\"", operatorArgs...) + "; else " + privilegedEnvironmentCommand(environment, scriptCommand, args...) + "; fi"
+	}
+	return privilegedEnvironmentCommand(environment, scriptCommand, args...)
+}
+
+func (remote Remote) operation(ctx context.Context, script string, input []byte, args ...string) ([]byte, error) {
+	return remote.ssh(ctx, remote.operationCommand(script, args...), input)
+}
+
+func privilegedEnvironmentCommand(environment []string, executable string, args ...string) string {
 	quotedArgs := make([]string, 0, len(args))
 	for _, arg := range args {
 		quotedArgs = append(quotedArgs, shellQuote(arg))
 	}
 	arguments := strings.Join(quotedArgs, " ")
-	return "if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then sudo -n env " + strings.Join(environment, " ") + " " + scriptCommand + " " + arguments + "; else env " + strings.Join(environment, " ") + " " + scriptCommand + " " + arguments + "; fi"
+	return "if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then sudo -n env " + strings.Join(environment, " ") + " " + executable + " " + arguments + "; else env " + strings.Join(environment, " ") + " " + executable + " " + arguments + "; fi"
 }
 
-func (remote Remote) operation(ctx context.Context, script string, input []byte, args ...string) ([]byte, error) {
-	return remote.ssh(ctx, remote.operationCommand(script, args...), input)
+func operatorArguments(operation string, args []string) ([]string, bool) {
+	var command string
+	switch filepath.ToSlash(operation) {
+	case "bootstrap":
+		command = "bootstrap"
+	case "profile":
+		command = "profile"
+	case "skill-status":
+		command = "skill-status"
+	case "backup":
+		command = "backup"
+	case "attachments":
+		command = "attachments"
+	case "auth":
+		command = "auth"
+	case "deploy":
+		command = "deploy"
+	case "healthcheck":
+		command = "healthcheck"
+	case "workspace-git":
+		command = "workspace-git"
+	case "uninstall":
+		command = "uninstall"
+	case "ops/bootstrap.sh":
+		command = "bootstrap"
+	case "ops/profile.sh":
+		command = "profile"
+	case "ops/skill-status.sh":
+		command = "skill-status"
+	case "ops/backup.sh":
+		command = "backup"
+	case "ops/attachments.sh":
+		command = "attachments"
+	case "ops/auth.sh":
+		command = "auth"
+	case "ops/deploy.sh":
+		command = "deploy"
+	case "ops/healthcheck.sh":
+		command = "healthcheck"
+	case "ops/workspace-git.sh":
+		command = "workspace-git"
+	case "ops/uninstall.sh":
+		command = "uninstall"
+	default:
+		return nil, false
+	}
+	return append([]string{command}, args...), true
+}
+
+func legacyOperationScript(operation string) string {
+	switch operation {
+	case "bootstrap", "ops/bootstrap.sh":
+		return "ops/bootstrap.sh"
+	case "profile", "ops/profile.sh":
+		return "ops/profile.sh"
+	case "skill-status", "ops/skill-status.sh":
+		return "ops/skill-status.sh"
+	case "backup", "ops/backup.sh":
+		return "ops/backup.sh"
+	case "attachments", "ops/attachments.sh":
+		return "ops/attachments.sh"
+	case "auth", "ops/auth.sh":
+		return "ops/auth.sh"
+	case "deploy", "ops/deploy.sh":
+		return "ops/deploy.sh"
+	case "healthcheck", "ops/healthcheck.sh":
+		return "ops/healthcheck.sh"
+	case "workspace-git", "ops/workspace-git.sh":
+		return "ops/workspace-git.sh"
+	case "uninstall", "ops/uninstall.sh":
+		return "ops/uninstall.sh"
+	default:
+		return operation
+	}
 }
 
 func workspaceGitArguments(action string, gitConfig WorkspaceGitConfig) []string {
@@ -137,14 +229,16 @@ func workspaceGitArguments(action string, gitConfig WorkspaceGitConfig) []string
 }
 
 func (remote Remote) workspaceGit(ctx context.Context, action string, gitConfig WorkspaceGitConfig) ([]byte, error) {
-	return remote.operation(ctx, "ops/workspace-git.sh", nil, workspaceGitArguments(action, gitConfig)...)
+	return remote.operation(ctx, "workspace-git", nil, workspaceGitArguments(action, gitConfig)...)
 }
 
 func (remote Remote) uninstall(ctx context.Context) ([]byte, error) {
 	current := remote.rootPath("current")
 	script := filepath.Join(current, "ops", "uninstall.sh")
-	command := "if [ -x " + shellQuote(script) + " ]; then " +
-		remote.operationCommandForRoot(current, "ops/uninstall.sh", "--json") +
+	operatorAMD64 := filepath.Join(current, "operator", "linux-amd64", "openlia-operator")
+	operatorARM64 := filepath.Join(current, "operator", "linux-arm64", "openlia-operator")
+	command := "if [ -x " + shellQuote(operatorAMD64) + " ] || [ -x " + shellQuote(operatorARM64) + " ] || [ -x " + shellQuote(script) + " ]; then " +
+		remote.operationCommandForRoot(current, "uninstall", "--json") +
 		"; else " + privilegedCommand(remote.legacyUninstallCommand(current)) + "; fi"
 	return remote.ssh(ctx, command, nil)
 }
@@ -195,7 +289,7 @@ func (remote Remote) activateRelease(ctx context.Context) error {
 }
 
 func (remote Remote) bootstrap(ctx context.Context) ([]byte, error) {
-	return remote.operation(ctx, "ops/bootstrap.sh", nil, "--json")
+	return remote.operation(ctx, "bootstrap", nil, "--json")
 }
 
 func (remote Remote) deploy(ctx context.Context, action string, start bool, component string) ([]byte, error) {
@@ -203,7 +297,7 @@ func (remote Remote) deploy(ctx context.Context, action string, start bool, comp
 	if start {
 		args = append(args, "--start")
 	}
-	return remote.operation(ctx, "ops/deploy.sh", nil, args...)
+	return remote.operation(ctx, "deploy", nil, args...)
 }
 
 func (remote Remote) health(ctx context.Context, allowStopped, providerCheck bool) ([]byte, error) {
@@ -214,7 +308,7 @@ func (remote Remote) health(ctx context.Context, allowStopped, providerCheck boo
 	if providerCheck {
 		args = append(args, "--provider-check")
 	}
-	return remote.operation(ctx, "ops/healthcheck.sh", nil, args...)
+	return remote.operation(ctx, "healthcheck", nil, args...)
 }
 
 func (remote Remote) composeLogs(ctx context.Context, follow bool) ([]byte, error) {
@@ -254,6 +348,7 @@ func (local Local) rootPath(parts ...string) string {
 func operationEnvironment(config Config, operationRoot string) []string {
 	return []string{
 		"OPENLIA_LOCAL_MODE=true",
+		"OPENLIA_REPO_ROOT=" + operationRoot,
 		"OPENLIA_RUNTIME_ROOT=" + filepath.Join(config.InstallRoot, "runtime"),
 		"OPENLIA_INSTALL_ROOT=" + config.InstallRoot,
 		"OPENLIA_PROJECT_NAME=" + config.Project,
@@ -275,6 +370,7 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_BACKUP_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "backups"),
 		"OPENLIA_META_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "meta"),
 		"OPENLIA_COMPOSE_FILE=" + filepath.Join(operationRoot, "docker", "compose.yaml"),
+		"OPENLIA_COMPOSE_PROJECT_DIR=" + filepath.Join(operationRoot, "docker"),
 		"OPENLIA_GENERATED_COMPOSE=" + filepath.Join(operationRoot, "docker", "compose.generated.yaml"),
 		"OPENLIA_ENABLED_SKILLS=" + strings.Join(config.EnabledSkills, ","),
 		"OPENLIA_SKILLS_CONFIGURED=true",
@@ -301,11 +397,56 @@ func (local Local) operation(ctx context.Context, script string, input []byte, a
 	if len(input) != 0 {
 		return nil, fmt.Errorf("local operations do not accept stdin")
 	}
+	if operatorArgs, ok := operatorArguments(script, args); ok {
+		return local.operator(ctx, local.releasePath(), operatorArgs...)
+	}
 	return local.command(ctx, local.releasePath(), script, args...)
 }
 
+func (local Local) operator(ctx context.Context, operationRoot string, args ...string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	previous := make(map[string]string)
+	present := make(map[string]bool)
+	for _, value := range operationEnvironment(local.Config, operationRoot) {
+		key, item, ok := strings.Cut(value, "=")
+		if !ok {
+			continue
+		}
+		previous[key] = os.Getenv(key)
+		_, present[key] = os.LookupEnv(key)
+		if err := os.Setenv(key, item); err != nil {
+			return nil, err
+		}
+	}
+	defer func() {
+		for key, value := range previous {
+			if present[key] {
+				_ = os.Setenv(key, value)
+			} else {
+				_ = os.Unsetenv(key)
+			}
+		}
+	}()
+
+	var stdout, stderr bytes.Buffer
+	code := operator.RunContext(ctx, args, nil, &stdout, &stderr)
+	if code != operator.ExitOK {
+		detail := strings.TrimSpace(redact(stderr.String()))
+		if detail == "" {
+			detail = strings.TrimSpace(redact(stdout.String()))
+		}
+		if detail == "" {
+			detail = fmt.Sprintf("operator exited with status %d", code)
+		}
+		return stdout.Bytes(), fmt.Errorf("local operator failed: %s", detail)
+	}
+	return stdout.Bytes(), nil
+}
+
 func (local Local) workspaceGit(ctx context.Context, action string, gitConfig WorkspaceGitConfig) ([]byte, error) {
-	return local.operation(ctx, "ops/workspace-git.sh", nil, workspaceGitArguments(action, gitConfig)...)
+	return local.operation(ctx, "workspace-git", nil, workspaceGitArguments(action, gitConfig)...)
 }
 
 func (local Local) releasePath() string {
@@ -401,7 +542,7 @@ func (local Local) activateRelease(ctx context.Context) error {
 }
 
 func (local Local) bootstrap(ctx context.Context) ([]byte, error) {
-	return local.operation(ctx, "ops/bootstrap.sh", nil, "--json")
+	return local.operation(ctx, "bootstrap", nil, "--json")
 }
 
 func (local Local) deploy(ctx context.Context, action string, start bool, component string) ([]byte, error) {
@@ -409,7 +550,7 @@ func (local Local) deploy(ctx context.Context, action string, start bool, compon
 	if start {
 		args = append(args, "--start")
 	}
-	return local.operation(ctx, "ops/deploy.sh", nil, args...)
+	return local.operation(ctx, "deploy", nil, args...)
 }
 
 func (local Local) health(ctx context.Context, allowStopped, providerCheck bool) ([]byte, error) {
@@ -420,11 +561,11 @@ func (local Local) health(ctx context.Context, allowStopped, providerCheck bool)
 	if providerCheck {
 		args = append(args, "--provider-check")
 	}
-	return local.operation(ctx, "ops/healthcheck.sh", nil, args...)
+	return local.operation(ctx, "healthcheck", nil, args...)
 }
 
 func (local Local) uninstall(ctx context.Context) ([]byte, error) {
-	return local.command(ctx, local.rootPath("current"), "ops/uninstall.sh", "--json")
+	return local.operator(ctx, local.rootPath("current"), "uninstall", "--json")
 }
 
 func (local Local) composeLogs(ctx context.Context, follow bool) ([]byte, error) {

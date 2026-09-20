@@ -64,7 +64,8 @@ The target repository layout is:
 
 ```text
 docker/                 Derived Hermes image and Compose files
-ops/                    Bootstrap, deploy, backup, and rotation commands
+operator/               Typed Go deployment and runtime operations
+cmd/operator/           Cross-compiled target operator entrypoint
 profile/                Hermes profile template and distribution metadata
 profile/skills/         Workflow skills and deterministic helper scripts
 workspace-template/     Initial Personal OS directories and instructions
@@ -371,9 +372,15 @@ Personal OS structure or its durable state.
 | Use case | Required runtime |
 | --- | --- |
 | CLI/static smoke | Go 1.26+, Python 3 with `requirements-dev.txt`, Bash, Docker CLI for Compose validation |
-| Local deployment on Linux | Go 1.26+, Python 3, Bash, Docker Engine with Compose v2 |
-| Local deployment on macOS | Go 1.26+, Python 3, Bash, Docker Desktop with a Linux engine |
-| Remote deployment | Go 1.26+ locally; SSH, Linux, Python 3, Bash, Docker, and Compose v2 on the target |
+| Local deployment on Linux | Go 1.26+, Docker Engine with Compose v2 |
+| Local deployment on macOS | Go 1.26+, Docker Desktop with a Linux engine |
+| Remote deployment | Go 1.26+ locally; SSH, Linux, Docker, and Compose v2 on the target |
+
+New deployments use the Go operator and do not require host-target Bash or
+Python. Bash and Python remain development and test requirements for the
+bundled legacy helpers, smoke runner, and deterministic skill checks. A
+release without a target operator artifact automatically uses those legacy
+helpers when available.
 
 The first deployment builds pinned Linux images and therefore requires network
 access to the configured image registries and release downloads. The pinned
@@ -382,12 +389,16 @@ be on a filesystem shared with Docker Desktop on macOS.
 
 ## Quick Start
 
-Build the operator CLI with Go 1.26 or newer:
+Build the host CLI and the Linux target operators with Go 1.26 or newer:
 
 ```sh
-go build -o openlia .
+make build
 ./openlia init --local --root "$HOME/.openlia"
 ```
+
+`make build` writes the uncommitted Linux amd64 and arm64 operator artifacts
+under `dist/`; the host CLI includes them in release archives when they are
+present. `go build -o openlia .` remains the host-only build for development.
 
 On macOS, Docker Desktop provides the Linux container engine used by the local
 deployment. On Linux, a local Docker Engine with Compose v2 is supported.
@@ -495,7 +506,7 @@ openlia workspace git setup
 ```
 
 `openlia update` is read-only without a component. `openlia update openlia`
-synchronizes the profile, templates, operations scripts, and bundled skills.
+synchronizes the Go operator, profile, templates, and bundled skills.
 The Hermes and Locho commands reconcile only their pinned runtime boundaries;
 they do not silently replace desired digests.
 
@@ -544,7 +555,6 @@ make smoke-local-live \
   OPENLIA_SMOKE_ENV_FILE="$HOME/.config/openlia/dev/openlia_dev.env" \
   OPENLIA_SMOKE_ATTACHMENTS_FILE="$HOME/.config/openlia/dev/locho-attachments.toml" \
   OPENLIA_SMOKE_LOCHO_HOST=genai
-./tests/ops_test.sh
 docker compose -f docker/compose.yaml config --quiet
 ```
 
