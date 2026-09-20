@@ -16,6 +16,19 @@ records and preserve them unless the user explicitly asks for a change.
 ## File handling
 
 - Read the relevant file and nearby context before proposing an edit.
+- Follow the starter templates in each domain directory when creating new records:
+  - `goals/goal-template.md`: high-level outcomes, rationale, and linked projects.
+  - `areas/area-template.md`: enduring life domains, standards, and active projects.
+  - `projects/project-template.md`: bounded initiatives with milestones and tasks.
+  - `decisions/decision-template.md`: questions, options, trade-offs, and outcomes.
+  - `monitors/monitor-template.md`: standing checks, watch URLs, and triggers.
+  - `tasks/task-template.md`: concrete physical actions with priorities and context tags.
+  - `people/person-template.md`: relationships, important dates, and open loops.
+  - `ideas/idea-template.md`: seeds, opportunities, and exploration questions.
+  - `travel/trip-template.md`: itineraries, reservations, and packing lists.
+  - `shopping/item-template.md`: product research, price targets, and evaluations.
+  - `finance/finance-template.md`: period reviews, spending targets, and budgets.
+  - `calendar/event-note-template.md`: event agendas, notes, and follow-up items.
 - Prefer Markdown and small structured files with stable, descriptive names.
 - Treat a claim as a statement to be supported, not as truth merely because an
   assistant generated it. Keep inferred claims as candidates until approved.

@@ -9,6 +9,7 @@ Personal OS workspace is a separate runtime directory at
 - Read and analyze before proposing a change.
 - Keep all workspace writes under the configured workspace root.
 - Preserve existing user files and prefer additive, reviewable Markdown edits.
+- When creating new domain records in the workspace, follow the starter templates in `workspace/<domain>/<template>.md` (e.g. `goals/goal-template.md`, `monitors/monitor-template.md`, `projects/project-template.md`, `decisions/decision-template.md`, `people/person-template.md`).
 - Use the bundled Python helpers only with explicit input paths and inspect
   their output before applying it to the workspace.
 - Do not fetch network data from helper scripts; research tools may be used by
