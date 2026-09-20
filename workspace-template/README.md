@@ -6,21 +6,21 @@ It is copied into a runtime workspace only when that workspace is empty.
 ## Canonical directories
 
 - `inbox/`: uncategorized captures waiting for review.
-- `goals/`: outcomes and the reason they matter.
-- `areas/`: ongoing responsibilities without a fixed end date.
-- `projects/`: bounded outcomes with milestones, tasks, risks, and decisions.
+- `goals/`: outcomes and the reason they matter (`goal-template.md`).
+- `areas/`: ongoing responsibilities without a fixed end date (`area-template.md`).
+- `projects/`: bounded outcomes with milestones, tasks, risks, and decisions (`project-template.md`).
 - `knowledge/`: durable notes, references, and research.
 - `knowledge/claims/`: reusable personal claims with explicit evidence,
-  provenance, temporal scope, and status.
-- `ideas/`: possible future work and observations.
-- `decisions/`: questions, options, evidence, trade-offs, and outcomes.
-- `monitors/`: things to watch for change over time.
-- `tasks/`: concrete actions that can be completed.
-- `calendar/`: planning notes and event context, not a calendar service mirror.
-- `people/`: relationship context and follow-ups.
-- `shopping/`: product research and purchase candidates.
-- `travel/`: trips, itineraries, and travel research.
-- `finance/`: budgets, spending notes, and financial research.
+  provenance, temporal scope, and status (`claim-record.md`).
+- `ideas/`: possible future work and observations (`idea-template.md`).
+- `decisions/`: questions, options, evidence, trade-offs, and outcomes (`decision-template.md`).
+- `monitors/`: things to watch for change over time (`monitor-template.md`).
+- `tasks/`: concrete actions that can be completed (`task-template.md`).
+- `calendar/`: planning notes, meeting agendas, and event context (`event-note-template.md`).
+- `people/`: relationship context, commitments, and follow-ups (`person-template.md`).
+- `shopping/`: product research and purchase candidates (`item-template.md`).
+- `travel/`: trips, itineraries, and travel research (`trip-template.md`).
+- `finance/`: budgets, spending notes, and financial reviews (`finance-template.md`).
 - `archive/`: completed or inactive material retained for reference.
 
 ## Working rules
