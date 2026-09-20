@@ -57,14 +57,22 @@ if [[ "$action" == profile ]]; then
         "${SCRIPT_DIR}/backup.sh" create --reason profile-update --json
     )
     backup_path=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["archive"])' <<<"$backup_output")
-    if ! "${SCRIPT_DIR}/profile.sh" sync --json >/dev/null; then
+    profile_sync_output=''
+    if [[ "$json" == true ]]; then
+        profile_sync_args=(sync --json)
+    else
+        profile_sync_args=(sync)
+    fi
+    if ! profile_sync_output=$("${SCRIPT_DIR}/profile.sh" "${profile_sync_args[@]}"); then
         openlia_record_change profile failed "$backup_path" 'profile synchronization failed'
         openlia_die 'profile synchronization failed; workspace was not replaced'
     fi
     openlia_record_change profile ok "$backup_path" 'profile assets synchronized'
     if [[ "$json" == true ]]; then
-        printf '{"ok":true,"action":"profile","backup":%s,"workspace":"preserved"}\n' "$(openlia_json_quote "$backup_path")"
+        printf '{"ok":true,"action":"profile","backup":%s,"workspace":"preserved","profile_sync":%s}\n' \
+            "$(openlia_json_quote "$backup_path")" "$profile_sync_output"
     else
+        printf '%s\n' "$profile_sync_output"
         printf 'openlia deploy: profile assets synchronized; workspace preserved\n'
     fi
     exit 0

@@ -18,7 +18,7 @@ def _list(data: dict[str, Any], key: str) -> list[dict[str, Any]]:
 
 
 def _title(item: dict[str, Any]) -> str:
-    return str(item.get("title") or item.get("name") or "Untitled")
+    return str(item.get("title") or item.get("name") or item.get("claim") or "Untitled")
 
 
 def _ordered(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -35,10 +35,12 @@ def render_review(data: dict[str, Any]) -> str:
     projects = _list(data, "projects")
     tasks = _list(data, "tasks")
     decisions = _list(data, "decisions")
+    claims = _list(data, "claims")
     completed = [task for task in tasks if str(task.get("status", "")).lower() in {"done", "completed"}]
     open_tasks = [task for task in tasks if task not in completed]
     active_projects = [project for project in projects if str(project.get("status", "active")).lower() not in {"done", "completed", "archived"}]
     revisit = [decision for decision in decisions if decision.get("revisit") is True or decision.get("outcome") in (None, "")]
+    claim_review = [claim for claim in claims if claim.get("needs_review") is True or str(claim.get("status", "")).lower() in {"candidate", "stale", "contested"}]
 
     lines = [
         "# Weekly Review",
@@ -61,6 +63,10 @@ def render_review(data: dict[str, Any]) -> str:
         "",
         *_bullets(revisit, "No decisions need review."),
         "",
+        "## Claims To Review",
+        "",
+        *_bullets(claim_review, "No claims need review."),
+        "",
         "## Next Week",
         "",
         "- Choose a small number of outcomes before adding more tasks.",
@@ -77,11 +83,13 @@ def self_test() -> None:
             "projects": [{"title": "Active project", "status": "active"}],
             "tasks": [{"title": "Finished task", "status": "done"}, {"title": "Open task", "status": "open"}],
             "decisions": [{"title": "Unresolved choice"}],
+            "claims": [{"claim": "A stale preference", "status": "stale", "needs_review": True}],
         }
     )
     assert "Finished task" in output
     assert "Open task" in output
     assert "Unresolved choice" in output
+    assert "A stale preference" in output
 
 
 def main(argv: list[str] | None = None) -> int:

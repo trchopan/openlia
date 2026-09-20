@@ -15,6 +15,8 @@ or a remote Linux VM:
 
 - Docker runs the Hermes gateway with persistent state.
 - A workspace template organizes personal information around durable concepts.
+- A claim ledger records reusable personal context with evidence and lifecycle
+  metadata rather than treating every model inference as a fact.
 - Hermes skills provide workflows that operate across those concepts.
 - Locho attachments provide private access to selected external services.
 - Authentication is kept outside Git and supports provider credential rotation.
@@ -194,6 +196,21 @@ Project      Evidence   Knowledge
 OpenLia can organize and classify captured information later, when there is
 enough context to do so well.
 
+### Claim Memory
+
+Reusable personal context belongs in `knowledge/claims/` as a small Markdown
+record with YAML front matter containing a stable ID, claim kind, source,
+provenance, temporal scope, and status. The claim kind distinguishes `reported`,
+`observed`, `inferred`, and `hypothesis`; a confidence score never replaces
+evidence. The read-only claim index uses an explicit `--as-of` date so expiry
+and review checks are deterministic.
+
+The workspace claim ledger is the canonical long-term record. Hermes runtime
+memory may cache claim IDs and summaries for retrieval, but Hermes-only memory
+must not override an active workspace claim or become durable truth without a
+source reference and review. Conflicting claims remain visible as contested or
+superseded records rather than being silently overwritten.
+
 ## Cross-Domain Capabilities
 
 Domains describe *what* matters in a person's life. Capabilities describe
@@ -209,6 +226,7 @@ Domains describe *what* matters in a person's life. Capabilities describe
 ### Understand and Remember
 
 - Extract facts, commitments, dates, and relationships
+- Preserve reusable claims with source, provenance, temporal scope, and status
 - Connect new information to goals, projects, and people
 - Maintain useful personal context without forcing premature categorization
 
@@ -304,7 +322,7 @@ attachments, and backup/recovery operations for local or remote deployments.
 The initial implementation will establish:
 
 1. A durable personal model for goals, areas, projects, knowledge, decisions,
-   monitors, tasks, people, and the inbox.
+   monitors, tasks, people, and the inbox, with a provenance-aware claim ledger.
 2. A versioned Hermes workspace template with `SOUL.md`, `AGENTS.md`, skills,
    and optional review automations.
 3. Docker deployment with persistent state, pinned runtime dependencies, and
@@ -325,6 +343,8 @@ automations without changing the underlying Personal OS model.
 - **Goals before tasks:** actions should retain the context of what they serve.
 - **Capture first, organize later:** the inbox should make recording frictionless.
 - **Decisions deserve memory:** preserve evidence, reasoning, and outcomes.
+- **Claims need provenance:** preserve evidence, temporal scope, uncertainty, and
+  lifecycle status for reusable personal context.
 - **Observe before acting:** recommendations should be grounded in current
   context.
 - **Human control matters:** consequential actions require explicit approval.
@@ -350,7 +370,7 @@ Personal OS structure or its durable state.
 
 | Use case | Required runtime |
 | --- | --- |
-| CLI/static smoke | Go 1.26+, Python 3, Bash, Docker CLI for Compose validation |
+| CLI/static smoke | Go 1.26+, Python 3 with `requirements-dev.txt`, Bash, Docker CLI for Compose validation |
 | Local deployment on Linux | Go 1.26+, Python 3, Bash, Docker Engine with Compose v2 |
 | Local deployment on macOS | Go 1.26+, Python 3, Bash, Docker Desktop with a Linux engine |
 | Remote deployment | Go 1.26+ locally; SSH, Linux, Python 3, Bash, Docker, and Compose v2 on the target |
@@ -478,6 +498,17 @@ openlia workspace git setup
 synchronizes the profile, templates, operations scripts, and bundled skills.
 The Hermes and Locho commands reconcile only their pinned runtime boundaries;
 they do not silently replace desired digests.
+
+Profile synchronization tracks distribution-owned skill provenance in
+`meta/managed/skills/<skill>.json`, including the distribution version, source
+identifier, content hash, and timestamps. It updates an unchanged managed
+skill, preserves customized skills, and reports untracked existing skills as
+`unmanaged` rather than overwriting them. A matching content hash without valid
+provenance is still `unmanaged`. Use the JSON result from
+`openlia update openlia --json` to inspect these migration statuses.
+These provenance records are also the contract for future read-only status,
+diff, and explicit migration commands; normal synchronization does not create
+or repair missing provenance.
 
 Skills are workflow-oriented rather than domain-specific:
 

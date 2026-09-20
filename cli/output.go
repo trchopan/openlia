@@ -87,7 +87,7 @@ Usage:
   openlia uninstall [--local|--target user@host] --project NAME --root /path
   openlia logs [--follow]
   openlia update [openlia|hermes|locho]
-  openlia skills list|show|enable|disable|test
+  openlia skills list|show|status|enable|disable|test
   openlia auth list|setup|rotate
   openlia attachments list
   openlia attachments rotate <host> --source PATH
