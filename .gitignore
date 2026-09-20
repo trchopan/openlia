@@ -31,6 +31,7 @@ docker/compose.generated.yaml
 
 # Go build and test artifacts
 /openlia
+/dist/
 *.test
 coverage.out
 __pycache__/

@@ -202,6 +202,5 @@ The broader local checks remain:
 go test ./...
 go vet ./...
 python3 -m py_compile tests/smoke.py
-./tests/ops_test.sh
 docker compose -f docker/compose.yaml config --quiet
 ```

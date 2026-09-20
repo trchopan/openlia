@@ -80,7 +80,11 @@ func splitCommonFlags(args []string) (Options, []string, error) {
 		case "--check-providers":
 			options.ProviderCheck = true
 		case "--help", "-h":
-			remaining = append(remaining, "help")
+			if len(remaining) == 0 {
+				remaining = append(remaining, "help")
+			} else {
+				remaining = append(remaining, arg)
+			}
 		default:
 			remaining = append(remaining, arg)
 		}
@@ -132,6 +136,9 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	workspaceGitAuthorName := set.String("workspace-git-author-name", "", "workspace Git commit author name")
 	workspaceGitAuthorEmail := set.String("workspace-git-author-email", "", "workspace Git commit author email")
 	if err := set.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return ExitOK
+		}
 		return ExitUsage
 	}
 	if set.NArg() != 0 {
@@ -214,6 +221,9 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	}
 	if err := validateConfig(config); err != nil {
 		return fail(options, ExitUsage, err.Error(), nil)
+	}
+	if config.Mode != "local" && !targetOperatorAssetsAvailable() {
+		return fail(options, ExitPrereq, "remote deployment requires Linux operator artifacts; run `make build` first", nil)
 	}
 
 	archive, digest, err := releaseArchive(assets)
@@ -341,7 +351,7 @@ func commandLifecycle(options Options, action string, args []string) int {
 	defer cancel()
 	deployment := newDeployment(config)
 	if action == "deploy" {
-		if _, err := deployment.operation(ctx, "ops/attachments.sh", nil, "generate", "--json"); err != nil {
+		if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
 			return fail(options, ExitFailure, "attachment Compose generation failed: "+err.Error(), nil)
 		}
 	}
@@ -351,7 +361,7 @@ func commandLifecycle(options Options, action string, args []string) int {
 		return fail(options, ExitFailure, err.Error(), map[string]any{"action": action})
 	}
 	if action == "deploy" && config.WorkspaceGit.Enabled {
-		if _, err := deployment.operation(ctx, "ops/profile.sh", nil, "sync", "--json"); err != nil {
+		if _, err := deployment.operation(ctx, "profile", nil, "sync", "--json"); err != nil {
 			return fail(options, ExitFailure, "workspace Git profile synchronization failed: "+err.Error(), map[string]any{"action": action})
 		}
 		if _, err := deployment.workspaceGit(ctx, "ensure", config.WorkspaceGit); err != nil {
@@ -455,6 +465,9 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 	defer cancel()
 	deployment := newDeployment(config)
 	if component == "openlia" {
+		if config.Mode != "local" && !targetOperatorAssetsAvailable() {
+			return fail(options, ExitPrereq, "remote OpenLia updates require Linux operator artifacts; run `make build` first", nil)
+		}
 		archive, digest, err := releaseArchive(assets)
 		if err != nil {
 			return fail(options, ExitInternal, err.Error(), nil)
@@ -469,7 +482,7 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 		if options.JSON {
 			profileArgs = append(profileArgs, "--json")
 		}
-		raw, err := deployment.operation(ctx, "ops/deploy.sh", nil, profileArgs...)
+		raw, err := deployment.operation(ctx, "deploy", nil, profileArgs...)
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
@@ -479,7 +492,7 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 	// The command does not silently change a tag or digest; operators update the
 	// desired pin in their operator config before invoking this boundary.
 	if component == "locho" {
-		if _, err := deployment.operation(ctx, "ops/attachments.sh", nil, "generate", "--json"); err != nil {
+		if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
 			return fail(options, ExitFailure, "attachment Compose generation failed: "+err.Error(), nil)
 		}
 	}
@@ -546,7 +559,7 @@ func commandSkills(options Options, args []string, assets fs.FS) int {
 		}
 		ctx, cancel := remoteContext()
 		defer cancel()
-		raw, err := newDeployment(config).operation(ctx, "ops/skill-status.sh", nil, statusArgs...)
+		raw, err := newDeployment(config).operation(ctx, "skill-status", nil, statusArgs...)
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
@@ -568,10 +581,10 @@ func commandSkills(options Options, args []string, assets fs.FS) int {
 		if err := saveConfig(config); err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
-		if config.Target != "" {
+		if config.Mode == "local" || config.Target != "" {
 			ctx, cancel := remoteContext()
 			defer cancel()
-			if _, err := newDeployment(config).operation(ctx, "ops/profile.sh", nil, "sync", "--json"); err != nil {
+			if _, err := newDeployment(config).operation(ctx, "profile", nil, "sync", "--json"); err != nil {
 				return fail(options, ExitFailure, err.Error(), nil)
 			}
 		}
@@ -597,7 +610,7 @@ func commandAuth(options Options, args []string) int {
 		}
 		ctx, cancel := remoteContext()
 		defer cancel()
-		raw, err := newDeployment(config).operation(ctx, "ops/auth.sh", nil, "list", "--json")
+		raw, err := newDeployment(config).operation(ctx, "auth", nil, "list", "--json")
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
@@ -645,7 +658,7 @@ func commandAttachments(options Options, args []string) int {
 		if len(args) != 0 {
 			return fail(options, ExitUsage, "attachments list takes no positional arguments", nil)
 		}
-		raw, err := deployment.operation(ctx, "ops/attachments.sh", nil, "list", "--json")
+		raw, err := deployment.operation(ctx, "attachments", nil, "list", "--json")
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
@@ -679,7 +692,7 @@ func commandBackup(options Options, args []string) int {
 		if len(args) != 0 {
 			return fail(options, ExitUsage, "backup create takes no positional arguments", nil)
 		}
-		raw, err := deployment.operation(ctx, "ops/backup.sh", nil, "create", "--json")
+		raw, err := deployment.operation(ctx, "backup", nil, "create", "--json")
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
@@ -697,7 +710,7 @@ func commandBackup(options Options, args []string) int {
 			}
 		}
 		if archive == "" {
-			raw, err := deployment.operation(ctx, "ops/backup.sh", nil, "restore", "--json")
+			raw, err := deployment.operation(ctx, "backup", nil, "restore", "--json")
 			if err != nil {
 				return fail(options, ExitFailure, err.Error(), nil)
 			}
@@ -714,7 +727,7 @@ func commandBackup(options Options, args []string) int {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
 		defer deployment.removeFile(context.Background(), remoteArchive)
-		raw, err := deployment.operation(ctx, "ops/backup.sh", nil, "restore", "--archive", remoteArchive, "--json")
+		raw, err := deployment.operation(ctx, "backup", nil, "restore", "--archive", remoteArchive, "--json")
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
@@ -792,7 +805,7 @@ func commandWorkspace(options Options, args []string) int {
 		if err := validateConfig(config); err != nil {
 			return fail(options, ExitUsage, err.Error(), nil)
 		}
-		if _, err := deployment.operation(ctx, "ops/profile.sh", nil, "sync", "--json"); err != nil {
+		if _, err := deployment.operation(ctx, "profile", nil, "sync", "--json"); err != nil {
 			return fail(options, ExitFailure, "workspace Git skill synchronization failed: "+err.Error(), nil)
 		}
 		raw, err := deployment.workspaceGit(ctx, "setup", config.WorkspaceGit)
@@ -850,9 +863,9 @@ func rotateRemoteFile(options Options, kind, source string) int {
 	var raw []byte
 	if strings.HasPrefix(kind, "attachments:") {
 		host := strings.TrimPrefix(kind, "attachments:")
-		raw, err = deployment.operation(ctx, "ops/attachments.sh", nil, "rotate", host, "--source", remotePath, "--json")
+		raw, err = deployment.operation(ctx, "attachments", nil, "rotate", host, "--source", remotePath, "--json")
 	} else {
-		raw, err = deployment.operation(ctx, "ops/auth.sh", nil, "rotate", "--source", remotePath, "--json")
+		raw, err = deployment.operation(ctx, "auth", nil, "rotate", "--source", remotePath, "--json")
 	}
 	if err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)

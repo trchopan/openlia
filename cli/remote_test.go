@@ -14,6 +14,41 @@ func TestOperationCommandIncludesTimezone(t *testing.T) {
 	}
 }
 
+func TestOperationCommandPrefersTargetOperatorWithLegacyFallback(t *testing.T) {
+	config := defaultConfig()
+	config.Target = "operator@example.test"
+	command := (Remote{Config: config}).operationCommand("ops/deploy.sh", "deploy", "--json")
+	for _, expected := range []string{
+		"operator/linux-amd64/openlia-operator",
+		"operator/linux-arm64/openlia-operator",
+		"uname -m",
+		"ops/deploy.sh",
+	} {
+		if !strings.Contains(command, expected) {
+			t.Fatalf("operator command missing %q: %s", expected, command)
+		}
+	}
+}
+
+func TestOperatorArgumentsMapAllOperationScripts(t *testing.T) {
+	for _, script := range []string{
+		"ops/bootstrap.sh",
+		"ops/profile.sh",
+		"ops/skill-status.sh",
+		"ops/backup.sh",
+		"ops/attachments.sh",
+		"ops/auth.sh",
+		"ops/deploy.sh",
+		"ops/healthcheck.sh",
+		"ops/workspace-git.sh",
+		"ops/uninstall.sh",
+	} {
+		if _, ok := operatorArguments(script, []string{"--json"}); !ok {
+			t.Fatalf("script %s was not mapped to the Go operator", script)
+		}
+	}
+}
+
 func TestWorkspaceGitArgumentsDoNotContainSecrets(t *testing.T) {
 	config := defaultConfig()
 	config.WorkspaceGit.Enabled = true

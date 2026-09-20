@@ -429,9 +429,7 @@ def run(mode: str, args: argparse.Namespace) -> list[dict[str, Any]]:
         results.append(run_case("DEP-001", ["docker", "compose", "-f", "docker/compose.yaml", "config", "--quiet"]))
         scripts = [
             *map(str, sorted((ROOT / "docker").glob("*.sh"))),
-            *map(str, sorted((ROOT / "ops").glob("*.sh"))),
             *map(str, sorted((ROOT / "profile/cron/scripts").glob("*.sh"))),
-            str(ROOT / "tests/workspace_git_test.sh"),
         ]
         results.append(run_case("STATIC-OPS", ["bash", "-n", *scripts]))
     if mode == "live":
