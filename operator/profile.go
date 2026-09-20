@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	distributionName = "openlia-personal-os"
-	hashScope        = "skill-files-v1"
+	distributionName   = "openlia-personal-os"
+	hashScope          = "skill-files-v1"
+	protectedSkillName = "openlia-skill-migration"
 )
 
 // ProfileOperator synchronizes distribution-owned profile files while leaving
@@ -39,14 +40,17 @@ type ProfileSyncResult struct {
 }
 
 type ProfileSkillStats struct {
-	Installed       int           `json:"installed"`
-	Updated         int           `json:"updated"`
-	Unchanged       int           `json:"unchanged"`
-	Customized      int           `json:"customized"`
-	Unmanaged       int           `json:"unmanaged"`
-	CustomizedNames []string      `json:"customized_names"`
-	UnmanagedNames  []string      `json:"unmanaged_names"`
-	Results         []SkillResult `json:"results"`
+	Installed        int           `json:"installed"`
+	Updated          int           `json:"updated"`
+	Unchanged        int           `json:"unchanged"`
+	Forked           int           `json:"forked"`
+	Customized       int           `json:"customized"`
+	Unmanaged        int           `json:"unmanaged"`
+	UpdatesAvailable int           `json:"updates_available"`
+	CustomizedNames  []string      `json:"customized_names"`
+	UnmanagedNames   []string      `json:"unmanaged_names"`
+	ForkedNames      []string      `json:"forked_names"`
+	Results          []SkillResult `json:"results"`
 }
 
 type SkillStatusResult struct {
@@ -61,6 +65,7 @@ type SkillStatusResult struct {
 
 type SkillStatusStats struct {
 	Managed         int `json:"managed"`
+	Forked          int `json:"forked"`
 	Customized      int `json:"customized"`
 	Unmanaged       int `json:"unmanaged"`
 	New             int `json:"new"`
@@ -135,24 +140,36 @@ func (result SkillResult) MarshalJSON() ([]byte, error) {
 type SkillMetadata struct {
 	Schema              int    `json:"schema"`
 	Skill               string `json:"skill"`
+	Ownership           string `json:"ownership"`
 	Distribution        string `json:"distribution"`
 	DistributionVersion string `json:"distribution_version"`
 	SourceID            string `json:"source_id"`
 	ArtifactPath        string `json:"artifact_path"`
 	HashScope           string `json:"hash_scope"`
 	ContentSHA256       string `json:"content_sha256"`
+	BaseSnapshot        string `json:"base_snapshot"`
+	PatchPath           string `json:"patch_path"`
+	PatchSHA256         string `json:"patch_sha256"`
+	ForkSHA256          string `json:"fork_sha256"`
+	ForkedAt            string `json:"forked_at,omitempty"`
 	InstalledAt         string `json:"installed_at"`
 	UpdatedAt           string `json:"updated_at"`
 }
 
 type metadataInfo struct {
-	State       string
-	Hash        string
-	Version     string
-	Source      string
-	InstalledAt string
-	UpdatedAt   string
-	Reason      string
+	State        string
+	Ownership    string
+	Hash         string
+	Version      string
+	Source       string
+	BaseSnapshot string
+	PatchPath    string
+	PatchHash    string
+	ForkHash     string
+	ForkedAt     string
+	InstalledAt  string
+	UpdatedAt    string
+	Reason       string
 }
 
 var contentHashPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -168,6 +185,9 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 		return ProfileSyncResult{}, err
 	}
 	if err := EnsureDir(filepath.Join(p.Config.DataRoot, "scripts"), 0o700); err != nil {
+		return ProfileSyncResult{}, err
+	}
+	if err := EnsureDir(p.Config.SystemSkillsRoot, 0o700); err != nil {
 		return ProfileSyncResult{}, err
 	}
 	managedRoot := filepath.Join(p.Config.MetaRoot, "managed")
@@ -190,6 +210,9 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 		if err := p.syncFile(item.source, item.dest, item.marker, item.mode); err != nil {
 			return ProfileSyncResult{}, err
 		}
+	}
+	if err := p.syncProtectedSkills(); err != nil {
+		return ProfileSyncResult{}, err
 	}
 
 	result := ProfileSyncResult{OK: true, Action: "profile-sync", Workspace: "preserved", Skills: ProfileSkillStats{
@@ -240,6 +263,11 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 		}
 		result.Skills.Results = append(result.Skills.Results, skillResult)
 		p.countSyncResult(&result.Skills, skillResult)
+		if skillResult.State == "forked" && skillResult.Action == "update_available" {
+			if _, err := PrepareSkillMigration(p.Config, name, p.now()); err != nil {
+				return ProfileSyncResult{}, err
+			}
+		}
 	}
 
 	runtimeSkills := filepath.Join(p.Config.DataRoot, "skills")
@@ -248,7 +276,7 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 		return ProfileSyncResult{}, fmt.Errorf("read runtime skills: %w", err)
 	}
 	for _, entry := range entries {
-		if entry.Name() == ".openlia-disabled" || (!entry.IsDir() && entry.Type()&os.ModeSymlink == 0) {
+		if entry.Name() == ".openlia-disabled" || entry.Name() == protectedSkillName || (!entry.IsDir() && entry.Type()&os.ModeSymlink == 0) {
 			continue
 		}
 		if _, statErr := os.Stat(filepath.Join(sourceRoot, entry.Name())); statErr == nil {
@@ -265,11 +293,42 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 		result.Skills.Results = append(result.Skills.Results, skillResult)
 		p.countSyncResult(&result.Skills, skillResult)
 	}
-	detail := fmt.Sprintf("profile assets synchronized without workspace replacement; updated=%d; customized=%d; unmanaged=%d", result.Skills.Updated, result.Skills.Customized, result.Skills.Unmanaged)
+	detail := fmt.Sprintf("profile assets synchronized without workspace replacement; updated=%d; forked=%d; updates_available=%d; customized=%d; unmanaged=%d", result.Skills.Updated, result.Skills.Forked, result.Skills.UpdatesAvailable, result.Skills.Customized, result.Skills.Unmanaged)
 	if err := RecordChange(p.Config, "profile-sync", "ok", "", detail, p.now()); err != nil {
 		return ProfileSyncResult{}, err
 	}
 	return result, nil
+}
+
+func (p *ProfileOperator) syncProtectedSkills() error {
+	sourceRoot := filepath.Join(p.Config.RepositoryRoot, "profile", "system-skills")
+	entries, err := os.ReadDir(sourceRoot)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read protected skills: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if err := ValidateSafeComponent(entry.Name(), "protected skill"); err != nil {
+			return err
+		}
+		if entry.Name() != protectedSkillName {
+			return fmt.Errorf("unsupported protected skill %s", entry.Name())
+		}
+		source := filepath.Join(sourceRoot, entry.Name())
+		destination := filepath.Join(p.Config.SystemSkillsRoot, entry.Name())
+		if err := replaceDirectory(source, destination); err != nil {
+			return fmt.Errorf("synchronize protected skill %s: %w", entry.Name(), err)
+		}
+		if err := normalizeSkill(destination); err != nil {
+			return fmt.Errorf("normalize protected skill %s: %w", entry.Name(), err)
+		}
+	}
+	return nil
 }
 
 func (p *ProfileOperator) Status(selected string) (SkillStatusResult, error) {
@@ -329,7 +388,7 @@ func (p *ProfileOperator) Status(selected string) (SkillStatusResult, error) {
 		return SkillStatusResult{}, fmt.Errorf("read runtime skills: %w", err)
 	}
 	for _, entry := range runtimeEntries {
-		if entry.Name() == ".openlia-disabled" || (!entry.IsDir() && entry.Type()&os.ModeSymlink == 0) {
+		if entry.Name() == ".openlia-disabled" || entry.Name() == protectedSkillName || (!entry.IsDir() && entry.Type()&os.ModeSymlink == 0) {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(sourceRoot, entry.Name())); err == nil {
@@ -402,7 +461,14 @@ func (p *ProfileOperator) syncSkill(source, destination, metadataPath, name, ver
 		if err := CopyDir(source, destination); err != nil {
 			return SkillResult{}, err
 		}
+		if err := normalizeSkill(destination); err != nil {
+			return SkillResult{}, err
+		}
 		writtenMetadata := p.newMetadata(name, sourceHash, version, sourceID)
+		writtenMetadata, err = p.writeSkillBaseline(source, destination, name, writtenMetadata)
+		if err != nil {
+			return SkillResult{}, err
+		}
 		if err := writeSkillMetadata(metadataPath, writtenMetadata); err != nil {
 			return SkillResult{}, err
 		}
@@ -425,6 +491,16 @@ func (p *ProfileOperator) syncSkill(source, destination, metadataPath, name, ver
 		return SkillResult{}, err
 	}
 	currentHash = "sha256:" + currentHash
+	if metadata.State == "valid" && metadata.Ownership == "forked" {
+		if metadata.ForkHash == "" || currentHash != metadata.ForkHash {
+			return p.blockedSkillResultWithCurrent(name, "forked", "valid", "fork_dirty", metadata, currentHash), nil
+		}
+		action, reason := "unchanged", "fork_unchanged"
+		if sourceHash != metadata.Hash {
+			action, reason = "update_available", "distribution_changed"
+		}
+		return SkillResult{Name: name, State: "forked", Action: action, ResultState: "forked", Reason: reason, Provenance: "valid", ManagedSource: metadata.Source, AvailableSource: sourceID, InstalledVersion: metadata.Version, AvailableVersion: version, ManagedHash: metadata.Hash, CurrentHash: currentHash, AvailableHash: sourceHash, InstalledAt: metadata.InstalledAt, UpdatedAt: metadata.UpdatedAt}, nil
+	}
 	if metadata.State == "valid" && currentHash == metadata.Hash {
 		if currentHash == sourceHash {
 			if err := normalizeSkill(destination); err != nil {
@@ -437,6 +513,10 @@ func (p *ProfileOperator) syncSkill(source, destination, metadataPath, name, ver
 		}
 		newMetadata := p.newMetadata(name, sourceHash, version, sourceID)
 		newMetadata.InstalledAt = metadata.InstalledAt
+		newMetadata, err = p.writeSkillBaseline(source, destination, name, newMetadata)
+		if err != nil {
+			return SkillResult{}, err
+		}
 		if err := writeSkillMetadata(metadataPath, newMetadata); err != nil {
 			return SkillResult{}, err
 		}
@@ -507,6 +587,16 @@ func (p *ProfileOperator) statusSkill(name, source, version, sourceID string) (S
 	if !available {
 		return SkillResult{Name: name, State: "unmanaged", Action: "blocked", ResultState: "unmanaged", Reason: "distribution_removed", Provenance: metadata.State, ManagedSource: metadata.Source, InstalledVersion: metadata.Version, AvailableVersion: version, ManagedHash: metadata.Hash, CurrentHash: currentHash, AvailableHash: availableHash, InstalledAt: metadata.InstalledAt, UpdatedAt: metadata.UpdatedAt}, nil
 	}
+	if metadata.State == "valid" && metadata.Ownership == "forked" {
+		if currentHash != metadata.ForkHash {
+			return SkillResult{Name: name, State: "forked", Action: "blocked", ResultState: "forked", Reason: "fork_dirty", Provenance: "valid", ManagedSource: metadata.Source, AvailableSource: sourceID, InstalledVersion: metadata.Version, AvailableVersion: version, ManagedHash: metadata.Hash, CurrentHash: currentHash, AvailableHash: availableHash, InstalledAt: metadata.InstalledAt, UpdatedAt: metadata.UpdatedAt}, nil
+		}
+		action, reason := "unchanged", "fork_unchanged"
+		if availableHash != "" && availableHash != metadata.Hash {
+			action, reason = "update_available", "distribution_changed"
+		}
+		return SkillResult{Name: name, State: "forked", Action: action, ResultState: "forked", Reason: reason, Provenance: "valid", ManagedSource: metadata.Source, AvailableSource: sourceID, InstalledVersion: metadata.Version, AvailableVersion: version, ManagedHash: metadata.Hash, CurrentHash: currentHash, AvailableHash: availableHash, InstalledAt: metadata.InstalledAt, UpdatedAt: metadata.UpdatedAt}, nil
+	}
 	if metadata.State == "valid" && currentHash == metadata.Hash {
 		action, reason := "unchanged", "managed_artifact_unchanged"
 		if currentHash != availableHash {
@@ -522,7 +612,26 @@ func (p *ProfileOperator) statusSkill(name, source, version, sourceID string) (S
 
 func (p *ProfileOperator) newMetadata(name, hash, version, source string) SkillMetadata {
 	stamp := utcTimestamp(p.now())
-	return SkillMetadata{Schema: 1, Skill: name, Distribution: distributionName, DistributionVersion: version, SourceID: source, ArtifactPath: "profile/skills/" + name, HashScope: hashScope, ContentSHA256: hash, InstalledAt: stamp, UpdatedAt: stamp}
+	return SkillMetadata{Schema: 2, Skill: name, Ownership: "managed", Distribution: distributionName, DistributionVersion: version, SourceID: source, ArtifactPath: "profile/skills/" + name, HashScope: hashScope, ContentSHA256: hash, BaseSnapshot: "managed/skills/" + name + "/base", PatchPath: "managed/skills/" + name + "/customization.patch", InstalledAt: stamp, UpdatedAt: stamp}
+}
+
+func (p *ProfileOperator) writeSkillBaseline(source, destination, name string, metadata SkillMetadata) (SkillMetadata, error) {
+	basePath := filepath.Join(p.Config.MetaRoot, filepath.FromSlash(metadata.BaseSnapshot))
+	if err := replaceDirectory(source, basePath); err != nil {
+		return SkillMetadata{}, err
+	}
+	patch, err := GenerateSkillPatch(basePath, destination, name)
+	if err != nil {
+		return SkillMetadata{}, err
+	}
+	patchPath := filepath.Join(p.Config.MetaRoot, filepath.FromSlash(metadata.PatchPath))
+	patchHash, err := WriteSkillPatch(patchPath, patch)
+	if err != nil {
+		return SkillMetadata{}, err
+	}
+	metadata.PatchSHA256 = patchHash
+	metadata.ForkSHA256 = ""
+	return metadata, nil
 }
 
 func (p *ProfileOperator) now() time.Time {
@@ -545,7 +654,7 @@ func skillResult(name, state, action, resultState, reason, provenance string, ma
 }
 
 func metadataInfoFromMetadata(metadata SkillMetadata) metadataInfo {
-	return metadataInfo{State: "valid", Hash: metadata.ContentSHA256, Version: metadata.DistributionVersion, Source: metadata.SourceID, InstalledAt: metadata.InstalledAt, UpdatedAt: metadata.UpdatedAt}
+	return metadataInfo{State: "valid", Ownership: metadata.Ownership, Hash: metadata.ContentSHA256, Version: metadata.DistributionVersion, Source: metadata.SourceID, BaseSnapshot: metadata.BaseSnapshot, PatchPath: metadata.PatchPath, PatchHash: metadata.PatchSHA256, ForkHash: metadata.ForkSHA256, ForkedAt: metadata.ForkedAt, InstalledAt: metadata.InstalledAt, UpdatedAt: metadata.UpdatedAt}
 }
 
 func (p *ProfileOperator) countSyncResult(stats *ProfileSkillStats, result SkillResult) {
@@ -556,8 +665,21 @@ func (p *ProfileOperator) countSyncResult(stats *ProfileSkillStats, result Skill
 		stats.Updated++
 	case "unchanged":
 		stats.Unchanged++
+		if result.State == "forked" {
+			stats.Forked++
+			stats.ForkedNames = append(stats.ForkedNames, result.Name)
+		}
+	case "update_available":
+		stats.UpdatesAvailable++
+		if result.State == "forked" {
+			stats.Forked++
+			stats.ForkedNames = append(stats.ForkedNames, result.Name)
+		}
 	case "blocked":
-		if result.State == "customized" {
+		if result.State == "forked" {
+			stats.Forked++
+			stats.ForkedNames = append(stats.ForkedNames, result.Name)
+		} else if result.State == "customized" {
 			stats.Customized++
 			stats.CustomizedNames = append(stats.CustomizedNames, result.Name)
 		} else {
@@ -571,6 +693,11 @@ func (p *ProfileOperator) countStatusResult(stats *SkillStatusStats, result Skil
 	switch result.State {
 	case "managed":
 		stats.Managed++
+		if result.Action == "update_available" {
+			stats.UpdateAvailable++
+		}
+	case "forked":
+		stats.Forked++
 		if result.Action == "update_available" {
 			stats.UpdateAvailable++
 		}
@@ -616,14 +743,9 @@ func (p *ProfileOperator) distributionInfo() (string, string) {
 }
 
 func readSkillMetadata(path, expectedSkill string) (metadataInfo, error) {
-	legacyMarker := strings.TrimSuffix(path, ".json") + ".sha256"
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		reason := "metadata_missing"
-		if _, markerErr := os.Stat(legacyMarker); markerErr == nil {
-			reason = "legacy_provenance"
-		}
-		return metadataInfo{State: "unmanaged", Reason: reason}, nil
+		return metadataInfo{State: "unmanaged", Reason: "metadata_missing"}, nil
 	}
 	if err != nil {
 		return metadataInfo{}, err
@@ -632,11 +754,17 @@ func readSkillMetadata(path, expectedSkill string) (metadataInfo, error) {
 	if json.Unmarshal(data, &metadata) != nil || !validSkillMetadata(metadata, expectedSkill) {
 		return metadataInfo{State: "invalid", Reason: "invalid_provenance"}, nil
 	}
-	return metadataInfo{State: "valid", Hash: metadata.ContentSHA256, Version: metadata.DistributionVersion, Source: metadata.SourceID, InstalledAt: metadata.InstalledAt, UpdatedAt: metadata.UpdatedAt}, nil
+	return metadataInfoFromMetadata(metadata), nil
 }
 
 func validSkillMetadata(metadata SkillMetadata, expectedSkill string) bool {
-	return metadata.Schema == 1 && metadata.Skill == expectedSkill && metadata.Distribution == distributionName && metadata.DistributionVersion != "" && metadata.SourceID != "" && metadata.ArtifactPath == "profile/skills/"+expectedSkill && metadata.HashScope == hashScope && contentHashPattern.MatchString(metadata.ContentSHA256) && metadata.InstalledAt != "" && metadata.UpdatedAt != ""
+	if metadata.Schema != 2 || metadata.Skill != expectedSkill || metadata.Ownership == "" || (metadata.Ownership != "managed" && metadata.Ownership != "forked") || metadata.Distribution != distributionName || metadata.DistributionVersion == "" || metadata.SourceID == "" || metadata.ArtifactPath != "profile/skills/"+expectedSkill || metadata.HashScope != hashScope || !contentHashPattern.MatchString(metadata.ContentSHA256) || metadata.BaseSnapshot != "managed/skills/"+expectedSkill+"/base" || metadata.PatchPath != "managed/skills/"+expectedSkill+"/customization.patch" || !contentHashPattern.MatchString(metadata.PatchSHA256) || metadata.InstalledAt == "" || metadata.UpdatedAt == "" {
+		return false
+	}
+	if metadata.Ownership == "forked" {
+		return contentHashPattern.MatchString(metadata.ForkSHA256) && metadata.ForkedAt != ""
+	}
+	return metadata.ForkSHA256 == "" && metadata.ForkedAt == ""
 }
 
 func writeSkillMetadata(path string, metadata SkillMetadata) error {

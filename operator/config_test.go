@@ -17,6 +17,7 @@ func testConfig(repo, runtime string) Config {
 		ComposeProjectDir: filepath.Join(repo, "docker"),
 		GeneratedCompose:  filepath.Join(repo, "docker", "compose.generated.yaml"),
 		DataRoot:          filepath.Join(runtime, "hermes"),
+		SystemSkillsRoot:  filepath.Join(runtime, "system-skills"),
 		LochoRoot:         filepath.Join(runtime, "locho"),
 		SecretDir:         filepath.Join(runtime, "secrets"),
 		SecretFile:        filepath.Join(runtime, "secrets", "hermes.env"),

@@ -25,3 +25,9 @@ func TestUninstallRequiresExplicitTargetRootAndProject(t *testing.T) {
 		t.Fatalf("uninstall without deployment arguments exit code = %d, want %d", got, ExitUsage)
 	}
 }
+
+func TestSkillMigrationApplyRequiresInteractiveApproval(t *testing.T) {
+	if got := commandSkillMigration(Options{NonInteractive: true}, []string{"apply", "proposal-1"}); got != ExitUsage {
+		t.Fatalf("non-interactive migration apply exit code = %d, want %d", got, ExitUsage)
+	}
+}

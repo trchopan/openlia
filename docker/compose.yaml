@@ -27,6 +27,10 @@ services:
         source: "${OPENLIA_DATA_ROOT:-/srv/openlia/runtime/hermes}"
         target: /opt/data
       - type: bind
+        source: "${OPENLIA_SYSTEM_SKILLS_ROOT:-/srv/openlia/runtime/system-skills}/openlia-skill-migration"
+        target: /opt/data/skills/openlia-skill-migration
+        read_only: true
+      - type: bind
         source: "${OPENLIA_SECRET_DIR:-/srv/openlia/runtime/secrets}"
         target: /run/openlia-secrets
         read_only: true

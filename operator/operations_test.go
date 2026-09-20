@@ -43,6 +43,23 @@ func TestValidateRuntimeDoesNotRequireTargetArchiveTools(t *testing.T) {
 	}
 }
 
+func TestProtectedSkillRefreshRecreatesOnlyRunningHermes(t *testing.T) {
+	config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+	if err := os.MkdirAll(config.MetaRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteState(config, stateRunning); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordedRunner{}
+	if err := refreshProtectedSkillRuntime(context.Background(), config, NewCompose(config, runner)); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.calls) != 1 || !strings.Contains(runner.calls[0], "up -d --no-deps --force-recreate hermes") {
+		t.Fatalf("unexpected protected skill refresh calls: %v", runner.calls)
+	}
+}
+
 func TestBackupExcludesSecretsAndAttachmentCapabilities(t *testing.T) {
 	config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
 	for _, directory := range []string{config.DataRoot, config.LochoRoot, config.MetaRoot, config.BackupRoot, config.SecretDir} {

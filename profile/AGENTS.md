@@ -22,11 +22,15 @@ Personal OS workspace is a separate runtime directory at
 
 Credentials belong in Hermes' runtime secret source or environment, never in
 this profile, the workspace template, prompts, helper input, or reports.
-Skill writes are staged for review. The bundled workspace Git pull is a
-no-agent cron job with no model or approval prompt; other cron jobs remain
-opt-in and must fail closed when a human approval is unavailable. Manage cron
-jobs through Hermes' cron interface rather than editing its generated state
-files directly.
+Skill writes are staged for review. Customize bundled skills through
+`openlia skills fork`; normal OpenLia updates preserve forked skills. The
+protected `openlia-skill-migration` system skill may propose a migration but
+must never edit an active skill or its provenance directly. Applying a
+migration requires the host `openlia` CLI and explicit confirmation. The
+bundled workspace Git pull is a no-agent cron job with no model or approval
+prompt; other cron jobs remain opt-in and must fail closed when a human
+approval is unavailable. Manage cron jobs through Hermes' cron interface
+rather than editing its generated state files directly.
 
 ## Workspace Git backup
 

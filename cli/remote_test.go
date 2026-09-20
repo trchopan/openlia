@@ -35,6 +35,8 @@ func TestOperatorArgumentsMapAllOperationScripts(t *testing.T) {
 		"ops/bootstrap.sh",
 		"ops/profile.sh",
 		"ops/skill-status.sh",
+		"skill-fork",
+		"skill-migration",
 		"ops/backup.sh",
 		"ops/attachments.sh",
 		"ops/auth.sh",

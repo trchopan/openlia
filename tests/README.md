@@ -38,6 +38,10 @@ checks the bundled helper and the installed runtime skill inside Hermes, and
 invokes `openlia uninstall --local`. It uses an empty synthetic secret source
 and does not contact a provider or Telegram.
 
+The operator tests also cover the provider-free skill lifecycle: forking a
+managed skill, preserving it across an OpenLia update, staging a migration
+context, applying an approved proposal, and restoring its provenance metadata.
+
 The root must not already exist. Local mode always attempts cleanup after the
 run; if initialization or uninstall fails, the root is left in place for
 inspection rather than being removed by the Python harness. Docker images and

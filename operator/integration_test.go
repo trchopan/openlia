@@ -40,12 +40,19 @@ func TestFilesystemOperatorWorkflow(t *testing.T) {
 		t.Fatalf("workspace template was not initialized: %v", err)
 	}
 
+	metadataSentinel := filepath.Join(config.MetaRoot, "managed", "restore-sentinel")
+	if err := os.WriteFile(metadataSentinel, []byte("archived metadata\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	backup, err := CreateBackup(config, "test", now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sentinel := filepath.Join(config.DataRoot, "workspace", "inbox", "sentinel.md")
 	if err := os.WriteFile(sentinel, []byte("preserve me\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metadataSentinel, []byte("current metadata\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := RestoreBackup(config, backup.Archive, now); err != nil {
@@ -56,5 +63,12 @@ func TestFilesystemOperatorWorkflow(t *testing.T) {
 	}
 	if state, err := ReadState(config); err != nil || state != StateStopped {
 		t.Fatalf("restored state = %q, %v", state, err)
+	}
+	metadata, err := os.ReadFile(metadataSentinel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(metadata) != "archived metadata\n" {
+		t.Fatalf("metadata was not restored: %q", metadata)
 	}
 }

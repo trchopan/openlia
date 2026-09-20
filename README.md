@@ -511,28 +511,47 @@ The Hermes and Locho commands reconcile only their pinned runtime boundaries;
 they do not silently replace desired digests.
 
 Profile synchronization tracks distribution-owned skill provenance in
-`meta/managed/skills/<skill>.json`, including the distribution version, source
-identifier, content hash, and timestamps. It updates an unchanged managed
-skill, preserves customized skills, and reports untracked existing skills as
-`unmanaged` rather than overwriting them. A matching content hash without valid
-provenance is still `unmanaged`. Use the JSON result from
-`openlia update openlia --json` to inspect these migration statuses.
-These provenance records are also the contract for future read-only status,
-diff, and explicit migration commands; normal synchronization does not create
-or repair missing provenance.
+`meta/managed/skills/<skill>.json`, including the upstream base version, source
+identifier, content hash, base snapshot, customization patch, and timestamps.
+It updates an unchanged managed skill and preserves forked skills. Fork a skill
+before customizing it:
+
+```sh
+openlia skills fork daily-briefing
+```
+
+When a fork has an upstream update, `openlia update openlia` leaves the active
+fork untouched and stages a migration context for Hermes. The protected
+`openlia-skill-migration` system skill can propose a migrated fork using the old
+base, the customization patch, and the new upstream base. The active skill is
+not changed until the proposal is reviewed and applied through the host CLI:
+
+```sh
+openlia skills migrate prepare daily-briefing
+openlia skills migrate show PROPOSAL_ID
+openlia skills migrate apply PROPOSAL_ID
+```
+
+Migration patches are internal tooling artifacts. Users review the proposed
+behavior and conflict summary rather than editing patch files directly. The
+system resolver skill cannot be forked or edited by Hermes and is updated only
+by OpenLia profile synchronization.
 
 Skills are workflow-oriented rather than domain-specific:
 
 ```text
-openlia skills list --json
-openlia skills show daily-briefing
-openlia skills test deep-research
+  openlia skills list --json
+  openlia skills show daily-briefing
+  openlia skills status daily-briefing
+  openlia skills test deep-research
 ```
 
 ## Security Boundaries
 
 - Hermes runs inside the derived image as the upstream unprivileged runtime user.
 - `/opt/data` is the only mutable Hermes volume.
+- The OpenLia migration resolver is distribution-owned and mounted read-only;
+  it can propose migrations but cannot edit active skills.
 - The default Compose stack has no public ports and no Docker socket mount.
 - Locho listeners use the private Compose network and are never published.
 - Workspace initialization is copy-once; later deployments preserve user files.
