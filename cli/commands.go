@@ -1010,7 +1010,16 @@ func testSkill(options Options, assets fs.FS, name string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	output, err := runLocalCommand(ctx, "python3", scriptName, "--self-test")
+	pythonBin := "python3"
+	if venv := os.Getenv("VIRTUAL_ENV"); venv != "" {
+		candidate := filepath.Join(venv, "bin", "python3")
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			pythonBin = candidate
+		}
+	} else if _, statErr := os.Stat(".venv/bin/python3"); statErr == nil {
+		pythonBin = ".venv/bin/python3"
+	}
+	output, err := runLocalCommand(ctx, pythonBin, scriptName, "--self-test")
 	if err != nil {
 		return fail(options, ExitFailure, "skill test failed: "+err.Error(), map[string]any{"skill": name})
 	}

@@ -1,7 +1,9 @@
 BUILD_DIR ?= dist
 GO ?= go
+VENV ?= .venv
+PYTHON ?= $(shell if [ -f "$(VENV)/bin/python3" ]; then echo "$(VENV)/bin/python3"; else echo "python3"; fi)
 
-.PHONY: help build build-host build-cli build-operator build-operator-linux-amd64 build-operator-linux-arm64 test lint compose-config skills-test smoke smoke-local smoke-local-live
+.PHONY: help build build-host build-cli build-operator build-operator-linux-amd64 build-operator-linux-arm64 test lint compose-config venv skills-test skills-verify clean-logs smoke smoke-local smoke-local-live
 
 help:
 	@printf '%s\n' \
@@ -12,6 +14,12 @@ help:
 		'build-operator-linux-amd64  Build the Linux amd64 operator artifact' \
 		'build-operator-linux-arm64  Build the Linux arm64 operator artifact' \
 		'test               Run Go, Python, skill, and operator tests' \
+		'venv               Create local virtualenv and install dependencies from requirements-dev.txt' \
+		'skills-test        Run offline skill self-tests' \
+		'skills-verify      Run live browser verifications against Playwright MCP' \
+		'clean-logs         Purge local .playwright-mcp and verification test logs' \
+		'deploy-dev         Verify skills and deploy to local dev stack' \
+		'deploy-prod        Verify skills and promote to production stack' \
 		'lint               Run formatting and shell checks' \
 		'compose-config     Validate the base Compose file' \
 		'smoke              Run provider-free static smoke checks' \
@@ -34,11 +42,21 @@ build-operator-linux-arm64:
 	mkdir -p "$(BUILD_DIR)"
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -o "$(BUILD_DIR)/openlia-operator-linux-arm64" ./cmd/operator
 
+venv:
+	@if command -v uv >/dev/null 2>&1; then \
+		echo "Creating virtual environment using uv in $(VENV)..."; \
+		uv venv $(VENV) && uv pip install --python $(VENV)/bin/python -r requirements-dev.txt; \
+	else \
+		echo "Creating virtual environment using python3 -m venv in $(VENV)..."; \
+		python3 -m venv $(VENV) && $(VENV)/bin/pip install -r requirements-dev.txt; \
+	fi
+	@echo "Virtual environment ready in $(VENV)."
+
 test:
 	go test ./...
 	go vet ./...
-	python3 -m py_compile tests/smoke.py
-	for script in profile/skills/*/scripts/*.py; do python3 "$$script" --self-test; done
+	$(PYTHON) -m py_compile tests/smoke.py
+	for script in profile/skills/*/scripts/*.py; do $(PYTHON) "$$script" --self-test; done
 
 lint:
 	gofmt -d main.go cli operator cmd
@@ -49,7 +67,19 @@ compose-config:
 	docker compose -f docker/compose.yaml config --quiet
 
 skills-test:
-	for script in profile/skills/*/scripts/*.py; do python3 "$$script" --self-test; done
+	$(PYTHON) tests/verify_skills.py --offline
+
+skills-verify:
+	$(PYTHON) tests/verify_skills.py --live
+
+clean-logs:
+	rm -rf .playwright-mcp/ /tmp/openlia_verify/
+
+deploy-dev: skills-test
+	OPENLIA_CONFIG=$$HOME/.config/openlia/dev/openlia_dev.toml ./openlia deploy
+
+deploy-prod: skills-test
+	OPENLIA_CONFIG=$$HOME/.config/openlia/config.toml ./openlia update openlia
 
 smoke:
 	python3 tests/smoke.py --mode cli

@@ -317,7 +317,7 @@ underlying personal model consistent.
 
 The first implementation is a thin operations layer, not a new agent runtime.
 It provides a Go operator CLI, pinned Docker/Compose assets, a file-based
-Personal OS template, eight workflow skills, credential rotation, Locho
+Personal OS template, ten workflow skills, credential rotation, Locho
 attachments, and backup/recovery operations for local or remote deployments.
 
 The initial implementation will establish:

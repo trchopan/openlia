@@ -7,8 +7,7 @@ impact.
 ## Development Requirements
 
 - Go 1.26 or newer
-- Python 3
-- Python dependencies from `requirements-dev.txt`
+- Python 3.9 or newer (with virtual environment setup via `make venv`)
 - Docker Compose v2 for Compose validation
 - Bash and ShellCheck for the small container and cron adapters
 
@@ -20,8 +19,10 @@ and private deployment identifiers must remain outside the repository.
 Run the relevant checks from the repository root:
 
 ```sh
-python3 -m pip install -r requirements-dev.txt
-make test
+make venv            # Sets up .venv/ and installs all dependencies (uses uv if present)
+make test            # Runs Go, Python, and skill self-tests
+make skills-test     # Offline skill self-test suite across all 13 skills
+make skills-verify   # Live browser verifications (with Playwright MCP running locally)
 make lint
 make compose-config
 python3 tests/smoke.py --mode cli
@@ -31,6 +32,8 @@ make smoke-local-live \
   OPENLIA_SMOKE_ATTACHMENTS_FILE="$HOME/.config/openlia/dev/locho-attachments.toml" \
   OPENLIA_SMOKE_LOCHO_HOST=genai
 ```
+
+For developing and verifying skills locally without deploying them to a running agent, see [`docs/SKILL_DEVELOPMENT.md`](docs/SKILL_DEVELOPMENT.md).
 
 The CLI smoke mode uses synthetic data and must not require provider
 credentials, Telegram, Locho, SSH, or a remote target. The local deployment

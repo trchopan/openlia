@@ -188,7 +188,7 @@ func composeServices(ctx context.Context, compose Compose) []string {
 	}
 	services := []string{}
 	for _, service := range strings.Split(strings.TrimSpace(string(result.Stdout)), "\n") {
-		if strings.HasPrefix(service, "locho-") {
+		if strings.HasPrefix(service, "locho-") || service == "openlia-tools" {
 			services = append(services, service)
 		}
 	}
@@ -280,7 +280,7 @@ func Healthcheck(ctx context.Context, config Config, compose Compose, allowStopp
 			services = append(services, service)
 			if compose.ServiceRunning(ctx, service) {
 				add("service:"+service, true, "running")
-				if strings.HasPrefix(service, "locho-") {
+				if strings.HasPrefix(service, "locho-") || service == "openlia-tools" {
 					published, portErr := compose.Run(ctx, "port", service)
 					if portErr != nil || strings.TrimSpace(string(published.Stdout)) == "" {
 						add("listener:"+service, true, "private_only")
@@ -317,6 +317,11 @@ func Healthcheck(ctx context.Context, config Config, compose Compose, allowStopp
 				add("provider_request", false, "failed_or_unconfigured")
 			} else {
 				add("provider_request", true, "completed")
+			}
+			if baseURL := parseBaseURL(config.SecretFile); baseURL != "" {
+				if strings.Contains(baseURL, "://localhost") || strings.Contains(baseURL, "://127.0.0.1") {
+					add("openai_endpoint", false, "container_cannot_reach_host_localhost_use_locho_service")
+				}
 			}
 		} else {
 			add("hermes_doctor", true, "not_requested")

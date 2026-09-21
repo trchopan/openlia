@@ -168,6 +168,23 @@ func providerInventory(path string) (openAISlots int, copilot, baseURL bool, err
 	return openAISlots, copilot, baseURL, nil
 }
 
+func parseBaseURL(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if key, val, ok := strings.Cut(line, "="); ok && strings.TrimSpace(key) == "OPENAI_BASE_URL" {
+			return strings.TrimSpace(val)
+		}
+	}
+	return ""
+}
+
 func isOpenAIKeySlot(key string) bool {
 	if key == "OPENAI_API_KEY" {
 		return true

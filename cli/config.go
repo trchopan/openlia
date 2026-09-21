@@ -31,6 +31,9 @@ var defaultSkills = []string{
 	"personal-finance",
 	"workspace-git",
 	"claim-review",
+	"browser-pilot",
+	"chatgpt-chat",
+	"gemini-chat",
 }
 
 type Config struct {
