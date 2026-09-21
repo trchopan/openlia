@@ -39,3 +39,12 @@ __pycache__/
 
 # Local smoke evidence
 smoke-report*.json
+
+# Playwright MCP runtime logs and test artifacts
+.playwright-mcp/
+openlia_verify/
+
+# Python virtual environments
+.venv/
+venv/
+ENV/

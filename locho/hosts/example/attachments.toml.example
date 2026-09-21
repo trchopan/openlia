@@ -7,3 +7,16 @@ listen_host = "0.0.0.0"
 [[services]]
 capability = "<service-name>:http:<capability>"
 listen_port = 18765
+
+# Inside the private Compose network, Hermes and other containers reach these
+# services using http://locho-<host>:<listen_port>.
+# For example, if host is "genai" and listen_port is 8088:
+#   OPENAI_BASE_URL="http://locho-genai:8088/v1"
+# And for Playwright MCP on port 8931:
+#   OPENLIA_BROWSER_MCP_URL="http://locho-genai:8931"
+
+# Remote Playwright MCP browser attachment (e.g. Vivaldi / Chrome via Locho):
+# [[services]]
+# capability = "playwright:tcp:<capability>"
+# listen_port = 8931
+

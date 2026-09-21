@@ -177,7 +177,7 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(attachment), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(attachment, []byte("host_id = \"laptop\"\nlisten_host = \"127.0.0.1\"\n[[services]]\n"), 0o600); err != nil {
+	if err := os.WriteFile(attachment, []byte("host_id = \"laptop\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"genai:http:capability\"\nlisten_port = 8088\n[[services]]\ncapability = \"playwright:tcp:capability\"\nlisten_port = 8931\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := GenerateAttachments(config); err != nil {
@@ -188,7 +188,7 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, expected := range []string{"locho-laptop:", "build:", "docker/locho.Dockerfile", "cap_drop: [ALL]", "no-new-privileges:true"} {
+	for _, expected := range []string{"locho-laptop:", "openlia-tools:", "build:", "docker/locho.Dockerfile", "docker/tools.Dockerfile", "cap_drop: [ALL]", "no-new-privileges:true", "OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8931\"", "OPENLIA_TOOLS_URL: \"http://openlia-tools:8787\""} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("generated Compose missing %q:\n%s", expected, text)
 		}
@@ -281,4 +281,86 @@ func archiveNames(t *testing.T, path string) map[string]bool {
 	_ = decompressor.Close()
 	_ = file.Close()
 	return result
+}
+
+func TestPruneBackups(t *testing.T) {
+	config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+	if err := os.MkdirAll(config.BackupRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	baseTime := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
+	// Create 7 backup archives with .json pairs spaced 1 minute apart
+	for i := 1; i <= 7; i++ {
+		archivePath := filepath.Join(config.BackupRoot, fmt.Sprintf("openlia-20260921T10000%dZ-%d.tar.gz", i, i))
+		if err := os.WriteFile(archivePath, []byte(fmt.Sprintf("archive-%d", i)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		jsonPath := archivePath + ".json"
+		if err := os.WriteFile(jsonPath, []byte(fmt.Sprintf("meta-%d", i)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		modTime := baseTime.Add(time.Duration(i) * time.Minute)
+		if err := os.Chtimes(archivePath, modTime, modTime); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(jsonPath, modTime, modTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Create 4 compose-generated files
+	for i := 1; i <= 4; i++ {
+		composePath := filepath.Join(config.BackupRoot, fmt.Sprintf("compose-generated-20260921T10000%dZ-%d", i, i))
+		if err := os.WriteFile(composePath, []byte(fmt.Sprintf("compose-%d", i)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		modTime := baseTime.Add(time.Duration(i) * time.Minute)
+		if err := os.Chtimes(composePath, modTime, modTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Prune keeping 3
+	removed, err := PruneBackups(config, 3)
+	if err != nil {
+		t.Fatalf("PruneBackups failed: %v", err)
+	}
+
+	// 4 archives (1, 2, 3, 4) and 1 compose file (1) should be removed = 5 total
+	if len(removed) != 5 {
+		t.Fatalf("expected 5 removed files, got %d: %v", len(removed), removed)
+	}
+
+	// Verify archives 1..4 are gone, 5..7 remain
+	for i := 1; i <= 4; i++ {
+		archivePath := filepath.Join(config.BackupRoot, fmt.Sprintf("openlia-20260921T10000%dZ-%d.tar.gz", i, i))
+		if _, err := os.Stat(archivePath); !os.IsNotExist(err) {
+			t.Fatalf("expected archive %d to be deleted, but it exists", i)
+		}
+		if _, err := os.Stat(archivePath + ".json"); !os.IsNotExist(err) {
+			t.Fatalf("expected metadata %d to be deleted, but it exists", i)
+		}
+	}
+	for i := 5; i <= 7; i++ {
+		archivePath := filepath.Join(config.BackupRoot, fmt.Sprintf("openlia-20260921T10000%dZ-%d.tar.gz", i, i))
+		if _, err := os.Stat(archivePath); err != nil {
+			t.Fatalf("expected archive %d to exist, but stat error: %v", i, err)
+		}
+		if _, err := os.Stat(archivePath + ".json"); err != nil {
+			t.Fatalf("expected metadata %d to exist, but stat error: %v", i, err)
+		}
+	}
+
+	// Verify compose-generated-1 is gone, 2..4 remain
+	compose1 := filepath.Join(config.BackupRoot, "compose-generated-20260921T100001Z-1")
+	if _, err := os.Stat(compose1); !os.IsNotExist(err) {
+		t.Fatal("expected compose-generated-1 to be deleted")
+	}
+	for i := 2; i <= 4; i++ {
+		composePath := filepath.Join(config.BackupRoot, fmt.Sprintf("compose-generated-20260921T10000%dZ-%d", i, i))
+		if _, err := os.Stat(composePath); err != nil {
+			t.Fatalf("expected compose file %d to exist: %v", i, err)
+		}
+	}
 }

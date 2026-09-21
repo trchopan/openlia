@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,6 +17,7 @@ type AttachmentHost struct {
 	Configured   bool   `json:"configured"`
 	ServiceCount int    `json:"service_count"`
 	Capabilities string `json:"capabilities"`
+	BrowserPort  int    `json:"-"`
 }
 
 type AttachmentListResult struct {
@@ -47,11 +49,11 @@ func ListAttachments(config Config) (AttachmentListResult, error) {
 		if info, statErr := os.Stat(path); statErr != nil || !info.Mode().IsRegular() {
 			continue
 		}
-		count, err := serviceCount(path)
+		count, browserPort, err := serviceInventory(path)
 		if err != nil {
 			return AttachmentListResult{}, err
 		}
-		result.Hosts = append(result.Hosts, AttachmentHost{Host: entry.Name(), Configured: true, ServiceCount: count, Capabilities: "redacted"})
+		result.Hosts = append(result.Hosts, AttachmentHost{Host: entry.Name(), Configured: true, ServiceCount: count, Capabilities: "redacted", BrowserPort: browserPort})
 	}
 	sort.Slice(result.Hosts, func(i, j int) bool { return result.Hosts[i].Host < result.Hosts[j].Host })
 	return result, nil
@@ -129,21 +131,54 @@ func generateAttachmentsFile(config Config) error {
 	if err != nil {
 		return err
 	}
+	browserURL := ""
+	for _, host := range hosts.Hosts {
+		if host.BrowserPort == 0 {
+			continue
+		}
+		if browserURL != "" {
+			return fmt.Errorf("multiple Playwright attachment endpoints are configured")
+		}
+		browserURL = fmt.Sprintf("http://locho-%s:%d", host.Host, host.BrowserPort)
+	}
 	var builder strings.Builder
 	if len(hosts.Hosts) == 0 && !config.APIEnabled && config.ExternalNetwork == "" {
 		builder.WriteString("services: {}\n")
 	} else {
 		builder.WriteString("services:\n")
-		if config.APIEnabled || config.ExternalNetwork != "" {
+		if config.APIEnabled || config.ExternalNetwork != "" || browserURL != "" {
 			builder.WriteString("  hermes:\n")
 			if config.APIEnabled {
 				fmt.Fprintf(&builder, "    ports:\n      - %q\n", config.APIHost+":8642:8642")
-				builder.WriteString("    environment:\n      API_SERVER_ENABLED: \"true\"\n      API_SERVER_HOST: \"0.0.0.0\"\n")
+			}
+			if config.APIEnabled || browserURL != "" {
+				builder.WriteString("    environment:\n")
+				if config.APIEnabled {
+					builder.WriteString("      API_SERVER_ENABLED: \"true\"\n      API_SERVER_HOST: \"0.0.0.0\"\n")
+				}
+				if browserURL != "" {
+					fmt.Fprintf(&builder, "      OPENLIA_BROWSER_MCP_URL: %q\n", browserURL)
+					builder.WriteString("      OPENLIA_TOOLS_URL: \"http://openlia-tools:8787\"\n")
+				}
 			}
 			if config.ExternalNetwork != "" {
 				builder.WriteString("    networks:\n      - openlia-private\n      - openlia-external\n")
 			}
 		}
+	}
+	if browserURL != "" {
+		dataRoot, _ := json.Marshal(config.DataRoot)
+		fmt.Fprintf(&builder, "  openlia-tools:\n    image: \"${OPENLIA_TOOLS_IMAGE:-openlia-tools:v0.1.0}\"\n")
+		builder.WriteString("    build:\n      context: ..\n      dockerfile: docker/tools.Dockerfile\n")
+		builder.WriteString("    command: [\"python3\", \"/opt/openlia/tools/openlia_tools.py\"]\n    restart: unless-stopped\n    read_only: true\n    tmpfs:\n      - /tmp\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n")
+		builder.WriteString("    environment:\n      HERMES_HOME: /opt/data\n      OPENLIA_BROWSER_MCP_URL: ")
+		quotedBrowserURL, _ := json.Marshal(browserURL)
+		builder.Write(quotedBrowserURL)
+		builder.WriteString("\n      OPENLIA_TOOLS_DATA_ROOT: /opt/data\n      PYTHONUNBUFFERED: \"1\"\n    volumes:\n      - type: bind\n        source: ")
+		builder.Write(dataRoot)
+		builder.WriteString("\n        target: /opt/data\n    networks:\n      - openlia-private\n")
+		builder.WriteString("    deploy:\n      resources:\n        limits:\n          cpus: \"1.0\"\n          memory: 1G\n")
+		builder.WriteString("    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n")
 	}
 	for _, host := range hosts.Hosts {
 		configPath := filepath.Join(config.LochoRoot, host.Host, "attachments.toml")
@@ -153,6 +188,8 @@ func generateAttachmentsFile(config Config) error {
 		builder.WriteString("    build:\n      context: ..\n      dockerfile: docker/locho.Dockerfile\n      args:\n        LOCHO_BASE_IMAGE: \"${LOCHO_BASE_IMAGE:-debian}\"\n        LOCHO_BASE_TAG: \"${LOCHO_BASE_TAG:-13.4-slim}\"\n        LOCHO_BASE_DIGEST: \"${LOCHO_BASE_DIGEST:-sha256:109e2c65005bf160609e4ba6acf7783752f8502ad218e298253428690b9eaa4b}\"\n        LOCHO_VERSION: \"1.2.0-beta.1\"\n        LOCHO_X86_64_SHA256: \"9d257c856f0a9c8220285db45c28c6227dfa76017d160f74490cfef7bd784ad4\"\n        LOCHO_AARCH64_SHA256: \"1c0e67b130734467783e5e48a69d3003d218a4da624ba5841f3c5e6840f19c18\"\n")
 		builder.WriteString("    command: [\"attach\", \"--config\", \"/etc/locho/attachments.toml\"]\n    restart: unless-stopped\n    read_only: true\n    tmpfs:\n      - /tmp\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    volumes:\n")
 		fmt.Fprintf(&builder, "      - type: bind\n        source: %s\n        target: /etc/locho/attachments.toml\n        read_only: true\n    networks:\n      - openlia-private\n", quoted)
+		builder.WriteString("    deploy:\n      resources:\n        limits:\n          cpus: \"0.5\"\n          memory: 512M\n")
+		builder.WriteString("    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n")
 	}
 	if config.ExternalNetwork != "" {
 		fmt.Fprintf(&builder, "networks:\n  openlia-external:\n    name: %q\n    external: true\n", config.ExternalNetwork)
@@ -335,18 +372,54 @@ func backupFile(config Config, source, label string, mode os.FileMode, now time.
 	return destination, nil
 }
 
-func serviceCount(path string) (int, error) {
+func serviceInventory(path string) (int, int, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	count := 0
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.TrimSuffix(line, "\r") == "[[services]]" {
-			count++
+	browserPort := 0
+	inService := false
+	capability := ""
+	listenPort := 0
+	flush := func() {
+		if !inService {
+			return
+		}
+		count++
+		if browserPort == 0 && strings.HasPrefix(capability, "playwright:") && listenPort > 0 {
+			browserPort = listenPort
 		}
 	}
-	return count, nil
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if line == "[[services]]" {
+			flush()
+			inService = true
+			capability = ""
+			listenPort = 0
+			continue
+		}
+		if !inService {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "capability":
+			if parsed, parseErr := strconv.Unquote(strings.TrimSpace(value)); parseErr == nil {
+				capability = parsed
+			}
+		case "listen_port":
+			if parsed, parseErr := strconv.Atoi(strings.TrimSpace(value)); parseErr == nil {
+				listenPort = parsed
+			}
+		}
+	}
+	flush()
+	return count, browserPort, nil
 }
 
 func validateAttachmentFile(path string) error {

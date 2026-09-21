@@ -57,6 +57,11 @@ services:
         limits:
           cpus: "2.0"
           memory: 4G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
 
 networks:
   openlia-private:

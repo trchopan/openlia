@@ -11,7 +11,7 @@ import (
 // The release payload is embedded so the operator can bootstrap a target
 // without cloning this repository on the operator or remote machine.
 //
-//go:embed all:docker all:profile all:workspace-template all:locho all:release
+//go:embed all:docker all:profile all:workspace-template all:locho all:release all:tools
 var releaseAssets embed.FS
 
 func main() {

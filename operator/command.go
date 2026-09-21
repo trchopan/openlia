@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -136,8 +137,34 @@ func runBackup(ctx context.Context, config Config, args []string, _ io.Reader, o
 		}
 		return emit(output, result, jsonOutput, "openlia backup: created "+result.Archive)
 	}
+	if action == "prune" {
+		keep := config.BackupRetention
+		if keep <= 0 {
+			keep = 5
+		}
+		remaining, value, err := consumeOptionalValue(args, "--keep")
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, err)
+		}
+		if value != "" {
+			k, err := strconv.Atoi(value)
+			if err != nil || k <= 0 {
+				return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("--keep must be a positive integer"))
+			}
+			keep = k
+		}
+		if len(remaining) != 0 {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup prune accepts --keep COUNT"))
+		}
+		removed, err := PruneBackups(config, keep)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		result := map[string]any{"ok": true, "action": "prune", "kept": keep, "removed": removed}
+		return emit(output, result, jsonOutput, fmt.Sprintf("openlia backup: pruned %d archives, keeping %d", len(removed), keep))
+	}
 	if action != "restore" {
-		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup requires create or restore"))
+		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup requires create, restore, or prune"))
 	}
 	archive, remaining, err := stringFlag(args, "--archive")
 	if err != nil || len(remaining) != 0 {

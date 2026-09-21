@@ -4,6 +4,13 @@
 model:
   provider: ${OPENLIA_PROVIDER}
   default: ${OPENLIA_MODEL}
+  # High Availability & Fallback Configuration:
+  # 1. Multiple key slots (OPENAI_API_KEY, OPENAI_API_KEY_2, etc.) in the secret file
+  #    are rotated automatically on 429/quota exhaustion.
+  # 2. To configure an alternate model fallback if primary provider is unreachable:
+  # fallback_provider: ${OPENLIA_FALLBACK_PROVIDER:-}
+  # fallback_model: ${OPENLIA_FALLBACK_MODEL:-}
+
 
 terminal:
   backend: local
@@ -13,6 +20,9 @@ terminal:
   docker_mount_cwd_to_workspace: false
   env_passthrough: []
   credential_files: []
+
+browser:
+  backend: "off"
 
 approvals:
   mode: manual
@@ -58,3 +68,11 @@ secrets:
     command: /usr/local/bin/openlia-secret-source
     helper_timeout_seconds: 3
     override_existing: true
+
+# Remote MCP attachments reachable over the internal openlia-private network:
+# mcp_servers:
+#   browser:
+#     url: "http://locho-<host>:8931/mcp"
+#     connect_timeout: 30
+#     timeout: 120
+

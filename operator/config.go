@@ -25,6 +25,7 @@ type Config struct {
 	SecretDir         string
 	SecretFile        string
 	BackupRoot        string
+	BackupRetention   int
 	MetaRoot          string
 	StateFile         string
 	LocalMode         bool
@@ -89,6 +90,7 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		SecretDir:         getOr(values, "OPENLIA_SECRET_DIR", filepath.Join(runtimeRoot, "secrets")),
 		SecretFile:        getOr(values, "OPENLIA_SECRET_FILE", filepath.Join(runtimeRoot, "secrets", "hermes.env")),
 		BackupRoot:        getOr(values, "OPENLIA_BACKUP_ROOT", filepath.Join(runtimeRoot, "backups")),
+		BackupRetention:   5,
 		MetaRoot:          getOr(values, "OPENLIA_META_ROOT", filepath.Join(runtimeRoot, "meta")),
 		StateFile:         getOr(values, "OPENLIA_STATE_FILE", filepath.Join(runtimeRoot, "meta", "stack-state")),
 		Provider:          getOr(values, "OPENLIA_PROVIDER", "openai-api"),
@@ -97,6 +99,14 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		LochoImage:        getOr(values, "OPENLIA_LOCHO_IMAGE", "openlia-locho:v1.2.0-beta.1"),
 		ExternalNetwork:   values["OPENLIA_EXTERNAL_NETWORK"],
 		APIHost:           getOr(values, "OPENLIA_API_HOST", "127.0.0.1"),
+	}
+
+	if rawRetention := values["OPENLIA_BACKUP_RETENTION"]; rawRetention != "" {
+		parsed, err := strconv.Atoi(rawRetention)
+		if err != nil || parsed <= 0 {
+			return Config{}, fmt.Errorf("OPENLIA_BACKUP_RETENTION must be a positive integer")
+		}
+		config.BackupRetention = parsed
 	}
 
 	if config.LocalMode, err = boolValue(values, "OPENLIA_LOCAL_MODE", false); err != nil {

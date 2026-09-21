@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -179,7 +180,105 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 	if err := AtomicWriteFile(destination+".json", append(metadataData, '\n'), 0o600); err != nil {
 		return BackupResult{}, err
 	}
+	retention := config.BackupRetention
+	if retention <= 0 {
+		retention = 5
+	}
+	_, _ = PruneBackups(config, retention)
 	return BackupResult{OK: true, Archive: destination, Secrets: "excluded"}, nil
+}
+
+// PruneBackups retains the most recent keepCount backup archives and auxiliary
+// backup files in config.BackupRoot, removing older ones.
+func PruneBackups(config Config, keepCount int) ([]string, error) {
+	if keepCount <= 0 {
+		keepCount = 5
+	}
+	if err := config.ValidatePaths(); err != nil {
+		return nil, err
+	}
+	if _, err := os.Lstat(config.BackupRoot); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+
+	entries, err := os.ReadDir(config.BackupRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	type fileItem struct {
+		name    string
+		path    string
+		modTime time.Time
+	}
+
+	var archives []fileItem
+	var composeFiles []fileItem
+	var preRestores []fileItem
+
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		name := entry.Name()
+		fullPath := filepath.Join(config.BackupRoot, name)
+
+		if entry.Type().IsRegular() && strings.HasPrefix(name, "openlia-") && strings.HasSuffix(name, ".tar.gz") {
+			archives = append(archives, fileItem{name: name, path: fullPath, modTime: info.ModTime()})
+		} else if entry.Type().IsRegular() && strings.HasPrefix(name, "compose-generated-") {
+			composeFiles = append(composeFiles, fileItem{name: name, path: fullPath, modTime: info.ModTime()})
+		} else if strings.HasPrefix(name, "pre-restore-") {
+			preRestores = append(preRestores, fileItem{name: name, path: fullPath, modTime: info.ModTime()})
+		}
+	}
+
+	sortByNewest := func(items []fileItem) {
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].modTime.Equal(items[j].modTime) {
+				return items[i].name > items[j].name
+			}
+			return items[i].modTime.After(items[j].modTime)
+		})
+	}
+
+	sortByNewest(archives)
+	sortByNewest(composeFiles)
+	sortByNewest(preRestores)
+
+	var removed []string
+	if len(archives) > keepCount {
+		for _, item := range archives[keepCount:] {
+			if err := os.Remove(item.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return removed, err
+			}
+			removed = append(removed, item.name)
+			jsonPath := item.path + ".json"
+			if _, statErr := os.Lstat(jsonPath); statErr == nil {
+				_ = os.Remove(jsonPath)
+			}
+		}
+	}
+
+	if len(composeFiles) > keepCount {
+		for _, item := range composeFiles[keepCount:] {
+			if err := os.Remove(item.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return removed, err
+			}
+			removed = append(removed, item.name)
+		}
+	}
+
+	if len(preRestores) > keepCount {
+		for _, item := range preRestores[keepCount:] {
+			if err := os.RemoveAll(item.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return removed, err
+			}
+			removed = append(removed, item.name)
+		}
+	}
+
+	return removed, nil
 }
 
 func RestoreBackup(config Config, archivePath string, now time.Time, composers ...Compose) (BackupResult, error) {

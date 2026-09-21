@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -71,5 +72,55 @@ func TestReleaseCollectsTargetOperatorAssets(t *testing.T) {
 		if got[name] != "openlia-operator-linux-"+architecture {
 			t.Fatalf("release asset %s = %q", name, got[name])
 		}
+	}
+}
+
+func TestLocalComposeLogsUsesDockerCompose(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "openlia")
+	config := defaultConfig()
+	config.Mode = "local"
+	config.Target = ""
+	config.InstallRoot = root
+	dockerDirectory := filepath.Join(root, "releases", config.Version, "docker")
+	if err := os.MkdirAll(dockerDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Join(dockerDirectory, "compose.yaml")
+	generated := filepath.Join(dockerDirectory, "compose.generated.yaml")
+	for _, path := range []string{base, generated} {
+		if err := os.WriteFile(path, []byte("services: {}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	binDirectory := t.TempDir()
+	docker := filepath.Join(binDirectory, "docker")
+	if err := os.WriteFile(docker, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDirectory+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	output, err := (Local{Config: config}).composeLogs(context.Background(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"compose",
+		"--project-name",
+		config.Project,
+		"--project-directory",
+		dockerDirectory,
+		"-f",
+		base,
+		"-f",
+		generated,
+		"logs",
+		"--tail",
+		"200",
+		"--follow",
+	}
+	got := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("docker compose arguments = %v, want %v", got, want)
 	}
 }

@@ -424,6 +424,9 @@ def run(mode: str, args: argparse.Namespace) -> list[dict[str, Any]]:
             "personal-finance",
             "workspace-git",
             "claim-review",
+            "browser-pilot",
+            "chatgpt-chat",
+            "gemini-chat",
         ):
             results.append(run_case(f"SKILL-{skill}", ["go", "run", ".", "skills", "test", skill]))
         results.append(run_case("DEP-001", ["docker", "compose", "-f", "docker/compose.yaml", "config", "--quiet"]))

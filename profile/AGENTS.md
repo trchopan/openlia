@@ -23,6 +23,7 @@ Personal OS workspace is a separate runtime directory at
 
 Credentials belong in Hermes' runtime secret source or environment, never in
 this profile, the workspace template, prompts, helper input, or reports.
+Bundled skills are distribution-owned and read-only; never attempt autonomous background curation or patching (`skill_manage`) on them.
 Skill writes are staged for review. Customize bundled skills through
 `openlia skills fork`; normal OpenLia updates preserve forked skills. The
 protected `openlia-skill-migration` system skill may propose a migration but
@@ -44,3 +45,12 @@ rather than editing its generated state files directly.
   bundled no-agent cron job performs the routine pull only.
 - Do not use hard resets, force-pushes, destructive conflict resolution, or
   pulls over dirty files. Stop and report the exact Git state instead.
+
+## External AI Research & Mandatory Temporary Chat Gatekeeper
+
+- Whenever the user asks to query, research, or converse with **ChatGPT** (`chatgpt.com`) or **Google Gemini** (`gemini.google.com`):
+  - **MANDATORY**: You MUST execute through the dedicated automated scripts. NEVER attempt manual, low-level browser tool loops (`browser_type`, `browser_click`).
+  - **For ChatGPT**: Submit `python3 /opt/data/skills/browser-pilot/scripts/openlia_job.py submit chatgpt-chat --prompt "<prompt>" --topic "<topic>"`, then poll the returned job ID with `status` and fetch it with `result`.
+  - **For Gemini**: Submit `python3 /opt/data/skills/browser-pilot/scripts/openlia_job.py submit gemini-chat --prompt "<prompt>" --topic "<topic>"`, then poll the returned job ID with `status` and fetch it with `result`.
+  - **Zero-Tolerance Temporary Chat**: Both scripts automatically enforce the zero-retention Temporary Chat gatekeeper before submitting prompts, and halt immediately if unverified.
+  - **Authentic Markdown & Export**: Both scripts automatically intercept authentic Markdown, sanitize citations, and save standardized YAML files with timestamp prefixes to `workspace/knowledge/<platform>/YYYYMMDD_HHMMSS_<slug>.yaml`.

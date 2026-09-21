@@ -581,7 +581,7 @@ func (local Local) uninstall(ctx context.Context) ([]byte, error) {
 func (local Local) composeLogs(ctx context.Context, follow bool) ([]byte, error) {
 	base := filepath.Join(local.releasePath(), "docker", "compose.yaml")
 	generated := filepath.Join(local.releasePath(), "docker", "compose.generated.yaml")
-	args := []string{"compose", "--project-name", local.Config.Project, "--project-directory", filepath.Join(local.releasePath(), "docker"), "-f", base}
+	args := []string{"docker", "compose", "--project-name", local.Config.Project, "--project-directory", filepath.Join(local.releasePath(), "docker"), "-f", base}
 	if _, err := os.Stat(generated); err == nil {
 		args = append(args, "-f", generated)
 	}

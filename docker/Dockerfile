@@ -19,7 +19,7 @@ USER root
 # The upstream image owns the entrypoint and s6 tree. Only add immutable
 # command-line runtimes, timezone data, and the OpenLia secret helper here.
 RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git hledger tzdata unzip xz-utils \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git hledger python3-yaml tzdata unzip xz-utils \
     && rm -rf /var/lib/apt/lists/* \
     && hledger --version \
     && set -eu; \
@@ -58,9 +58,14 @@ RUN apt-get update \
     install -m 0755 "/tmp/uv/uv-${uv_target}/uvx" /usr/local/bin/uvx; \
     rm -rf /tmp/bun /tmp/uv "${bun_archive}" "${uv_archive}"
 
-COPY profile/skills/claim-review/requirements.txt /tmp/openlia-claim-requirements.txt
-RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache --requirement /tmp/openlia-claim-requirements.txt \
-    && rm -f /tmp/openlia-claim-requirements.txt
+COPY profile/skills/claim-review/requirements.txt /tmp/claim-req.txt
+COPY profile/skills/gemini-chat/requirements.txt /tmp/gemini-req.txt
+COPY profile/skills/chatgpt-chat/requirements.txt /tmp/chatgpt-req.txt
+RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache \
+    --requirement /tmp/claim-req.txt \
+    --requirement /tmp/gemini-req.txt \
+    --requirement /tmp/chatgpt-req.txt \
+    && rm -f /tmp/*-req.txt
 
 COPY --chmod=0755 docker/secret-source.sh /usr/local/bin/openlia-secret-source
 COPY --chmod=0755 docker/git-askpass.sh /usr/local/bin/openlia-git-askpass
