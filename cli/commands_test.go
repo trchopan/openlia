@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"path/filepath"
 	"testing"
 	"testing/fstest"
 )
@@ -29,5 +30,39 @@ func TestUninstallRequiresExplicitTargetRootAndProject(t *testing.T) {
 func TestSkillMigrationApplyRequiresInteractiveApproval(t *testing.T) {
 	if got := commandSkillMigration(Options{NonInteractive: true}, []string{"apply", "proposal-1"}); got != ExitUsage {
 		t.Fatalf("non-interactive migration apply exit code = %d, want %d", got, ExitUsage)
+	}
+}
+
+func TestAttachmentsMapRejectsInvalidRole(t *testing.T) {
+	temporary := t.TempDir()
+	t.Setenv("OPENLIA_CONFIG", filepath.Join(temporary, "config.toml"))
+	if err := saveConfig(defaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, invalid := range []string{"generic", "image-generator", "unassigned", "custom", ""} {
+		code := commandAttachments(Options{}, []string{"map", "laptop", "ollama", "--role", invalid})
+		if code != ExitUsage {
+			t.Fatalf("expected ExitUsage for invalid role %q, got %d", invalid, code)
+		}
+	}
+}
+func TestAttachmentsMapRejectsMissingArgs(t *testing.T) {
+	temporary := t.TempDir()
+	t.Setenv("OPENLIA_CONFIG", filepath.Join(temporary, "config.toml"))
+	if err := saveConfig(defaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{
+		{"map"},
+		{"map", "laptop"},
+		{"map", "laptop", "ollama"},
+		{"map", "laptop", "ollama", "--wrong", "openai-endpoint"},
+	} {
+		code := commandAttachments(Options{}, args)
+		if code != ExitUsage {
+			t.Fatalf("expected ExitUsage for args %v, got %d", args, code)
+		}
 	}
 }

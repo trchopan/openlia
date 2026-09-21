@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"openlia/operator"
 )
 
 func Run(args []string, assets fs.FS) int {
@@ -238,6 +240,17 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 			return fail(options, ExitFailure, "could not stage secret source: "+err.Error(), nil)
 		}
 	}
+	for _, host := range config.Services {
+		if host.Source != "" && host.Name != "" {
+			if err := validateProtectedSourcePath(host.Source, "attachment source"); err != nil {
+				return fail(options, ExitUsage, err.Error(), nil)
+			}
+			target := deployment.rootPath("runtime", "locho", host.Name, "attachments.toml")
+			if err := deployment.uploadFile(ctx, host.Source, target, 0o600); err != nil {
+				return fail(options, ExitFailure, "could not stage attachment source: "+err.Error(), nil)
+			}
+		}
+	}
 	if err := deployment.uploadRelease(ctx, archive, digest); err != nil {
 		return fail(options, ExitPrereq, err.Error(), nil)
 	}
@@ -247,9 +260,15 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	if _, err := deployment.bootstrap(ctx); err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
+	// Generate the compose sidecar file (and sync OPENAI_BASE_URL into hermes.env)
+	// before the full deploy so Hermes starts with the correct provider endpoint.
+	if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
+		return fail(options, ExitFailure, "attachment Compose generation failed: "+err.Error(), nil)
+	}
 	if _, err := deployment.deploy(ctx, "deploy", true, "all"); err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
+
 	if config.WorkspaceGit.Enabled {
 		if _, err := deployment.workspaceGit(ctx, "setup", config.WorkspaceGit); err != nil {
 			return fail(options, ExitFailure, "workspace Git setup failed: "+err.Error(), nil)
@@ -351,6 +370,13 @@ func commandLifecycle(options Options, action string, args []string) int {
 	defer cancel()
 	deployment := newDeployment(config)
 	if action == "deploy" {
+		for _, host := range config.Services {
+			if host.Source != "" && host.Name != "" {
+				if err := syncAttachmentSource(ctx, deployment, host.Name, host.Source); err != nil {
+					return fail(options, ExitFailure, fmt.Sprintf("attachment sync failed for host %q: %s", host.Name, err.Error()), nil)
+				}
+			}
+		}
 		if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
 			return fail(options, ExitFailure, "attachment Compose generation failed: "+err.Error(), nil)
 		}
@@ -692,7 +718,7 @@ func commandAuth(options Options, args []string) int {
 
 func commandAttachments(options Options, args []string) int {
 	if len(args) == 0 {
-		return fail(options, ExitUsage, "attachments requires list or rotate", nil)
+		return fail(options, ExitUsage, "attachments requires list, map, or rotate", nil)
 	}
 	action := args[0]
 	args = args[1:]
@@ -711,16 +737,113 @@ func commandAttachments(options Options, args []string) int {
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
+		if options.JSON {
+			return renderRemote(options, raw, "")
+		}
+		var result operator.AttachmentListResult
+		if err := json.Unmarshal(raw, &result); err == nil {
+			return writeResult(options, map[string]any{"schema": 1, "ok": true, "hosts": result.Hosts}, operator.FormatAttachmentListHuman(result))
+		}
 		return renderRemote(options, raw, redact(string(raw)))
 	}
-	if action != "rotate" || len(args) < 1 || !safeComponent(args[0]) {
-		return fail(options, ExitUsage, "attachments rotate requires HOST --source PATH", nil)
+	if action == "map" {
+		role, remaining, err := extractFlag(args, "--role")
+		if err != nil || role == "" {
+			return fail(options, ExitUsage, "attachments map requires [HOST] SERVICE --role ROLE", nil)
+		}
+		if err := ValidateServiceRole(role); err != nil {
+			return fail(options, ExitUsage, err.Error(), nil)
+		}
+		host := ""
+		service := ""
+		if len(remaining) == 1 {
+			if len(config.Services) == 1 {
+				host = config.Services[0].Name
+				service = remaining[0]
+			} else if len(config.Services) == 0 {
+				return fail(options, ExitUsage, "no service hosts configured; declare a [[services]] host first", nil)
+			} else {
+				return fail(options, ExitUsage, "multiple service hosts configured; specify host: openlia attachments map HOST SERVICE --role ROLE", nil)
+			}
+		} else if len(remaining) == 2 {
+			host = remaining[0]
+			service = remaining[1]
+		} else {
+			return fail(options, ExitUsage, "attachments map requires [HOST] SERVICE --role ROLE", nil)
+		}
+		if !safeComponent(host) || !safeComponent(service) {
+			return fail(options, ExitUsage, "host and service names must be safe identifiers", nil)
+		}
+		foundIndex := -1
+		for i, h := range config.Services {
+			if h.Name == host {
+				foundIndex = i
+				break
+			}
+		}
+		if foundIndex >= 0 {
+			if config.Services[foundIndex].Roles == nil {
+				config.Services[foundIndex].Roles = make(map[string]string)
+			}
+			config.Services[foundIndex].Roles[service] = role
+		} else {
+			config.Services = append(config.Services, ServiceHostConfig{
+				Name:  host,
+				Roles: map[string]string{service: role},
+			})
+		}
+		if err := saveConfig(config); err != nil {
+			return fail(options, ExitFailure, err.Error(), nil)
+		}
+		deployment = newDeployment(config)
+		raw, err := deployment.operation(ctx, "attachments", nil, "generate", "--json")
+		if err != nil {
+			return fail(options, ExitFailure, fmt.Sprintf("service role saved, but attachment generation failed: %s", err.Error()), nil)
+		}
+		return renderRemote(options, raw, fmt.Sprintf("openlia attachments: mapped %s.%s to %s", host, service, role))
 	}
-	source, err := requiredPathFlag(args[1:], "--source")
-	if err != nil {
-		return fail(options, ExitUsage, "attachments rotate requires --source PATH", nil)
+	if action == "rotate" {
+		host := ""
+		source := ""
+		sourceVal, remaining, err := extractFlag(args, "--source")
+		if err != nil {
+			return fail(options, ExitUsage, err.Error(), nil)
+		}
+		if len(remaining) == 0 {
+			if len(config.Services) == 1 && config.Services[0].Name != "" {
+				host = config.Services[0].Name
+				source = config.Services[0].Source
+			} else if len(config.Services) == 0 {
+				return fail(options, ExitUsage, "attachments rotate requires HOST --source PATH", nil)
+			} else {
+				return fail(options, ExitUsage, "multiple service hosts configured; specify HOST: attachments rotate HOST --source PATH", nil)
+			}
+		} else if len(remaining) == 1 {
+			host = remaining[0]
+			if !safeComponent(host) {
+				return fail(options, ExitUsage, "invalid host name", nil)
+			}
+			source = sourceVal
+			if source == "" {
+				for _, h := range config.Services {
+					if h.Name == host && h.Source != "" {
+						source = h.Source
+						break
+					}
+				}
+			}
+		} else {
+			return fail(options, ExitUsage, "attachments rotate requires [HOST] [--source PATH]", nil)
+		}
+		if sourceVal != "" {
+			source = sourceVal
+		}
+		if source == "" {
+			return fail(options, ExitUsage, "attachments rotate requires --source PATH or source configured in config.toml", nil)
+		}
+		return rotateRemoteFile(options, "attachments:"+host, source)
 	}
-	return rotateRemoteFile(options, "attachments:"+args[0], source)
+	return fail(options, ExitUsage, "attachments requires list, map, or rotate", nil)
 }
 
 func commandBackup(options Options, args []string) int {
@@ -892,6 +1015,15 @@ func requiredPathFlag(args []string, name string) (string, error) {
 	return "", errors.New("missing path")
 }
 
+func requiredValueFlag(args []string, name string) (string, error) {
+	for index, arg := range args {
+		if arg == name && index+1 < len(args) && args[index+1] != "" {
+			return args[index+1], nil
+		}
+	}
+	return "", fmt.Errorf("missing %s", name)
+}
+
 func rotateRemoteFile(options Options, kind, source string) int {
 	if err := validateProtectedSourcePath(source, "source"); err != nil {
 		return fail(options, ExitUsage, err.Error(), nil)
@@ -1046,4 +1178,32 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func syncAttachmentSource(ctx context.Context, deployment deployment, host, source string) error {
+	if err := validateProtectedSourcePath(source, "attachment source"); err != nil {
+		return err
+	}
+	remotePath := deployment.rootPath("runtime", "meta", ".openlia-incoming")
+	if err := deployment.uploadFile(ctx, source, remotePath, 0o600); err != nil {
+		return err
+	}
+	defer deployment.removeFile(context.Background(), remotePath)
+	_, err := deployment.operation(ctx, "attachments", nil, "rotate", host, "--source", remotePath, "--json")
+	return err
+}
+
+func extractFlag(args []string, name string) (string, []string, error) {
+	for i := 0; i < len(args); i++ {
+		if args[i] == name {
+			if i+1 >= len(args) || args[i+1] == "" {
+				return "", nil, fmt.Errorf("missing value for %s", name)
+			}
+			val := args[i+1]
+			rem := append([]string(nil), args[:i]...)
+			rem = append(rem, args[i+2:]...)
+			return val, rem, nil
+		}
+	}
+	return "", args, nil
 }

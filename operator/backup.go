@@ -91,8 +91,12 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 		if !wasRunning {
 			return
 		}
-		if _, restartErr := compose.Run(ctx, "up", "-d", "--no-deps", "hermes"); restartErr != nil && err == nil {
-			err = fmt.Errorf("backup completed but Hermes could not be restarted")
+		if res, restartErr := compose.Run(ctx, "up", "-d", "--no-deps", "hermes"); restartErr != nil && err == nil {
+			msg := strings.TrimSpace(string(res.Stderr))
+			if msg == "" {
+				msg = strings.TrimSpace(string(res.Stdout))
+			}
+			err = fmt.Errorf("backup completed but Hermes could not be restarted (%s): %w", msg, restartErr)
 		}
 	}()
 	stamp := now.UTC().Format("20060102T150405Z")

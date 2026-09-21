@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,23 @@ var defaultSkills = []string{
 	"gemini-chat",
 }
 
+const (
+	RolePlaywrightBrowser = "playwright-browser"
+	RoleOpenAIEndpoint    = "openai-endpoint"
+)
+
+var allowedServiceRoles = map[string]bool{
+	RolePlaywrightBrowser: true,
+	RoleOpenAIEndpoint:    true,
+}
+
+func ValidateServiceRole(role string) error {
+	if !allowedServiceRoles[role] {
+		return fmt.Errorf("invalid service role %q; must be one of: %s, %s", role, RolePlaywrightBrowser, RoleOpenAIEndpoint)
+	}
+	return nil
+}
+
 type Config struct {
 	Schema          int
 	Version         string
@@ -58,6 +76,13 @@ type Config struct {
 	ReleaseSource   string
 	EnabledSkills   []string
 	WorkspaceGit    WorkspaceGitConfig
+	Services        []ServiceHostConfig
+}
+
+type ServiceHostConfig struct {
+	Name   string
+	Source string
+	Roles  map[string]string
 }
 
 type WorkspaceGitConfig struct {
@@ -94,6 +119,7 @@ func defaultConfig() Config {
 			AuthorName:  "OpenLia Agent",
 			AuthorEmail: "openlia@localhost",
 		},
+		Services: nil,
 	}
 }
 
@@ -148,8 +174,18 @@ func parseConfig(data string) (Config, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		if strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]]") {
+			section = strings.TrimSpace(line[2 : len(line)-2])
+			if section == "services" {
+				config.Services = append(config.Services, ServiceHostConfig{Roles: make(map[string]string)})
+			}
+			continue
+		}
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			section = strings.TrimSpace(line[1 : len(line)-1])
+			if section == "services" && len(config.Services) == 0 {
+				config.Services = append(config.Services, ServiceHostConfig{Roles: make(map[string]string)})
+			}
 			continue
 		}
 		key, value, ok := strings.Cut(line, "=")
@@ -158,65 +194,97 @@ func parseConfig(data string) (Config, error) {
 		}
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(strings.SplitN(value, " #", 2)[0])
-		switch section + "." + key {
-		case "openlia.schema":
-			config.Schema, err = parseInt(value)
-		case "openlia.version":
-			config.Version, err = parseString(value)
-		case "openlia.mode":
-			config.Mode, err = parseString(value)
-		case "openlia.target":
-			config.Target, err = parseString(value)
-		case "openlia.root":
-			config.InstallRoot, err = parseString(value)
-		case "openlia.remote_root":
-			config.InstallRoot, err = parseString(value)
-		case "openlia.project":
-			config.Project, err = parseString(value)
-		case "openlia.model":
-			config.Model, err = parseString(value)
-		case "openlia.timezone":
-			config.Timezone, err = parseString(value)
-		case "openlia.provider":
-			config.Provider, err = parseString(value)
-		case "openlia.external_network":
-			config.ExternalNetwork, err = parseString(value)
-		case "release.source":
-			config.ReleaseSource, err = parseString(value)
-		case "components.hermes_image":
-			config.HermesImage, err = parseString(value)
-		case "components.hermes_tag":
-			config.HermesTag, err = parseString(value)
-		case "components.hermes_digest":
-			config.HermesDigest, err = parseString(value)
-		case "components.locho_image":
-			config.LochoImage, err = parseString(value)
-		case "components.locho_version":
-			config.LochoVersion, err = parseString(value)
-		case "api.enabled":
-			config.APIEnabled, err = parseBool(value)
-		case "api.host":
-			config.APIHost, err = parseString(value)
-		case "secrets.source":
-			config.SecretSource, err = parseString(value)
-		case "skills.enabled":
-			config.EnabledSkills, err = parseStringArray(value)
-		case "workspace_git.enabled":
-			config.WorkspaceGit.Enabled, err = parseBool(value)
-		case "workspace_git.provider":
-			config.WorkspaceGit.Provider, err = parseString(value)
-		case "workspace_git.remote":
-			config.WorkspaceGit.Remote, err = parseString(value)
-		case "workspace_git.branch":
-			config.WorkspaceGit.Branch, err = parseString(value)
-		case "workspace_git.schedule":
-			config.WorkspaceGit.Schedule, err = parseString(value)
-		case "workspace_git.author_name":
-			config.WorkspaceGit.AuthorName, err = parseString(value)
-		case "workspace_git.author_email":
-			config.WorkspaceGit.AuthorEmail, err = parseString(value)
-		default:
-			return Config{}, fmt.Errorf("line %d contains unknown setting %q", lineNumber, section+"."+key)
+		if section == "services" {
+			if len(config.Services) == 0 {
+				config.Services = append(config.Services, ServiceHostConfig{Roles: make(map[string]string)})
+			}
+			current := &config.Services[len(config.Services)-1]
+			cleanKey := strings.Trim(key, "\"")
+			switch cleanKey {
+			case "name":
+				current.Name, err = parseString(value)
+			case "source":
+				current.Source, err = parseString(value)
+				if err == nil {
+					current.Source = expandTilde(current.Source)
+				}
+			default:
+				if strings.Contains(cleanKey, ".") {
+					return Config{}, fmt.Errorf("line %d: invalid service key %q; service names cannot contain dots (declare host with 'name = ...')", lineNumber, cleanKey)
+				}
+				var role string
+				role, err = parseString(value)
+				if err == nil {
+					err = ValidateServiceRole(role)
+				}
+				if err == nil {
+					if current.Roles == nil {
+						current.Roles = make(map[string]string)
+					}
+					current.Roles[cleanKey] = role
+				}
+			}
+		} else {
+			switch section + "." + key {
+			case "openlia.schema":
+				config.Schema, err = parseInt(value)
+			case "openlia.version":
+				config.Version, err = parseString(value)
+			case "openlia.mode":
+				config.Mode, err = parseString(value)
+			case "openlia.target":
+				config.Target, err = parseString(value)
+			case "openlia.root":
+				config.InstallRoot, err = parseString(value)
+			case "openlia.remote_root":
+				config.InstallRoot, err = parseString(value)
+			case "openlia.project":
+				config.Project, err = parseString(value)
+			case "openlia.model":
+				config.Model, err = parseString(value)
+			case "openlia.timezone":
+				config.Timezone, err = parseString(value)
+			case "openlia.provider":
+				config.Provider, err = parseString(value)
+			case "openlia.external_network":
+				config.ExternalNetwork, err = parseString(value)
+			case "release.source":
+				config.ReleaseSource, err = parseString(value)
+			case "components.hermes_image":
+				config.HermesImage, err = parseString(value)
+			case "components.hermes_tag":
+				config.HermesTag, err = parseString(value)
+			case "components.hermes_digest":
+				config.HermesDigest, err = parseString(value)
+			case "components.locho_image":
+				config.LochoImage, err = parseString(value)
+			case "components.locho_version":
+				config.LochoVersion, err = parseString(value)
+			case "api.enabled":
+				config.APIEnabled, err = parseBool(value)
+			case "api.host":
+				config.APIHost, err = parseString(value)
+			case "secrets.source":
+				config.SecretSource, err = parseString(value)
+			case "skills.enabled":
+				config.EnabledSkills, err = parseStringArray(value)
+			case "workspace_git.enabled":
+				config.WorkspaceGit.Enabled, err = parseBool(value)
+			case "workspace_git.provider":
+				config.WorkspaceGit.Provider, err = parseString(value)
+			case "workspace_git.remote":
+				config.WorkspaceGit.Remote, err = parseString(value)
+			case "workspace_git.branch":
+				config.WorkspaceGit.Branch, err = parseString(value)
+			case "workspace_git.schedule":
+				config.WorkspaceGit.Schedule, err = parseString(value)
+			case "workspace_git.author_name":
+				config.WorkspaceGit.AuthorName, err = parseString(value)
+			case "workspace_git.author_email":
+				config.WorkspaceGit.AuthorEmail, err = parseString(value)
+			default:
+				return Config{}, fmt.Errorf("line %d contains unknown setting %q", lineNumber, section+"."+key)
+			}
 		}
 		if err != nil {
 			return Config{}, fmt.Errorf("line %d: %w", lineNumber, err)
@@ -329,6 +397,35 @@ func validateConfig(config Config) error {
 	}
 	if err := validateWorkspaceGit(config.WorkspaceGit); err != nil {
 		return err
+	}
+	hostNames := make(map[string]bool)
+	for i, host := range config.Services {
+		if host.Name == "" {
+			return fmt.Errorf("service host at index %d requires a name", i)
+		}
+		if !safeComponent(host.Name) {
+			return fmt.Errorf("invalid service host name %q", host.Name)
+		}
+		if hostNames[host.Name] {
+			return fmt.Errorf("duplicate service host name %q", host.Name)
+		}
+		hostNames[host.Name] = true
+		if host.Source != "" {
+			if !filepath.IsAbs(host.Source) {
+				return fmt.Errorf("service host %q source %q must be an absolute path", host.Name, host.Source)
+			}
+			if isInsideWorkingTree(host.Source) {
+				return fmt.Errorf("service host %q source %q must be outside the OpenLia checkout", host.Name, host.Source)
+			}
+		}
+		for svc, role := range host.Roles {
+			if !safeComponent(svc) {
+				return fmt.Errorf("service host %q has invalid service name %q", host.Name, svc)
+			}
+			if err := ValidateServiceRole(role); err != nil {
+				return fmt.Errorf("service host %q service %q: %w", host.Name, svc, err)
+			}
+		}
 	}
 	return nil
 }
@@ -539,5 +636,34 @@ func renderConfig(config Config) string {
 	}
 	builder.WriteString("]\n")
 	fmt.Fprintf(&builder, "\n[workspace_git]\nenabled = %t\nprovider = %q\nremote = %q\nbranch = %q\nschedule = %q\nauthor_name = %q\nauthor_email = %q\n", config.WorkspaceGit.Enabled, config.WorkspaceGit.Provider, config.WorkspaceGit.Remote, config.WorkspaceGit.Branch, config.WorkspaceGit.Schedule, config.WorkspaceGit.AuthorName, config.WorkspaceGit.AuthorEmail)
+	for _, host := range config.Services {
+		builder.WriteString("\n[[services]]\n")
+		if host.Source != "" {
+			fmt.Fprintf(&builder, "source = %q\n", host.Source)
+		}
+		if host.Name != "" {
+			fmt.Fprintf(&builder, "name = %q\n", host.Name)
+		}
+		keys := make([]string, 0, len(host.Roles))
+		for k := range host.Roles {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(&builder, "%q = %q\n", k, host.Roles[k])
+		}
+	}
 	return builder.String()
+}
+
+func expandTilde(path string) string {
+	if strings.HasPrefix(path, "~/") || path == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			if path == "~" {
+				return home
+			}
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
 }

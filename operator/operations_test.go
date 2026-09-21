@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -361,6 +362,134 @@ func TestPruneBackups(t *testing.T) {
 		composePath := filepath.Join(config.BackupRoot, fmt.Sprintf("compose-generated-20260921T10000%dZ-%d", i, i))
 		if _, err := os.Stat(composePath); err != nil {
 			t.Fatalf("expected compose file %d to exist: %v", i, err)
+		}
+	}
+}
+
+func TestLochoServiceRegistryAndRoleMapping(t *testing.T) {
+	repo := t.TempDir()
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	config := testConfig(repo, runtimeRoot)
+	if err := os.MkdirAll(filepath.Join(repo, "docker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config.ServiceRoles = map[string]string{
+		"laptop.playwright": "playwright-browser",
+		"laptop.ollama":     "openai-endpoint",
+	}
+	attachmentDir := filepath.Join(config.LochoRoot, "laptop")
+	if err := os.MkdirAll(attachmentDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	attachmentContent := `host_id = "laptop"
+listen_host = "0.0.0.0"
+
+[[services]]
+capability = "playwright:tcp:supersecrettoken1"
+listen_port = 8931
+
+[[services]]
+capability = "ollama:http:supersecrettoken2"
+listen_port = 11434
+
+[[services]]
+capability = "genai:http:supersecrettoken3"
+listen_port = 8765
+
+[[services]]
+capability = "ssh:tcp:supersecrettoken4"
+listen_port = 2222
+`
+	if err := os.WriteFile(filepath.Join(attachmentDir, "attachments.toml"), []byte(attachmentContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	listResult, err := ListAttachments(config)
+	if err != nil {
+		t.Fatalf("ListAttachments failed: %v", err)
+	}
+	if len(listResult.Hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(listResult.Hosts))
+	}
+	host := listResult.Hosts[0]
+	if len(host.Services) != 4 {
+		t.Fatalf("expected 4 services, got %d", len(host.Services))
+	}
+
+	roleMap := make(map[string]string)
+	endpointMap := make(map[string]string)
+	for _, svc := range host.Services {
+		roleMap[svc.Name] = svc.Role
+		endpointMap[svc.Name] = svc.Endpoint
+	}
+	if roleMap["playwright"] != "playwright-browser" {
+		t.Errorf("playwright role = %q, want 'playwright-browser'", roleMap["playwright"])
+	}
+	if roleMap["ollama"] != "openai-endpoint" {
+		t.Errorf("ollama role = %q, want 'openai-endpoint'", roleMap["ollama"])
+	}
+	if roleMap["genai"] != "unassigned" {
+		t.Errorf("genai role = %q, want 'unassigned'", roleMap["genai"])
+	}
+	if roleMap["ssh"] != "unassigned" {
+		t.Errorf("ssh role = %q, want 'unassigned'", roleMap["ssh"])
+	}
+
+	if endpointMap["playwright"] != "http://locho-laptop:8931" {
+		t.Errorf("playwright endpoint = %q, want 'http://locho-laptop:8931'", endpointMap["playwright"])
+	}
+	if endpointMap["ollama"] != "http://locho-laptop:11434" {
+		t.Errorf("ollama endpoint = %q, want 'http://locho-laptop:11434'", endpointMap["ollama"])
+	}
+	if endpointMap["ssh"] != "locho-laptop:2222" {
+		t.Errorf("ssh endpoint = %q, want 'locho-laptop:2222'", endpointMap["ssh"])
+	}
+
+	if err := GenerateAttachments(config); err != nil {
+		t.Fatalf("GenerateAttachments failed: %v", err)
+	}
+
+	// Verify services.json in DataRoot
+	dataRegistryPath := filepath.Join(config.DataRoot, "services.json")
+	dataRegistryBytes, err := os.ReadFile(dataRegistryPath)
+	if err != nil {
+		t.Fatalf("failed to read data services.json: %v", err)
+	}
+	var registry ServiceRegistry
+	if err := json.Unmarshal(dataRegistryBytes, &registry); err != nil {
+		t.Fatalf("failed to unmarshal services.json: %v", err)
+	}
+	if len(registry.Services) != 4 {
+		t.Fatalf("services.json contains %d services, want 4", len(registry.Services))
+	}
+
+	// Ensure secret tokens NEVER leak into registry or compose file
+	for _, forbidden := range []string{"supersecrettoken1", "supersecrettoken2", "supersecrettoken3", "supersecrettoken4"} {
+		if strings.Contains(string(dataRegistryBytes), forbidden) {
+			t.Fatalf("services.json leaked forbidden token %q", forbidden)
+		}
+	}
+
+	// Verify generated Compose
+	composeBytes, err := os.ReadFile(config.GeneratedCompose)
+	if err != nil {
+		t.Fatalf("failed to read generated compose: %v", err)
+	}
+	composeText := string(composeBytes)
+	for _, forbidden := range []string{"supersecrettoken1", "supersecrettoken2", "supersecrettoken3", "supersecrettoken4"} {
+		if strings.Contains(composeText, forbidden) {
+			t.Fatalf("compose leaked forbidden token %q", forbidden)
+		}
+	}
+
+	for _, expected := range []string{
+		"OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8931\"",
+		"OPENLIA_OPENAI_ENDPOINT_URL: \"http://locho-laptop:11434\"",
+		"OPENLIA_SERVICE_LAPTOP_PLAYWRIGHT_URL: \"http://locho-laptop:8931\"",
+		"OPENLIA_SERVICE_LAPTOP_OLLAMA_URL: \"http://locho-laptop:11434\"",
+	} {
+		if !strings.Contains(composeText, expected) {
+			t.Errorf("generated Compose missing %q:\n%s", expected, composeText)
 		}
 	}
 }

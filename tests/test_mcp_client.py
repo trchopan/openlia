@@ -20,7 +20,7 @@ class McpClientHeaderTest(unittest.TestCase):
     def test_host_header_normalization(self) -> None:
         test_cases = [
             ("http://localhost:8931", "localhost:8931"),
-            ("http://locho-genai:8931", "localhost:8931"),
+            ("http://locho-test-host:8931", "localhost:8931"),
             ("http://locho-laptop:9000", "localhost:9000"),
             ("http://127.0.0.1:8931/", "localhost:8931"),
             ("http://remote-host", "localhost:8931"),

@@ -12,12 +12,28 @@ import (
 	"time"
 )
 
+type LochoService struct {
+	Host     string `json:"host"`
+	Name     string `json:"name"`
+	Protocol string `json:"protocol"`
+	Port     int    `json:"port"`
+	Endpoint string `json:"endpoint"`
+	Role     string `json:"role"`
+}
+
 type AttachmentHost struct {
-	Host         string `json:"host"`
-	Configured   bool   `json:"configured"`
-	ServiceCount int    `json:"service_count"`
-	Capabilities string `json:"capabilities"`
-	BrowserPort  int    `json:"-"`
+	Host         string         `json:"host"`
+	Configured   bool           `json:"configured"`
+	ServiceCount int            `json:"service_count"`
+	Services     []LochoService `json:"services"`
+	Capabilities string         `json:"capabilities"`
+	BrowserPort  int            `json:"-"`
+}
+
+type ServiceRegistry struct {
+	Schema      int            `json:"schema"`
+	GeneratedAt string         `json:"generated_at"`
+	Services    []LochoService `json:"services"`
 }
 
 type AttachmentListResult struct {
@@ -45,15 +61,34 @@ func ListAttachments(config Config) (AttachmentListResult, error) {
 		if ValidateSafeComponent(entry.Name(), "host") != nil {
 			continue
 		}
+		if len(config.ConfiguredHosts) > 0 {
+			configured := false
+			for _, h := range config.ConfiguredHosts {
+				if h == entry.Name() {
+					configured = true
+					break
+				}
+			}
+			if !configured {
+				continue
+			}
+		}
 		path := filepath.Join(config.LochoRoot, entry.Name(), "attachments.toml")
 		if info, statErr := os.Stat(path); statErr != nil || !info.Mode().IsRegular() {
 			continue
 		}
-		count, browserPort, err := serviceInventory(path)
+		services, browserPort, err := serviceInventory(entry.Name(), path, config.ServiceRoles)
 		if err != nil {
 			return AttachmentListResult{}, err
 		}
-		result.Hosts = append(result.Hosts, AttachmentHost{Host: entry.Name(), Configured: true, ServiceCount: count, Capabilities: "redacted", BrowserPort: browserPort})
+		result.Hosts = append(result.Hosts, AttachmentHost{
+			Host:         entry.Name(),
+			Configured:   true,
+			ServiceCount: len(services),
+			Services:     services,
+			Capabilities: "redacted",
+			BrowserPort:  browserPort,
+		})
 	}
 	sort.Slice(result.Hosts, func(i, j int) bool { return result.Hosts[i].Host < result.Hosts[j].Host })
 	return result, nil
@@ -131,34 +166,67 @@ func generateAttachmentsFile(config Config) error {
 	if err != nil {
 		return err
 	}
+	var allServices []LochoService
 	browserURL := ""
+	openaiURL := ""
 	for _, host := range hosts.Hosts {
-		if host.BrowserPort == 0 {
-			continue
+		for _, svc := range host.Services {
+			allServices = append(allServices, svc)
+			if svc.Role == "playwright-browser" {
+				if browserURL != "" && browserURL != svc.Endpoint {
+					return fmt.Errorf("multiple Playwright attachment endpoints are configured")
+				}
+				browserURL = svc.Endpoint
+			} else if svc.Role == "openai-endpoint" && openaiURL == "" {
+				openaiURL = svc.Endpoint
+			}
 		}
-		if browserURL != "" {
-			return fmt.Errorf("multiple Playwright attachment endpoints are configured")
+		if browserURL == "" && host.BrowserPort > 0 {
+			browserURL = fmt.Sprintf("http://locho-%s:%d", host.Host, host.BrowserPort)
 		}
-		browserURL = fmt.Sprintf("http://locho-%s:%d", host.Host, host.BrowserPort)
 	}
+
+	registry := ServiceRegistry{
+		Schema:      1,
+		GeneratedAt: utcTimestamp(time.Now().UTC()),
+		Services:    allServices,
+	}
+	registryBytes, marshalErr := json.MarshalIndent(registry, "", "  ")
+	if marshalErr == nil {
+		if ensureErr := EnsureDir(config.DataRoot, 0o700); ensureErr == nil {
+			_ = AtomicWriteFile(filepath.Join(config.DataRoot, "services.json"), append(registryBytes, '\n'), 0o600)
+		}
+		if ensureErr := EnsureDir(config.MetaRoot, 0o700); ensureErr == nil {
+			_ = AtomicWriteFile(filepath.Join(config.MetaRoot, "services.json"), append(registryBytes, '\n'), 0o600)
+		}
+	}
+
 	var builder strings.Builder
-	if len(hosts.Hosts) == 0 && !config.APIEnabled && config.ExternalNetwork == "" {
+	hasHermesEnv := config.APIEnabled || config.ExternalNetwork != "" || browserURL != "" || openaiURL != "" || len(allServices) > 0
+	if len(hosts.Hosts) == 0 && !hasHermesEnv {
 		builder.WriteString("services: {}\n")
 	} else {
 		builder.WriteString("services:\n")
-		if config.APIEnabled || config.ExternalNetwork != "" || browserURL != "" {
+		if hasHermesEnv {
 			builder.WriteString("  hermes:\n")
 			if config.APIEnabled {
 				fmt.Fprintf(&builder, "    ports:\n      - %q\n", config.APIHost+":8642:8642")
 			}
-			if config.APIEnabled || browserURL != "" {
-				builder.WriteString("    environment:\n")
-				if config.APIEnabled {
-					builder.WriteString("      API_SERVER_ENABLED: \"true\"\n      API_SERVER_HOST: \"0.0.0.0\"\n")
-				}
-				if browserURL != "" {
-					fmt.Fprintf(&builder, "      OPENLIA_BROWSER_MCP_URL: %q\n", browserURL)
-					builder.WriteString("      OPENLIA_TOOLS_URL: \"http://openlia-tools:8787\"\n")
+			builder.WriteString("    environment:\n")
+			if config.APIEnabled {
+				builder.WriteString("      API_SERVER_ENABLED: \"true\"\n      API_SERVER_HOST: \"0.0.0.0\"\n")
+			}
+			if browserURL != "" {
+				fmt.Fprintf(&builder, "      OPENLIA_BROWSER_MCP_URL: %q\n", browserURL)
+				builder.WriteString("      OPENLIA_TOOLS_URL: \"http://openlia-tools:8787\"\n")
+			}
+			if openaiURL != "" {
+				fmt.Fprintf(&builder, "      OPENLIA_OPENAI_ENDPOINT_URL: %q\n", openaiURL)
+			}
+			for _, svc := range allServices {
+				if svc.Role != "unassigned" {
+					envKey := fmt.Sprintf("OPENLIA_SERVICE_%s_%s_URL", sanitizeEnvKey(svc.Host), sanitizeEnvKey(svc.Name))
+					fmt.Fprintf(&builder, "      %s: %q\n", envKey, svc.Endpoint)
 				}
 			}
 			if config.ExternalNetwork != "" {
@@ -194,7 +262,56 @@ func generateAttachmentsFile(config Config) error {
 	if config.ExternalNetwork != "" {
 		fmt.Fprintf(&builder, "networks:\n  openlia-external:\n    name: %q\n    external: true\n", config.ExternalNetwork)
 	}
-	return AtomicWriteFile(config.GeneratedCompose, []byte(builder.String()), 0o600)
+	if err := AtomicWriteFile(config.GeneratedCompose, []byte(builder.String()), 0o600); err != nil {
+		return err
+	}
+	// Keep OPENAI_BASE_URL in hermes.env in sync with the configured openai endpoint.
+	// Hermes reads OPENAI_BASE_URL from its secret helper (which sources hermes.env) to
+	// resolve the provider base URL at runtime. If this value is stale (e.g. after a host
+	// rename), Hermes silently calls the wrong — or non-existent — endpoint.
+	// We patch the file here so attachments generate is the single source of truth.
+	if config.SecretFile != "" {
+		if err := patchSecretBaseURL(config.SecretFile, openaiURL); err != nil {
+			// Non-fatal: compose was written successfully; log via return so caller sees it.
+			return fmt.Errorf("compose generated OK but could not sync OPENAI_BASE_URL in secret file: %w", err)
+		}
+	}
+	return nil
+}
+
+// patchSecretBaseURL rewrites the OPENAI_BASE_URL line in the hermes secrets
+// file so it always matches the currently configured openai-endpoint service.
+// If openaiURL is empty the line is removed; otherwise it is set to openaiURL+"/v1".
+// All other lines are preserved verbatim.
+func patchSecretBaseURL(secretFile, openaiURL string) error {
+	data, err := os.ReadFile(secretFile)
+	if os.IsNotExist(err) {
+		// Nothing to patch — file doesn't exist yet (first deploy before auth rotate).
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var out []string
+	for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "OPENAI_BASE_URL=") {
+			continue // drop old value; we'll append the fresh one below
+		}
+		out = append(out, line)
+	}
+	// Remove trailing blank lines added by previous iterations, then append new value.
+	for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
+		out = out[:len(out)-1]
+	}
+	if openaiURL != "" {
+		out = append(out, "OPENAI_BASE_URL="+strings.TrimRight(openaiURL, "/")+"/v1")
+	}
+	content := strings.Join(out, "\n")
+	if content != "" {
+		content += "\n"
+	}
+	return AtomicWriteFile(secretFile, []byte(content), 0o600)
 }
 
 func RotateAttachment(config Config, host, source string, now time.Time, composers ...Compose) error {
@@ -336,11 +453,15 @@ func rotateAttachmentWithCompose(ctx context.Context, config Config, compose Com
 		return fmt.Errorf("generated Compose validation failed; previous attachment was restored")
 	}
 	if previousState == stateRunning {
-		if _, err := compose.Run(ctx, "up", "-d", "--no-deps", "locho-"+host); err != nil {
+		if res, err := compose.Run(ctx, "up", "-d", "--no-deps", "--remove-orphans", "locho-"+host); err != nil {
 			restore()
 			_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "locho-"+host)
-			_ = RecordChange(config, "locho-"+host+"-rotate", "failed", configBackup, "Locho restart failed; previous attachment restored", now)
-			return fmt.Errorf("Locho restart failed; previous attachment was restored")
+			msg := strings.TrimSpace(string(res.Stderr))
+			if msg == "" {
+				msg = strings.TrimSpace(string(res.Stdout))
+			}
+			_ = RecordChange(config, "locho-"+host+"-rotate", "failed", configBackup, "Locho restart failed: "+msg, now)
+			return fmt.Errorf("Locho restart failed (%s): %w; previous attachment was restored", msg, err)
 		}
 	}
 	return RecordChange(config, "locho-"+host+"-rotate", "ok", configBackup, "single host sidecar replaced", now)
@@ -372,12 +493,12 @@ func backupFile(config Config, source, label string, mode os.FileMode, now time.
 	return destination, nil
 }
 
-func serviceInventory(path string) (int, int, error) {
+func serviceInventory(host, path string, roles map[string]string) ([]LochoService, int, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return 0, 0, err
+		return nil, 0, err
 	}
-	count := 0
+	var services []LochoService
 	browserPort := 0
 	inService := false
 	capability := ""
@@ -386,8 +507,44 @@ func serviceInventory(path string) (int, int, error) {
 		if !inService {
 			return
 		}
-		count++
-		if browserPort == 0 && strings.HasPrefix(capability, "playwright:") && listenPort > 0 {
+		parts := strings.Split(capability, ":")
+		name := ""
+		proto := "http"
+		if len(parts) >= 3 {
+			name = parts[0]
+			proto = parts[1]
+		} else if len(parts) == 2 {
+			name = parts[0]
+			if parts[1] == "http" || parts[1] == "tcp" {
+				proto = parts[1]
+			}
+		} else if len(parts) == 1 {
+			name = parts[0]
+		}
+		if name == "" {
+			name = fmt.Sprintf("service-%d", len(services)+1)
+		}
+		role := "unassigned"
+		if assigned, ok := roles[host+"."+name]; ok && assigned != "" {
+			role = assigned
+		} else if assigned, ok := roles[name]; ok && assigned != "" {
+			role = assigned
+		}
+		endpoint := fmt.Sprintf("http://locho-%s:%d", host, listenPort)
+		if proto == "tcp" && role != "playwright-browser" {
+			endpoint = fmt.Sprintf("locho-%s:%d", host, listenPort)
+		}
+		services = append(services, LochoService{
+			Host:     host,
+			Name:     name,
+			Protocol: proto,
+			Port:     listenPort,
+			Endpoint: endpoint,
+			Role:     role,
+		})
+		if role == "playwright-browser" && browserPort == 0 && listenPort > 0 {
+			browserPort = listenPort
+		} else if browserPort == 0 && (strings.HasPrefix(capability, "playwright:") || name == "playwright") && listenPort > 0 {
 			browserPort = listenPort
 		}
 	}
@@ -419,7 +576,19 @@ func serviceInventory(path string) (int, int, error) {
 		}
 	}
 	flush()
-	return count, browserPort, nil
+	return services, browserPort, nil
+}
+
+func sanitizeEnvKey(name string) string {
+	var builder strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
+		} else {
+			builder.WriteRune('_')
+		}
+	}
+	return strings.ToUpper(builder.String())
 }
 
 func validateAttachmentFile(path string) error {
@@ -457,4 +626,29 @@ func validateExternalSource(config Config, path, label string) error {
 		return fmt.Errorf("%s is not a readable file", label)
 	}
 	return nil
+}
+
+func FormatAttachmentListHuman(result AttachmentListResult) string {
+	if len(result.Hosts) == 0 {
+		return "openlia attachments: no hosts configured"
+	}
+	var builder strings.Builder
+	builder.WriteString("openlia attachments:\n")
+	for i, host := range result.Hosts {
+		if i > 0 {
+			builder.WriteString("\n")
+		}
+		plural := "s"
+		if len(host.Services) == 1 {
+			plural = ""
+		}
+		fmt.Fprintf(&builder, "  Host: %s (%d service%s configured)\n", host.Host, len(host.Services), plural)
+		if len(host.Services) == 0 {
+			builder.WriteString("    (no services declared)\n")
+		}
+		for _, svc := range host.Services {
+			fmt.Fprintf(&builder, "    - %s (%s, port %d) -> %s [role: %s]\n", svc.Name, svc.Protocol, svc.Port, svc.Endpoint, svc.Role)
+		}
+	}
+	return strings.TrimRight(builder.String(), "\n")
 }

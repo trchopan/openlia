@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -115,6 +116,8 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"OPENLIA_GENERATED_COMPOSE=" + shellQuote(filepath.Join(operationRoot, "docker", "compose.generated.yaml")),
 		"OPENLIA_ENABLED_SKILLS=" + shellQuote(strings.Join(remote.Config.EnabledSkills, ",")),
 		"OPENLIA_SKILLS_CONFIGURED='true'",
+		"OPENLIA_SERVICE_ROLES=" + shellQuote(renderServicesJSON(remote.Config.Services)),
+		"OPENLIA_CONFIGURED_HOSTS=" + shellQuote(configuredHosts(remote.Config.Services)),
 	}
 	legacyScript := legacyOperationScript(operation)
 	scriptCommand := shellQuote(filepath.Join(operationRoot, legacyScript))
@@ -384,7 +387,42 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_GENERATED_COMPOSE=" + filepath.Join(operationRoot, "docker", "compose.generated.yaml"),
 		"OPENLIA_ENABLED_SKILLS=" + strings.Join(config.EnabledSkills, ","),
 		"OPENLIA_SKILLS_CONFIGURED=true",
+		"OPENLIA_SERVICE_ROLES=" + renderServicesJSON(config.Services),
+		"OPENLIA_CONFIGURED_HOSTS=" + configuredHosts(config.Services),
 	}
+}
+
+func configuredHosts(services []ServiceHostConfig) string {
+	if len(services) == 0 {
+		return ""
+	}
+	hosts := make([]string, 0, len(services))
+	for _, host := range services {
+		if host.Name != "" {
+			hosts = append(hosts, host.Name)
+		}
+	}
+	return strings.Join(hosts, ",")
+}
+
+func renderServicesJSON(services []ServiceHostConfig) string {
+	if len(services) == 0 {
+		return "{}"
+	}
+	m := make(map[string]string)
+	for _, host := range services {
+		for svc, role := range host.Roles {
+			m[svc] = role
+			if host.Name != "" {
+				m[host.Name+"."+svc] = role
+			}
+		}
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
 }
 
 func (local Local) command(ctx context.Context, operationRoot, script string, args ...string) ([]byte, error) {

@@ -192,7 +192,7 @@ func runAttachments(ctx context.Context, config Config, args []string, output, e
 		if err != nil {
 			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 		}
-		return emit(output, result, jsonOutput, "openlia attachments: runtime capabilities redacted")
+		return emit(output, result, jsonOutput, FormatAttachmentListHuman(result))
 	case "generate":
 		if len(args) != 0 {
 			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("attachments generate accepts no arguments"))

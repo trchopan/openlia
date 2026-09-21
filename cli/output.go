@@ -90,6 +90,7 @@ Usage:
   openlia skills list|show|status|fork|migrate|enable|disable|test
   openlia auth list|setup|rotate
   openlia attachments list
+  openlia attachments map <host> <service> --role <role>
   openlia attachments rotate <host> --source PATH
   openlia backup create|restore
   openlia workspace git setup|status
