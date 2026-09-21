@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,6 +39,8 @@ type Config struct {
 	ExternalNetwork   string
 	APIEnabled        bool
 	APIHost           string
+	ServiceRoles      map[string]string
+	ConfiguredHosts   []string
 }
 
 // LoadConfig reads the process environment.
@@ -124,6 +127,21 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 				return Config{}, fmt.Errorf("OPENLIA_ENABLED_SKILLS contains an empty skill")
 			}
 			config.EnabledSkills = append(config.EnabledSkills, skill)
+		}
+	}
+	config.ServiceRoles = make(map[string]string)
+	if rawRoles := values["OPENLIA_SERVICE_ROLES"]; rawRoles != "" {
+		var roles map[string]string
+		if err := json.Unmarshal([]byte(rawRoles), &roles); err == nil {
+			config.ServiceRoles = roles
+		}
+	}
+	if rawHosts := values["OPENLIA_CONFIGURED_HOSTS"]; rawHosts != "" {
+		for _, host := range strings.Split(rawHosts, ",") {
+			host = strings.TrimSpace(host)
+			if host != "" {
+				config.ConfiguredHosts = append(config.ConfiguredHosts, host)
+			}
 		}
 	}
 	return config, nil

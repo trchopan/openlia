@@ -182,3 +182,128 @@ func TestProtectedSourcePathRequiresMode600(t *testing.T) {
 		t.Fatal("insecure secret source was accepted")
 	}
 }
+
+func TestConfigServicesRoundTrip(t *testing.T) {
+	temporary := t.TempDir()
+	sourcePath := filepath.Join(temporary, "locho-attachments.toml")
+	if err := os.WriteFile(sourcePath, []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(temporary, "config.toml")
+	t.Setenv("OPENLIA_CONFIG", path)
+	want := defaultConfig()
+	want.Services = []ServiceHostConfig{
+		{
+			Name:   "m1pro",
+			Source: sourcePath,
+			Roles: map[string]string{
+				"playwright": RolePlaywrightBrowser,
+				"genai":      RoleOpenAIEndpoint,
+			},
+		},
+	}
+	if err := saveConfig(want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Services) != 1 {
+		t.Fatalf("expected 1 service host, got %d", len(got.Services))
+	}
+	host := got.Services[0]
+	if host.Name != "m1pro" || host.Source != sourcePath || len(host.Roles) != 2 || host.Roles["playwright"] != RolePlaywrightBrowser || host.Roles["genai"] != RoleOpenAIEndpoint {
+		t.Fatalf("services round-trip mismatch: got %#v want %#v", host, want.Services[0])
+	}
+}
+
+func TestConfigServicesMultiHostRoundTrip(t *testing.T) {
+	temporary := t.TempDir()
+	source1 := filepath.Join(temporary, "host1.toml")
+	source2 := filepath.Join(temporary, "host2.toml")
+	_ = os.WriteFile(source1, []byte("h1"), 0o600)
+	_ = os.WriteFile(source2, []byte("h2"), 0o600)
+	path := filepath.Join(temporary, "config.toml")
+	t.Setenv("OPENLIA_CONFIG", path)
+	want := defaultConfig()
+	want.Services = []ServiceHostConfig{
+		{
+			Name:   "m1pro",
+			Source: source1,
+			Roles: map[string]string{
+				"playwright": RolePlaywrightBrowser,
+			},
+		},
+		{
+			Name:   "gpu-server",
+			Source: source2,
+			Roles: map[string]string{
+				"vllm": RoleOpenAIEndpoint,
+			},
+		},
+	}
+	if err := saveConfig(want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Services) != 2 {
+		t.Fatalf("expected 2 service hosts, got %d", len(got.Services))
+	}
+	if got.Services[0].Name != "m1pro" || got.Services[1].Name != "gpu-server" {
+		t.Fatalf("unexpected hosts: got %#v", got.Services)
+	}
+}
+
+func TestConfigServicesRejectsInvalidRole(t *testing.T) {
+	for _, invalid := range []string{"generic", "image-generator", "unassigned", "custom", ""} {
+		config := defaultConfig()
+		config.Services = []ServiceHostConfig{
+			{
+				Name: "laptop",
+				Roles: map[string]string{
+					"svc": invalid,
+				},
+			},
+		}
+		if err := validateConfig(config); err == nil {
+			t.Fatalf("invalid service role %q was accepted", invalid)
+		}
+	}
+}
+
+func TestConfigServicesRejectsDottedKey(t *testing.T) {
+	data := `
+[openlia]
+schema = 1
+version = "0.1.0"
+mode = "local"
+root = ".openlia"
+project = "openlia"
+model = "gpt-5.6-luna"
+timezone = "UTC"
+provider = "openai-api"
+
+[[services]]
+name = "m1pro"
+"m1pro.genai" = "openai-endpoint"
+`
+	_, err := parseConfig(data)
+	if err == nil {
+		t.Fatal("expected error on dotted service key, got nil")
+	}
+}
+
+func TestConfigServicesRejectsDuplicateHost(t *testing.T) {
+	config := defaultConfig()
+	config.Services = []ServiceHostConfig{
+		{Name: "m1pro"},
+		{Name: "m1pro"},
+	}
+	if err := validateConfig(config); err == nil {
+		t.Fatal("expected error on duplicate host name, got nil")
+	}
+}

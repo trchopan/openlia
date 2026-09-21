@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -109,7 +110,7 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 		case options.Component == "all":
 			args = []string{"up", "-d"}
 			if options.Action == "deploy" {
-				args = append(args, "--build")
+				args = append(args, "--build", "--remove-orphans")
 			}
 		case options.Component == "hermes":
 			args = []string{"up", "-d"}
@@ -128,9 +129,13 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 			}
 			args = append(args, append([]string{"--no-deps"}, services...)...)
 		}
-		if _, err := compose.Run(ctx, args...); err != nil {
-			_ = RecordChange(config, options.Action, "failed", backup, "Compose start failed", now)
-			return DeployResult{}, fmt.Errorf("Compose start failed")
+		if res, err := compose.Run(ctx, args...); err != nil {
+			msg := strings.TrimSpace(string(res.Stderr))
+			if msg == "" {
+				msg = strings.TrimSpace(string(res.Stdout))
+			}
+			_ = RecordChange(config, options.Action, "failed", backup, "Compose start failed: "+msg, now)
+			return DeployResult{}, fmt.Errorf("Compose start failed (%s): %w", msg, err)
 		}
 		// Normalize the bind-mounted workspace through the container user, not a
 		// host-side chown that may not exist on Docker Desktop.
@@ -379,6 +384,15 @@ func Healthcheck(ctx context.Context, config Config, compose Compose, allowStopp
 		add("secret_source", true, "mode_0600")
 	} else {
 		add("secret_source", false, "missing_or_wrong_mode")
+	}
+	attachments, attachErr := ListAttachments(config)
+	if attachErr == nil && len(attachments.Hosts) > 0 {
+		registryPath := filepath.Join(config.DataRoot, "services.json")
+		if info, statErr := os.Stat(registryPath); statErr == nil && info.Mode().IsRegular() {
+			add("services_registry", true, "present")
+		} else {
+			add("services_registry", false, "missing")
+		}
 	}
 	return result, nil
 }
