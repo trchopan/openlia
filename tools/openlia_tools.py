@@ -291,14 +291,12 @@ class JobService:
                     self.browser_client = module.PlaywrightMcpClient(os.getenv("OPENLIA_BROWSER_MCP_URL", ""))
                 os.environ["HERMES_HOME"] = str(self.data_root)
                 os.environ["OPENLIA_TOOLS_WORKER"] = "1"
-                os.environ["OPENLIA_BROWSER_REUSE_TAB"] = "1"
                 execute = module.execute_gemini_chat if row["tool"] == "gemini-chat" else module.execute_chatgpt_chat
                 execute(
                     prompt=str(row["prompt"]),
                     topic=str(row["topic"]),
                     output_path=str(row["output_path"]),
                     mcp_url=os.getenv("OPENLIA_BROWSER_MCP_URL", ""),
-                    keep_tab=True,
                     timeout=int(row["timeout_seconds"]),
                     client=self.browser_client,
                 )

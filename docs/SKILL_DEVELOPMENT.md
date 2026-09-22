@@ -113,7 +113,7 @@ make skills-verify
 ```
 
 > [!NOTE]
-> **Browser Tab Lifecycle**: Upon successful completion, scripts automatically close their tab via `browser_tabs(action="close")` unless `--keep-tab` is specified. If an error or gatekeeper failure occurs, the tab is kept open so you can immediately inspect the browser DOM, modal states, or network errors. When running unattended, `enforce_tab_cap()` automatically prunes stale background tabs to prevent tab leaks.
+> **Browser Tab Lifecycle**: Each script run opens an isolated tab and closes it after successful completion via `browser_tabs(action="close")`. If an error or gatekeeper failure occurs, the worker resets the browser context before the next job. When running unattended, `enforce_tab_cap()` also prunes stale background tabs to prevent tab leaks.
 >
 > **Log Retention (`.playwright-mcp/`)**: `@playwright/mcp` generates console logs and accessibility snapshots under `.playwright-mcp/`. OpenLia includes an automated log pruner (`prune_playwright_mcp_logs()`) in all runners that evicts files older than 24h and caps the directory to 20 files. You can also run `make clean-logs` to flush all temporary logs on demand.
 

@@ -698,8 +698,6 @@ def execute_gemini_chat(
     topic: str = "",
     output_path: str = "",
     mcp_url: str = "",
-    continue_session: bool = False,
-    keep_tab: bool = False,
     timeout: float = 180.0,
     client: PlaywrightMcpClient | None = None,
 ) -> str:
@@ -709,32 +707,27 @@ def execute_gemini_chat(
     client = client or PlaywrightMcpClient(target_mcp_url)
     enforce_tab_cap(client, max_tabs=2)
 
-    if not continue_session:
-        # Step 1: Reuse the connected tab for the persistent worker. Standalone
-        # runs create a fresh tab so they do not disturb an existing session.
-        if os.getenv("OPENLIA_BROWSER_REUSE_TAB") == "1":
-            client.call_tool("browser_navigate", {"url": "https://gemini.google.com/app"})
-        else:
-            client.call_tool("browser_tabs", {"action": "new", "url": "https://gemini.google.com/app"})
-        time.sleep(3)
+    # Start every job in a fresh ephemeral conversation.
+    client.call_tool("browser_tabs", {"action": "new", "url": "https://gemini.google.com/app"})
+    time.sleep(3)
 
-        # Step 2: Gatekeeper Check
-        snap = client.call_tool("browser_snapshot", {})
-        snap_text = client.get_tool_text(snap)
+    # Gatekeeper Check
+    snap = client.call_tool("browser_snapshot", {})
+    snap_text = client.get_tool_text(snap)
 
-        if not detect_temporary_chat_state(snap_text):
-            # Click sidebar Temporary Chat toggle
-            client.call_tool("browser_click", {"target": 'button[aria-label="Temporary chat"]'})
-            confirmed = False
-            for _ in range(6):
-                time.sleep(1)
-                snap = client.call_tool("browser_snapshot", {})
-                snap_text = client.get_tool_text(snap)
-                if detect_temporary_chat_state(snap_text):
-                    confirmed = True
-                    break
-            if not confirmed:
-                raise RuntimeError("Zero-Tolerance Gatekeeper: Gemini Temporary Chat mode could not be verified. Aborting query.")
+    if not detect_temporary_chat_state(snap_text):
+        # Click sidebar Temporary Chat toggle
+        client.call_tool("browser_click", {"target": 'button[aria-label="Temporary chat"]'})
+        confirmed = False
+        for _ in range(6):
+            time.sleep(1)
+            snap = client.call_tool("browser_snapshot", {})
+            snap_text = client.get_tool_text(snap)
+            if detect_temporary_chat_state(snap_text):
+                confirmed = True
+                break
+        if not confirmed:
+            raise RuntimeError("Zero-Tolerance Gatekeeper: Gemini Temporary Chat mode could not be verified. Aborting query.")
 
     # Capture the existing response count before submitting this prompt.
     initial_state = read_completion_state(client, prompt)
@@ -794,8 +787,7 @@ def execute_gemini_chat(
         f.write(yaml_data)
 
     # Step 8: Session Teardown on success
-    if not keep_tab:
-        close_current_tab(client)
+    close_current_tab(client)
 
     return output_path
 
@@ -926,8 +918,6 @@ def main() -> None:
     parser.add_argument("--topic", "-t", type=str, default="", help="Conversation topic for metadata and filename")
     parser.add_argument("--output", "-o", type=str, default="", help="Output YAML file path")
     parser.add_argument("--mcp-url", type=str, default="", help="Playwright MCP server base URL")
-    parser.add_argument("--continue", dest="continue_session", action="store_true", help="Continue in existing temporary chat tab")
-    parser.add_argument("--keep-tab", action="store_true", help="Keep browser tab open after completion")
     parser.add_argument("--timeout", type=float, default=180.0, help="Response completion timeout in seconds")
 
     # Legacy compatibility helpers
@@ -979,8 +969,6 @@ def main() -> None:
             topic=args.topic,
             output_path=args.output,
             mcp_url=args.mcp_url,
-            continue_session=args.continue_session,
-            keep_tab=args.keep_tab,
             timeout=args.timeout,
         )
         print(f"saved: {out}")

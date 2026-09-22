@@ -1,6 +1,6 @@
 ---
 name: gemini-chat
-description: MANDATORY Temporary Chat automated research via Google Gemini web UI with ephemeral banner gatekeeper, authentic Markdown extraction, Google Search grounding, and YAML export.
+description: MANDATORY isolated Temporary Chat automated research via Google Gemini web UI with ephemeral banner gatekeeper, authentic Markdown extraction, Google Search grounding, and YAML export.
 version: 0.2.0
 platforms: [linux, macos]
 required_environment_variables: []
@@ -15,10 +15,10 @@ metadata:
 
 ## When to Use
 
-Use this skill to conduct deep research, code review, large-context analysis (up to 1M+ tokens), and Google Search-grounded inquiries using the official **Google Gemini** web interface (`gemini.google.com`), saving complete multi-turn transcripts into standardized OpenLia YAML knowledge files.
+Use this skill to conduct deep research, code review, large-context analysis (up to 1M+ tokens), and Google Search-grounded inquiries using the official **Google Gemini** web interface (`gemini.google.com`), saving each completed query and response into standardized OpenLia YAML knowledge files.
 
 - **Google Search Grounding**: Leverage Gemini's real-time Google search integration for recent developments, documentation, and live web facts.
-- **Large Context & Reasoning**: Offload long-document review or multi-turn technical reasoning to Gemini 1.5 Pro / 2.0 Flash Thinking.
+- **Large Context & Reasoning**: Offload long-document review or complex technical reasoning to Gemini 1.5 Pro / 2.0 Flash Thinking.
 - **Durable Knowledge Ingestion**: Serialize verbatim dialogues into `workspace/knowledge/gemini/` matching the OpenLia frontend-ready schema with sanitized citations.
 
 ---
@@ -57,14 +57,6 @@ for the full remote-browser conversation.
 6. **Authentic Markdown & Grounding Extraction**: Intercepts `navigator.clipboard.writeText` and triggers Gemini's Copy response button to extract 100% authentic Markdown (tables, code blocks), unwraps Google redirect URLs (`https://www.google.com/url?q=...`), and derives clean citation titles.
 7. **YAML Serialization**: Writes the conversation to `workspace/knowledge/gemini/YYYYMMDD_HHMMSS_<slug>.yaml`.
 8. **Session Cleanup**: Resets the browser tab to `about:blank`.
-
-### Multi-Turn Conversation (Follow-ups)
-To continue a conversation without resetting the chat session:
-```bash
-python3 /opt/data/skills/browser-pilot/scripts/openlia_job.py submit gemini-chat \
-  --prompt "Explain browser support specifically for Chrome and Firefox." \
-  --topic "Wasm GC 2026 follow-up"
-```
 
 ---
 

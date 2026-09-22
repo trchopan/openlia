@@ -1,6 +1,6 @@
 ---
 name: chatgpt-chat
-description: MANDATORY Temporary Chat (?temporary-chat=true) automated research via ChatGPT web UI with zero-tolerance gatekeeper, authentic Markdown extraction, and YAML export.
+description: MANDATORY isolated Temporary Chat (?temporary-chat=true) research via ChatGPT web UI with zero-tolerance gatekeeper, authentic Markdown extraction, and YAML export.
 version: 0.2.0
 platforms: [linux, macos]
 required_environment_variables: []
@@ -15,11 +15,11 @@ metadata:
 
 ## When to Use
 
-Use this skill to leverage the ChatGPT web interface (including ChatGPT Search, Advanced Data Analysis, or thinking models) to research, draft, compare technical architectures, or offload complex inquiries, while guaranteeing user privacy through **Temporary Chat** mode and saving the complete multi-turn dialogue into structured YAML.
+Use this skill to leverage the ChatGPT web interface (including ChatGPT Search, Advanced Data Analysis, or thinking models) to research, draft, compare technical architectures, or offload complex inquiries, while guaranteeing user privacy through **Temporary Chat** mode and saving each completed query and response into structured YAML.
 
 - **Deep Reasoning & Comparison**: Offload complex comparative analysis or code generation to specialized ChatGPT models.
 - **Privacy-Preserving Research**: Enforce Temporary Chat mode so discussions are neither saved to user chat history nor used for model training.
-- **Knowledge Base Ingestion**: Serialize verbatim turns into standard YAML containing rich Markdown for durable storage in `workspace/knowledge/chatgpt/`.
+- **Knowledge Base Ingestion**: Serialize the completed query and response into standard YAML containing rich Markdown for durable storage in `workspace/knowledge/chatgpt/`.
 
 ---
 
@@ -57,14 +57,6 @@ for the full remote-browser conversation.
 6. **Authentic Markdown & Citation Extraction**: Intercepts `navigator.clipboard.writeText` and triggers ChatGPT's "Copy response" button to capture 100% authentic Markdown (tables, code blocks, headers), cleans tracking query parameters, and derives clean citation titles.
 7. **YAML Serialization**: Writes the conversation to `workspace/knowledge/chatgpt/YYYYMMDD_HHMMSS_<slug>.yaml`.
 8. **Session Cleanup**: Resets the browser tab to `about:blank`.
-
-### Multi-Turn Conversation (Follow-ups)
-To continue a conversation without resetting the chat session:
-```bash
-python3 /opt/data/skills/browser-pilot/scripts/openlia_job.py submit chatgpt-chat \
-  --prompt "Now compare performance and memory overhead." \
-  --topic "Go vs Rust Channels follow-up"
-```
 
 ---
 
