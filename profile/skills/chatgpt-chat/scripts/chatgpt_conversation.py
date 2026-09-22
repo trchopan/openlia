@@ -625,8 +625,6 @@ def execute_chatgpt_chat(
     topic: str = "",
     output_path: str = "",
     mcp_url: str = "",
-    continue_session: bool = False,
-    keep_tab: bool = False,
     timeout: float = 180.0,
     client: PlaywrightMcpClient | None = None,
 ) -> str:
@@ -636,29 +634,24 @@ def execute_chatgpt_chat(
     client = client or PlaywrightMcpClient(target_mcp_url)
     enforce_tab_cap(client, max_tabs=2)
 
-    if not continue_session:
-        # Step 1: Reuse the connected tab for the persistent worker. Standalone
-        # runs create a fresh tab so they do not disturb an existing session.
-        if os.getenv("OPENLIA_BROWSER_REUSE_TAB") == "1":
-            client.call_tool("browser_navigate", {"url": "https://chatgpt.com/?temporary-chat=true"})
-        else:
-            client.call_tool("browser_tabs", {"action": "new", "url": "https://chatgpt.com/?temporary-chat=true"})
-        time.sleep(3)
+    # Start every job in a fresh temporary conversation.
+    client.call_tool("browser_tabs", {"action": "new", "url": "https://chatgpt.com/?temporary-chat=true"})
+    time.sleep(3)
 
-        # Step 2: Gatekeeper Check
+    # Gatekeeper Check
+    snap = client.call_tool("browser_snapshot", {})
+    snap_text = client.get_tool_text(snap)
+
+    if not detect_temporary_chat_state(snap_text):
+        # Attempt to click model selector / temporary switch if visible
+        client.call_tool("browser_click", {"target": 'button[data-testid="model-selector-dropdown"], button[aria-label*="Model"]'})
+        time.sleep(1)
+        client.call_tool("browser_click", {"target": 'button[role="switch"], div:has-text("Temporary chat")'})
+        time.sleep(2)
         snap = client.call_tool("browser_snapshot", {})
         snap_text = client.get_tool_text(snap)
-
         if not detect_temporary_chat_state(snap_text):
-            # Attempt to click model selector / temporary switch if visible
-            client.call_tool("browser_click", {"target": 'button[data-testid="model-selector-dropdown"], button[aria-label*="Model"]'})
-            time.sleep(1)
-            client.call_tool("browser_click", {"target": 'button[role="switch"], div:has-text("Temporary chat")'})
-            time.sleep(2)
-            snap = client.call_tool("browser_snapshot", {})
-            snap_text = client.get_tool_text(snap)
-            if not detect_temporary_chat_state(snap_text):
-                raise RuntimeError("Zero-Tolerance Gatekeeper: ChatGPT Temporary Chat mode could not be verified. Aborting query.")
+            raise RuntimeError("Zero-Tolerance Gatekeeper: ChatGPT Temporary Chat mode could not be verified. Aborting query.")
 
     # Capture the existing conversation length before submitting this prompt.
     initial_state = read_completion_state(client)
@@ -710,8 +703,7 @@ def execute_chatgpt_chat(
         f.write(yaml_data)
 
     # Step 8: Session Teardown on success
-    if not keep_tab:
-        close_current_tab(client)
+    close_current_tab(client)
 
     return output_path
 
@@ -840,8 +832,6 @@ def main() -> None:
     parser.add_argument("--topic", "-t", type=str, default="", help="Conversation topic for metadata and filename")
     parser.add_argument("--output", "-o", type=str, default="", help="Output YAML file path")
     parser.add_argument("--mcp-url", type=str, default="", help="Playwright MCP server base URL")
-    parser.add_argument("--continue", dest="continue_session", action="store_true", help="Continue in existing temporary chat tab")
-    parser.add_argument("--keep-tab", action="store_true", help="Keep browser tab open after completion")
     parser.add_argument("--timeout", type=float, default=180.0, help="Response completion timeout in seconds")
 
     # Legacy compatibility helpers
@@ -892,8 +882,6 @@ def main() -> None:
             topic=args.topic,
             output_path=args.output,
             mcp_url=args.mcp_url,
-            continue_session=args.continue_session,
-            keep_tab=args.keep_tab,
             timeout=args.timeout,
         )
         print(f"saved: {out}")
