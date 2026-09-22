@@ -3,6 +3,7 @@ package operator
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -65,5 +66,37 @@ func TestProfileSyncPreservesCustomizedSkillsAndTracksMetadata(t *testing.T) {
 	}
 	if unmanaged.Skills.Unmanaged != 1 || unmanaged.Skills.Results[0].Reason != "metadata_missing" {
 		t.Fatalf("missing provenance was not reported: %+v", unmanaged)
+	}
+}
+
+func TestProfileSyncRendersFallbackProviders(t *testing.T) {
+	repo := t.TempDir()
+	runtime := filepath.Join(t.TempDir(), "runtime")
+	configPath := filepath.Join(repo, "profile", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "profile", "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configTemplate := "model:\n  provider: copilot\n\n" + fallbackBlockStart + "\nfallback_providers: []\n" + fallbackBlockEnd + "\n"
+	if err := os.WriteFile(configPath, []byte(configTemplate), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := testConfig(repo, runtime)
+	config.FallbackProviders = []FallbackProviderConfig{
+		{Provider: "custom", Model: "gateway-model", BaseURL: "http://locho-laptop:11434/v1", KeyEnv: "OPENAI_GATEWAY_API_KEY"},
+		{Provider: "openai-api", Model: "official-model"},
+	}
+	if _, err := NewProfileOperator(config).Sync(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(config.DataRoot, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "base_url: \"http://locho-laptop:11434/v1\"\n    key_env: \"OPENAI_GATEWAY_API_KEY\"\n  - provider: \"openai-api\"\n    model: \"official-model\""
+	if !strings.Contains(string(data), want) {
+		t.Fatalf("fallback providers were not rendered:\n%s", data)
 	}
 }

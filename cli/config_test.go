@@ -14,6 +14,10 @@ func TestConfigRoundTrip(t *testing.T) {
 	want := defaultConfig()
 	want.Target = "operator@example.test"
 	want.Model = "test-model"
+	want.FallbackProviders = []FallbackProviderConfig{
+		{Provider: "custom", Model: "gateway-model", BaseURL: "https://gateway.example.test/v1", KeyEnv: "OPENAI_GATEWAY_API_KEY"},
+		{Provider: "openai-api", Model: "official-model"},
+	}
 	want.Timezone = "Asia/Tokyo"
 	want.SecretSource = filepath.Join(temporary, "hermes.env")
 	want.EnabledSkills = []string{"daily-briefing", "deep-research"}
@@ -33,7 +37,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Target != want.Target || got.Model != want.Model || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || got.WorkspaceGit != want.WorkspaceGit {
+	if got.Target != want.Target || got.Model != want.Model || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || got.WorkspaceGit != want.WorkspaceGit {
 		t.Fatalf("round trip mismatch: got %#v want %#v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -42,6 +46,37 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("config mode is %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestConfigRejectsInvalidFallbackProvider(t *testing.T) {
+	for _, endpoint := range []string{
+		"gateway.example.test/v1",
+		"https://user:pass@gateway.example.test/v1",
+		"https://gateway.example.test/v1?token=secret",
+		"https://gateway.example.test/v1#fragment",
+	} {
+		config := defaultConfig()
+		config.FallbackProviders = []FallbackProviderConfig{{Provider: "custom", Model: "gateway", BaseURL: endpoint}}
+		if err := validateConfig(config); err == nil {
+			t.Fatalf("gateway URL %q was accepted", endpoint)
+		}
+	}
+	config := defaultConfig()
+	config.FallbackProviders = []FallbackProviderConfig{{Provider: "custom", Model: "gateway"}}
+	if err := validateConfig(config); err == nil {
+		t.Fatal("custom fallback without base URL was accepted")
+	}
+}
+
+func TestConfigAcceptsFallbackProviders(t *testing.T) {
+	config := defaultConfig()
+	config.FallbackProviders = []FallbackProviderConfig{
+		{Provider: "custom", Model: "gateway", BaseURL: "http://gateway.example.test:8080/v1"},
+		{Provider: "openai-api", Model: "official"},
+	}
+	if err := validateConfig(config); err != nil {
+		t.Fatalf("valid gateway URL was rejected: %v", err)
 	}
 }
 
@@ -198,7 +233,7 @@ func TestConfigServicesRoundTrip(t *testing.T) {
 			Source: sourcePath,
 			Roles: map[string]string{
 				"playwright": RolePlaywrightBrowser,
-				"genai":      RoleOpenAIEndpoint,
+				"genai":      RoleOpenAIGateway,
 			},
 		},
 	}
@@ -213,7 +248,7 @@ func TestConfigServicesRoundTrip(t *testing.T) {
 		t.Fatalf("expected 1 service host, got %d", len(got.Services))
 	}
 	host := got.Services[0]
-	if host.Name != "m1pro" || host.Source != sourcePath || len(host.Roles) != 2 || host.Roles["playwright"] != RolePlaywrightBrowser || host.Roles["genai"] != RoleOpenAIEndpoint {
+	if host.Name != "m1pro" || host.Source != sourcePath || len(host.Roles) != 2 || host.Roles["playwright"] != RolePlaywrightBrowser || host.Roles["genai"] != RoleOpenAIGateway {
 		t.Fatalf("services round-trip mismatch: got %#v want %#v", host, want.Services[0])
 	}
 }
@@ -239,7 +274,7 @@ func TestConfigServicesMultiHostRoundTrip(t *testing.T) {
 			Name:   "gpu-server",
 			Source: source2,
 			Roles: map[string]string{
-				"vllm": RoleOpenAIEndpoint,
+				"vllm": RoleOpenAIGateway,
 			},
 		},
 	}
@@ -259,7 +294,7 @@ func TestConfigServicesMultiHostRoundTrip(t *testing.T) {
 }
 
 func TestConfigServicesRejectsInvalidRole(t *testing.T) {
-	for _, invalid := range []string{"generic", "image-generator", "unassigned", "custom", ""} {
+	for _, invalid := range []string{"generic", "image-generator", "unassigned", "custom", "openai-endpoint", ""} {
 		config := defaultConfig()
 		config.Services = []ServiceHostConfig{
 			{
@@ -289,7 +324,7 @@ provider = "openai-api"
 
 [[services]]
 name = "m1pro"
-"m1pro.genai" = "openai-endpoint"
+"m1pro.genai" = "openai-gateway"
 `
 	_, err := parseConfig(data)
 	if err == nil {

@@ -375,7 +375,7 @@ func TestLochoServiceRegistryAndRoleMapping(t *testing.T) {
 	}
 	config.ServiceRoles = map[string]string{
 		"laptop.playwright": "playwright-browser",
-		"laptop.ollama":     "openai-endpoint",
+		"laptop.ollama":     "openai-gateway",
 	}
 	attachmentDir := filepath.Join(config.LochoRoot, "laptop")
 	if err := os.MkdirAll(attachmentDir, 0o700); err != nil {
@@ -425,8 +425,8 @@ listen_port = 2222
 	if roleMap["playwright"] != "playwright-browser" {
 		t.Errorf("playwright role = %q, want 'playwright-browser'", roleMap["playwright"])
 	}
-	if roleMap["ollama"] != "openai-endpoint" {
-		t.Errorf("ollama role = %q, want 'openai-endpoint'", roleMap["ollama"])
+	if roleMap["ollama"] != "openai-gateway" {
+		t.Errorf("ollama role = %q, want 'openai-gateway'", roleMap["ollama"])
 	}
 	if roleMap["genai"] != "unassigned" {
 		t.Errorf("genai role = %q, want 'unassigned'", roleMap["genai"])
@@ -484,12 +484,14 @@ listen_port = 2222
 
 	for _, expected := range []string{
 		"OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8931\"",
-		"OPENLIA_OPENAI_ENDPOINT_URL: \"http://locho-laptop:11434\"",
 		"OPENLIA_SERVICE_LAPTOP_PLAYWRIGHT_URL: \"http://locho-laptop:8931\"",
 		"OPENLIA_SERVICE_LAPTOP_OLLAMA_URL: \"http://locho-laptop:11434\"",
 	} {
 		if !strings.Contains(composeText, expected) {
 			t.Errorf("generated Compose missing %q:\n%s", expected, composeText)
 		}
+	}
+	if strings.Contains(composeText, "OPENAI_BASE_URL") {
+		t.Fatalf("generated Compose must not configure OPENAI_BASE_URL:\n%s", composeText)
 	}
 }

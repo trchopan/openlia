@@ -97,6 +97,7 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"OPENLIA_PROVIDER=" + shellQuote(remote.Config.Provider),
 		"OPENLIA_EXTERNAL_NETWORK=" + shellQuote(remote.Config.ExternalNetwork),
 		"OPENLIA_MODEL=" + shellQuote(remote.Config.Model),
+		"OPENLIA_FALLBACK_PROVIDERS=" + shellQuote(renderFallbackProvidersJSON(remote.Config.FallbackProviders)),
 		"HERMES_TIMEZONE=" + shellQuote(remote.Config.Timezone),
 		"OPENLIA_HERMES_IMAGE=" + shellQuote(remote.Config.HermesImage),
 		"OPENLIA_LOCHO_IMAGE=" + shellQuote(remote.Config.LochoImage),
@@ -368,6 +369,7 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_PROVIDER=" + config.Provider,
 		"OPENLIA_EXTERNAL_NETWORK=" + config.ExternalNetwork,
 		"OPENLIA_MODEL=" + config.Model,
+		"OPENLIA_FALLBACK_PROVIDERS=" + renderFallbackProvidersJSON(config.FallbackProviders),
 		"HERMES_TIMEZONE=" + config.Timezone,
 		"OPENLIA_HERMES_IMAGE=" + config.HermesImage,
 		"OPENLIA_LOCHO_IMAGE=" + config.LochoImage,
@@ -390,6 +392,14 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_SERVICE_ROLES=" + renderServicesJSON(config.Services),
 		"OPENLIA_CONFIGURED_HOSTS=" + configuredHosts(config.Services),
 	}
+}
+
+func renderFallbackProvidersJSON(values []FallbackProviderConfig) string {
+	data, err := json.Marshal(values)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
 }
 
 func configuredHosts(services []ServiceHostConfig) string {

@@ -11,7 +11,8 @@ listen_port = 18765
 # Inside the private Compose network, Hermes and other containers reach these
 # services using http://locho-<host>:<listen_port>.
 # For example, if host is "<host>" and listen_port is 8088:
-#   OPENAI_BASE_URL="http://locho-<host>:8088/v1"
+# Configure this explicit endpoint in config.toml:
+#   base_url = "http://locho-<host>:8088/v1"
 # And for Playwright MCP on port 8931:
 #   OPENLIA_BROWSER_MCP_URL="http://locho-<host>:8931"
 

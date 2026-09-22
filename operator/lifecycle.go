@@ -324,7 +324,9 @@ func Healthcheck(ctx context.Context, config Config, compose Compose, allowStopp
 				add("provider_request", true, "completed")
 			}
 			if baseURL := parseBaseURL(config.SecretFile); baseURL != "" {
-				if strings.Contains(baseURL, "://localhost") || strings.Contains(baseURL, "://127.0.0.1") {
+				if config.Provider == "copilot" {
+					add("openai_endpoint", false, "OPENAI_BASE_URL_must_be_unset_use_openai_gateway")
+				} else if strings.Contains(baseURL, "://localhost") || strings.Contains(baseURL, "://127.0.0.1") {
 					add("openai_endpoint", false, "container_cannot_reach_host_localhost_use_locho_service")
 				}
 			}

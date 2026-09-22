@@ -19,7 +19,7 @@ Discovered services can be assigned roles using `openlia attachments map`:
 ```bash
 openlia attachments list
 openlia attachments map <host> <service> --role playwright-browser
-openlia attachments map <host> <service> --role openai-endpoint
+openlia attachments map <host> <service> --role openai-gateway
 ```
 
 Or directly in `~/.config/openlia/config.toml` using one `[[services]]` block per
@@ -32,11 +32,11 @@ name = "<host>"
 
 [[services]]
 name = "<another-host>"
-"<service>" = "openai-endpoint"
+"<service>" = "openai-gateway"
 ```
 
 Supported roles:
 - `playwright-browser`: Remote browser automation via Playwright MCP server. Wires `OPENLIA_BROWSER_MCP_URL` and manages `openlia-tools`.
-- `openai-endpoint`: OpenAI-compatible local model/gateway (e.g. Ollama, vLLM, GenAI). Wires `OPENLIA_OPENAI_ENDPOINT_URL`.
+- `openai-gateway`: OpenAI-compatible local model/gateway (e.g. Ollama, vLLM, GenAI). Declare its explicit `/v1` URL in the matching `fallback_providers` entry.
 
 All attached services are automatically published into the runtime service registry at `/opt/data/services.json` for Hermes and associated tools.

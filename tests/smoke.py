@@ -120,7 +120,7 @@ def validate_live_inputs(args: argparse.Namespace) -> tuple[Path, Path]:
         raise ValueError("locho-host must contain only letters, numbers, underscore, or hyphen")
     env_file = require_live_path(args.env_file, "env-file")
     attachments_file = require_live_path(args.attachments_file, "attachments-file")
-    required_keys = {"OPENAI_API_KEY", "OPENAI_BASE_URL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS"}
+    required_keys = {"COPILOT_GITHUB_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS"}
     seen_keys: set[str] = set()
     for raw_line in env_file.read_text(encoding="utf-8").splitlines():
         line = raw_line.rstrip("\r")
@@ -131,6 +131,8 @@ def validate_live_inputs(args: argparse.Namespace) -> tuple[Path, Path]:
         key, value = line.split("=", 1)
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) or not value:
             raise ValueError("env-file contains an invalid or empty assignment")
+        if key == "OPENAI_BASE_URL":
+            raise ValueError("env-file must not contain OPENAI_BASE_URL; configure an explicit fallback provider URL")
         seen_keys.add(key)
     missing_keys = sorted(required_keys - seen_keys)
     if missing_keys:
