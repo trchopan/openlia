@@ -13,7 +13,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -497,6 +497,16 @@ class PlaywrightMcpClient:
         )
         urllib.request.urlopen(req, timeout=5)
 
+    def close(self) -> None:
+        """Close the local SSE connection without making another MCP call."""
+        self.running = False
+        response = getattr(self, "resp", None)
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+
     def call_tool(self, name: str, arguments: dict, timeout: float = 90.0) -> dict:
         return self.call("tools/call", {"name": name, "arguments": arguments}, timeout=timeout)
 
@@ -506,6 +516,41 @@ class PlaywrightMcpClient:
             if item.get("type") == "text":
                 text += item.get("text", "")
         return text
+
+
+def prepare_temporary_chat(
+    client: PlaywrightMcpClient,
+    client_factory: Callable[[], PlaywrightMcpClient] | None = None,
+    retries: int = 2,
+) -> PlaywrightMcpClient:
+    """Preflight MCP and open Temporary Chat before any prompt is typed."""
+    last_error: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            tabs = client.call_tool("browser_tabs", {"action": "list"}, timeout=15.0)
+            tabs_text = client.get_tool_text(tabs)
+            if "chrome-extension://" not in tabs_text or "Welcome" not in tabs_text:
+                raise RuntimeError("no OpenLia-owned extension Welcome tab is available")
+            client._openlia_tab_owned = True
+            client.call_tool(
+                "browser_navigate",
+                {"url": "https://gemini.google.com/app"},
+                timeout=30.0,
+            )
+            return client
+        except Exception as error:
+            last_error = error
+            if getattr(client, "_openlia_tab_owned", False):
+                close_current_tab(client)
+            if client_factory is None or attempt >= retries:
+                break
+            client.close()
+            time.sleep(1.0)
+            client = client_factory()
+    raise RuntimeError(
+        "Browser MCP transport was unavailable before Gemini prompt submission; "
+        "no prompt was sent"
+    ) from last_error
 
 
 def extract_eval_json(raw_text: str) -> Any:
@@ -700,96 +745,98 @@ def execute_gemini_chat(
     mcp_url: str = "",
     timeout: float = 180.0,
     client: PlaywrightMcpClient | None = None,
+    client_factory: Callable[[], PlaywrightMcpClient] | None = None,
 ) -> str:
     """Execute Gemini chat query via Playwright MCP and output standardized YAML."""
     prune_playwright_mcp_logs(".playwright-mcp", max_files=20, max_age_hours=24)
     target_mcp_url = mcp_url or os.getenv("OPENLIA_BROWSER_MCP_URL", "http://localhost:8931")
     client = client or PlaywrightMcpClient(target_mcp_url)
-    enforce_tab_cap(client, max_tabs=2)
-
-    # Start every job in a fresh ephemeral conversation.
-    client.call_tool("browser_tabs", {"action": "new", "url": "https://gemini.google.com/app"})
-    time.sleep(3)
-
-    # Gatekeeper Check
-    snap = client.call_tool("browser_snapshot", {})
-    snap_text = client.get_tool_text(snap)
-
-    if not detect_temporary_chat_state(snap_text):
-        # Click sidebar Temporary Chat toggle
-        client.call_tool("browser_click", {"target": 'button[aria-label="Temporary chat"]'})
-        confirmed = False
-        for _ in range(6):
-            time.sleep(1)
-            snap = client.call_tool("browser_snapshot", {})
-            snap_text = client.get_tool_text(snap)
-            if detect_temporary_chat_state(snap_text):
-                confirmed = True
-                break
-        if not confirmed:
-            raise RuntimeError("Zero-Tolerance Gatekeeper: Gemini Temporary Chat mode could not be verified. Aborting query.")
-
-    # Capture the existing response count before submitting this prompt.
-    initial_state = read_completion_state(client, prompt)
-    initial_model_count = int(initial_state.get("model_count", 0))
-
-    # Step 3: Type and submit prompt
-    client.call_tool("browser_type", {
-        "target": 'div.ql-editor[contenteditable="true"]',
-        "text": prompt,
-    })
-    time.sleep(0.5)
+    tab_owned = False
     try:
-        client.call_tool("browser_click", {"target": 'button[aria-label="Send message"]'})
-    except Exception:
-        client.call_tool("browser_press_key", {"key": "Enter"})
+        client = prepare_temporary_chat(client, client_factory=client_factory)
+        tab_owned = bool(getattr(client, "_openlia_tab_owned", False))
+        enforce_tab_cap(client, max_tabs=2)
+        time.sleep(3)
 
-    # Step 4: Wait for a new model response to finish and stabilize.
-    wait_for_completion(client, prompt, initial_model_count, timeout)
+        # Gatekeeper Check
+        snap = client.call_tool("browser_snapshot", {})
+        snap_text = client.get_tool_text(snap)
 
-    # Step 5: Extract turns via clipboard interception
-    eval_res = client.call_tool("browser_evaluate", {"function": browser_script(EXTRACTION_JS, prompt)})
-    raw_eval_text = client.get_tool_text(eval_res)
-    turns = extract_eval_json(raw_eval_text)
+        if not detect_temporary_chat_state(snap_text):
+            # Click sidebar Temporary Chat toggle
+            client.call_tool("browser_click", {"target": 'button[aria-label="Temporary chat"]'})
+            confirmed = False
+            for _ in range(6):
+                time.sleep(1)
+                snap = client.call_tool("browser_snapshot", {})
+                snap_text = client.get_tool_text(snap)
+                if detect_temporary_chat_state(snap_text):
+                    confirmed = True
+                    break
+            if not confirmed:
+                raise RuntimeError("Zero-Tolerance Gatekeeper: Gemini Temporary Chat mode could not be verified. Aborting query.")
 
-    validate_turn_sequence(turns)
+        # Capture the existing response count before submitting this prompt.
+        initial_state = read_completion_state(client, prompt)
+        initial_model_count = int(initial_state.get("model_count", 0))
 
-    # Step 5b: Verify URL did not branch into persistent conversation
-    url_eval = client.call_tool("browser_evaluate", {"function": "() => window.location.href"})
-    curr_url_raw = client.get_tool_text(url_eval)
-    try:
-        curr_url = extract_eval_json(curr_url_raw)
-    except Exception:
-        curr_url = curr_url_raw
-    if isinstance(curr_url, str) and re.search(r"/app/[a-zA-Z0-9_-]{10,}", curr_url):
-        raise RuntimeError(f"Gatekeeper Leak Detected: Gemini persisted chat into URL: {curr_url}")
+        # Step 3: Type and submit prompt
+        client.call_tool("browser_type", {
+            "target": 'div.ql-editor[contenteditable="true"]',
+            "text": prompt,
+        })
+        time.sleep(0.5)
+        try:
+            client.call_tool("browser_click", {"target": 'button[aria-label="Send message"]'})
+        except Exception:
+            client.call_tool("browser_press_key", {"key": "Enter"})
 
-    # Step 6: Assemble YAML
-    topic_str = topic or prompt[:40]
-    meta = {
-        "platform": "gemini",
-        "topic": topic_str,
-        "model": "Gemini",
-        "url": "https://gemini.google.com/app",
-    }
-    yaml_data = build_conversation_yaml(meta, turns)
+        # Step 4: Wait for a new model response to finish and stabilize.
+        wait_for_completion(client, prompt, initial_model_count, timeout)
 
-    # Step 7: Save output
-    if not output_path:
-        filename = generate_timestamped_filename(topic_str)
-        workspace_dir = os.path.join(resolve_workspace_root(), "knowledge", "gemini")
-        os.makedirs(workspace_dir, exist_ok=True)
-        output_path = os.path.join(workspace_dir, filename)
-    else:
-        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        # Step 5: Extract turns via clipboard interception
+        eval_res = client.call_tool("browser_evaluate", {"function": browser_script(EXTRACTION_JS, prompt)})
+        raw_eval_text = client.get_tool_text(eval_res)
+        turns = extract_eval_json(raw_eval_text)
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(yaml_data)
+        validate_turn_sequence(turns)
 
-    # Step 8: Session Teardown on success
-    close_current_tab(client)
+        # Step 5b: Verify URL did not branch into persistent conversation
+        url_eval = client.call_tool("browser_evaluate", {"function": "() => window.location.href"})
+        curr_url_raw = client.get_tool_text(url_eval)
+        try:
+            curr_url = extract_eval_json(curr_url_raw)
+        except Exception:
+            curr_url = curr_url_raw
+        if isinstance(curr_url, str) and re.search(r"/app/[a-zA-Z0-9_-]{10,}", curr_url):
+            raise RuntimeError(f"Gatekeeper Leak Detected: Gemini persisted chat into URL: {curr_url}")
 
-    return output_path
+        # Step 6: Assemble YAML
+        topic_str = topic or prompt[:40]
+        meta = {
+            "platform": "gemini",
+            "topic": topic_str,
+            "model": "Gemini",
+            "url": "https://gemini.google.com/app",
+        }
+        yaml_data = build_conversation_yaml(meta, turns)
+
+        # Step 7: Save output
+        if not output_path:
+            filename = generate_timestamped_filename(topic_str)
+            workspace_dir = os.path.join(resolve_workspace_root(), "knowledge", "gemini")
+            os.makedirs(workspace_dir, exist_ok=True)
+            output_path = os.path.join(workspace_dir, filename)
+        else:
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(yaml_data)
+
+        return output_path
+    finally:
+        if tab_owned:
+            close_current_tab(client)
 
 
 def live_verify(mcp_url: str = "") -> None:

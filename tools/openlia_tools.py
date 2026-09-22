@@ -287,8 +287,15 @@ class JobService:
                 scripts_root = self.data_root / "skills" / row["tool"] / "scripts"
                 sys.path.insert(0, str(scripts_root))
                 module = __import__(module_name)
-                if self.browser_client is None:
+                def new_browser_client() -> Any:
+                    if self.browser_client is not None:
+                        close_browser_client(self.browser_client)
                     self.browser_client = module.PlaywrightMcpClient(os.getenv("OPENLIA_BROWSER_MCP_URL", ""))
+                    return self.browser_client
+
+                # Do not carry an SSE/MCP session across jobs. The extension
+                # relay can keep a stale connection alive after a tunnel reset.
+                self.browser_client = new_browser_client()
                 os.environ["HERMES_HOME"] = str(self.data_root)
                 os.environ["OPENLIA_TOOLS_WORKER"] = "1"
                 execute = module.execute_gemini_chat if row["tool"] == "gemini-chat" else module.execute_chatgpt_chat
@@ -299,21 +306,32 @@ class JobService:
                     mcp_url=os.getenv("OPENLIA_BROWSER_MCP_URL", ""),
                     timeout=int(row["timeout_seconds"]),
                     client=self.browser_client,
+                    client_factory=new_browser_client,
                 )
             if not Path(str(row["output_path"])).is_file():
                 self.store.update(job_id, "failed", "worker", "browser job completed without a result file")
             else:
                 self.store.update(job_id, "completed", "completed")
         except Exception:
-            if self.browser_client is not None:
-                try:
-                    self.browser_client.call_tool("browser_navigate", {"url": "about:blank"})
-                except Exception:
-                    pass
+            close_browser_client(self.browser_client)
             self.browser_client = None
             self.store.update(job_id, "failed", "worker", redact(traceback.format_exc()))
         finally:
+            close_browser_client(self.browser_client)
+            self.browser_client = None
             self.active_job_id = None
+
+
+def close_browser_client(client: Any) -> None:
+    """Close a browser client locally; never make a network cleanup call."""
+    if client is None:
+        return
+    close = getattr(client, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass
 
 
 class Handler(BaseHTTPRequestHandler):
