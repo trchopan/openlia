@@ -1,178 +1,125 @@
-# Local Skill Development & Testing Guide
+# Skill Development And Testing
 
-This guide describes how to develop, test, and verify OpenLia skills locally on your development machine **without deploying them to a running agent** or touching real user workspace data.
+OpenLia supports two different skill workflows. Bundled skills are developed in
+this repository and shipped with OpenLia. External skills are fetched from
+configured GitHub repositories and use the external manager described in
+[`EXTERNAL_SKILLS.md`](EXTERNAL_SKILLS.md). Their dependency and test contracts
+are intentionally different.
 
----
+## Bundled Skills
 
-## 1. Core Principles & Environment Separation
+Bundled skills live at `profile/skills/<name>/` and normally contain:
 
-When developing skills for OpenLia:
-1. **Zero Production Contamination**: Test runs must never write to `/opt/data/workspace` or modify active user chats. Use dedicated isolated test paths (e.g. `/tmp/openlia_verify/`).
-2. **No Running Agent Required**: You do **not** need Docker, the Hermes container, or the remote Raspberry Pi host active. All development and testing occurs via standalone Python scripts and local Playwright MCP.
-3. **Layered Verification**: Skills are tested in four tiers, starting with sub-second offline unit tests up to live browser canary verification.
-
----
-
-## 2. Skill Directory Structure
-
-Every skill resides in [`profile/skills/<skill-name>/`](file:///Users/quangtran/Sync/learn-ai/open_lia/profile/skills/):
-
-```
-profile/skills/<skill-name>/
-├── SKILL.md              # Frontmatter metadata (name, description, tags) and agent instructions
-├── requirements.txt      # (Optional) Explicit pinned Python dependencies (e.g. PyYAML==6.0.2)
-├── scripts/              # Standalone Python scripts executed by agent or developer
-│   └── <helper>.py       # Must implement --self-test and execution modes
-├── templates/            # (Optional) Domain Markdown templates
-└── references/           # (Optional) Domain guidelines or rubrics
+```text
+profile/skills/<name>/
+|-- SKILL.md
+|-- requirements.txt       # Optional; only for dependencies bundled by OpenLia
+|-- scripts/               # Optional deterministic helpers
+|-- templates/             # Optional Markdown templates
+`-- references/            # Optional guidance or rubrics
 ```
 
-### Frontmatter Requirements (`SKILL.md`)
-```yaml
----
-name: skill-name
-description: Clear 1-sentence summary of what the skill accomplishes.
-version: 0.2.0
-platforms: [linux, macos]
-required_environment_variables: []
-required_credential_files: []
-metadata:
-  hermes:
-    tags: [personal-os, automation, category]
-    category: automation
----
-```
+Follow the frontmatter and conventions already used by neighboring bundled
+skills. A Python helper should provide a deterministic, offline `--self-test`
+when the repository test harness expects one. Run the bundled checks from the
+repository root:
 
----
-
-## 3. Dependency Management & Security Policy
-
-OpenLia uses a permissive yet strictly governed dependency policy for skills:
-- **Battle-Tested Libraries Preferred**: Rather than writing custom, fragile parsers or network implementations, skills are encouraged to leverage high-quality, standard ecosystem libraries (e.g., `PyYAML`, `pydantic`) for stable, predictable results.
-- **Strict Version Pinning**: All dependencies must be explicitly pinned with exact versions (`==`) in the skill's own `requirements.txt` (e.g. `PyYAML==6.0.2`).
-- **Aggregated Manifest**: Root [`requirements-dev.txt`](../requirements-dev.txt) aggregates all skill requirements into a single source of truth.
-- **Reproducible Local Environment (`make venv`)**:
-  Run `make venv` to create `.venv/` and install all requirements. The `Makefile` and operator CLI (`openlia skills test`) automatically detect and use `.venv/bin/python3` if present.
-- **Container Synchronization**: When skills are deployed to the remote agent, [`docker/Dockerfile`](../docker/Dockerfile) automatically installs all declared skill requirements into the agent's `/opt/hermes/.venv`.
-
----
-
-## 4. The 4-Tier Local Testing Hierarchy
-
-OpenLia uses a 4-tier verification hierarchy to ensure skills can be continuously improved and tested without friction.
-
-```mermaid
-flowchart LR
-    Tier1["Tier 1: Offline Unit Test<br/>(make skills-test)"]
-    Tier2["Tier 2: Live Verification<br/>(make skills-verify)"]
-    Tier3["Tier 3: Custom Interactive Test<br/>(--prompt ... -o /tmp/...)"]
-    Tier4["Tier 4: Operator Check<br/>(go run . skills test)"]
-
-    Tier1 --> Tier2 --> Tier3 --> Tier4
-```
-
-### Tier 1: Instant Offline Self-Tests (`--self-test`)
-Every Python script in `profile/skills/*/scripts/*.py` must implement a deterministic `--self-test` flag that runs offline in under 0.1 seconds without browser, network, or external API dependencies.
-
-```bash
-# Test a specific skill script offline
-python3 profile/skills/gemini-chat/scripts/gemini_conversation.py --self-test
-python3 profile/skills/chatgpt-chat/scripts/chatgpt_conversation.py --self-test
-python3 profile/skills/browser-pilot/scripts/check_browser_pilot.py --self-test
-
-# Test all skill scripts across the entire repository (<0.5s)
+```sh
+make venv
 make skills-test
+go run . skills test SKILL_NAME
 ```
 
-**What it tests**: Argument parsing, URL cleaning/tracking stripping, metadata extraction, regex patterns, and YAML schema compliance.
+### Browser Skill Verification
 
----
+Browser-backed bundled skills require a local Playwright MCP server with the
+browser extension and shared browser context enabled:
 
-### Tier 2: Live Browser Verification (`--verify`)
-For browser-based skills, live verification tests the full end-to-end flow against a local browser session via Playwright MCP.
-
-#### 1. Start the Local Playwright MCP Server
-In a dedicated terminal, run the Playwright MCP server with the browser extension enabled:
-```bash
-npx @playwright/mcp@latest --host 127.0.0.1 --port 8931 --extension --idle-timeout 0 --shared-browser-context
+```sh
+npx @playwright/mcp@latest --host 127.0.0.1 --port 8931 --extension \
+  --idle-timeout 0 --shared-browser-context
 ```
 
-#### 2. Run Live Verification
-```bash
-# Verify Gemini Chat live (verifies Temporary Chat toggle, prompt submit, Markdown extraction)
+Run the live canaries only when an authenticated disposable browser session is
+available:
+
+```sh
 python3 profile/skills/gemini-chat/scripts/gemini_conversation.py --verify
-
-# Verify ChatGPT Chat live
 python3 profile/skills/chatgpt-chat/scripts/chatgpt_conversation.py --verify
-
-# Verify Browser Pilot connectivity & tab listing
 python3 profile/skills/browser-pilot/scripts/check_browser_pilot.py --verify
-
-# Or verify all browser skills together
 make skills-verify
 ```
 
-> [!NOTE]
-> **Browser Tab Lifecycle**: Each script run opens an isolated tab and closes it after successful completion via `browser_tabs(action="close")`. If an error or gatekeeper failure occurs, the worker resets the browser context before the next job. When running unattended, `enforce_tab_cap()` also prunes stale background tabs to prevent tab leaks.
->
-> **Log Retention (`.playwright-mcp/`)**: `@playwright/mcp` generates console logs and accessibility snapshots under `.playwright-mcp/`. OpenLia includes an automated log pruner (`prune_playwright_mcp_logs()`) in all runners that evicts files older than 24h and caps the directory to 20 files. You can also run `make clean-logs` to flush all temporary logs on demand.
+Live browser output belongs under `/tmp/openlia_verify/`; it must not write to
+the real workspace. The runners prune `.playwright-mcp/` files older than 24
+hours and cap retained files. Browser jobs use isolated Temporary Chat flows
+and fail closed when the temporary mode or browser transport cannot be
+verified.
 
----
+For custom local browser queries, write output to a temporary path:
 
-### Tier 3: Custom Interactive Query Simulation
-You can test skills with arbitrary prompts and inspect the exact YAML output and citations without deploying:
-
-```bash
-# Send a custom prompt to Gemini and save to /tmp
-python3 profile/skills/gemini-chat/scripts/gemini_conversation.py \
-  --prompt "Explain Go 1.26 release highlights in 3 bullets." \
-  --topic "Go 1.26 Highlights" \
-  --output /tmp/test_gemini.yaml
-
-# Inspect the resulting structured YAML
-cat /tmp/test_gemini.yaml
-```
-
-```bash
-# Send a custom prompt to ChatGPT and save to /tmp
+```sh
 python3 profile/skills/chatgpt-chat/scripts/chatgpt_conversation.py \
-  --prompt "Compare Python dataclasses vs Pydantic v2 performance." \
-  --topic "Dataclasses vs Pydantic" \
-  --output /tmp/test_chatgpt.yaml
-
-# Inspect the resulting structured YAML
-cat /tmp/test_chatgpt.yaml
+  --prompt "Compare Python dataclasses and Pydantic." \
+  --topic "Python data models" --output /tmp/test_chatgpt.yaml
 ```
 
----
+Browser-backed helpers can also be checked with `make skills-verify` when the
+documented local Playwright MCP prerequisites and authenticated browser session
+are available. Keep live verification separate from offline self-tests and do
+not use personal workspace data as test fixtures.
 
-### Tier 4: Operator Contract Compatibility
-OpenLia's operator CLI validates skills by extracting their scripts into an isolated temporary environment and running `--self-test`. Test this exactly as the operator does:
+### Bundled Dependencies
 
-```bash
-go run . skills test browser-pilot
-go run . skills test chatgpt-chat
-go run . skills test gemini-chat
-```
+`make venv` installs the repository's development requirements for local tests.
+The derived Hermes image installs only the bundled requirement files explicitly
+listed in `docker/Dockerfile`. Adding an arbitrary `requirements.txt` below
+`profile/skills/` does not cause Docker or deployment to discover and install
+it automatically.
 
----
+When a bundled skill needs a runtime dependency, update its pinned requirement
+file, the explicit Docker build inputs, development requirements when needed,
+third-party notices, and tests together. Rebuild the image before expecting the
+dependency in Hermes.
 
-## 4. Promotion & Deployment Pipeline
+## External Skills
 
-Once you have verified your changes across all 4 tiers locally, you can safely deploy the updated skills to your agent environments:
+External skills do not use bundled `requirements.txt` aggregation and are not
+installed into Hermes' global Python environment. Their repository must provide
+`openlia-skills.json`; each skill must provide `SKILL.md`. Optional dependencies
+use these exact pairs:
 
-### Deploy to Local Dev Stack
-```bash
-make deploy-dev
-# Equivalent to:
-# OPENLIA_CONFIG=$HOME/.config/openlia/dev/openlia_dev.toml ./openlia deploy
-```
+- `pyproject.toml` and `uv.lock`
+- `package.json` and `bun.lock`
 
-### Promote to Production Stack (Remote Agent)
-```bash
-make deploy-prod
-# Equivalent to:
-# OPENLIA_CONFIG=$HOME/.config/openlia/config.toml ./openlia update openlia
-```
+OpenLia audits frozen production dependencies in an isolated one-shot container
+and stores a content-addressed environment outside the skill tree. A manifest
+`test` argv array is also run in an isolated, networkless container. See the
+[external repository guide](EXTERNAL_SKILLS.md) for the schema, commands,
+approval requirements, customization flow, isolation guarantees, and current
+limitations.
 
-Both deployment commands run `make skills-test` as an automatic pre-flight gate, ensuring broken or unverified skills are never deployed.
+## Safety
+
+- Keep tests deterministic and offline unless they are explicitly live checks.
+- Never write tests against `/opt/data/workspace`, active chats, or real user
+  records.
+- Never commit credentials, protected dotenv files, runtime caches, dependency
+  environments, or private repository identifiers.
+- Treat skill instructions, scripts, and dependency packages as executable
+  supply-chain input. Passing an OpenLia audit is not a source-code review.
+- Use temporary output paths for local development and disposable credentials
+  for explicit live verification.
+
+## Deployment
+
+Bundled skill changes are synchronized by `openlia update openlia` and follow
+the bundled managed/fork migration flow. External repositories are not included
+in that release synchronization. Add a source once with `skill-sources add`;
+initialized deployments validate and fetch it automatically. `skills install`
+and `skills update` fetch and audit automatically, show a commit-bound plan, and
+then request confirmation. Explicit `skill-sources check`, `skill-sources fetch`,
+and `skills audit` commands are diagnostics. In both workflows, fork a managed
+installed skill before intentional local customization so future updates do not
+overwrite it. For external skills, rerunning `skills fork` refreshes an existing
+fork; the `fork-refresh` command is an advanced alias.
