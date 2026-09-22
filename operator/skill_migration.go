@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -25,6 +26,10 @@ type SkillForkResult struct {
 type SkillMigrationContext struct {
 	Schema           int    `json:"schema"`
 	Skill            string `json:"skill"`
+	Origin           string `json:"origin,omitempty"`
+	Source           string `json:"source,omitempty"`
+	OldCommit        string `json:"old_commit,omitempty"`
+	NewCommit        string `json:"new_commit,omitempty"`
 	OldBaseHash      string `json:"old_base_hash"`
 	CurrentForkHash  string `json:"current_fork_hash"`
 	CurrentPatchHash string `json:"current_patch_hash"`
@@ -47,6 +52,10 @@ type SkillMigrationProposal struct {
 	ID               string   `json:"id"`
 	Skill            string   `json:"skill"`
 	State            string   `json:"state"`
+	Origin           string   `json:"origin,omitempty"`
+	Source           string   `json:"source,omitempty"`
+	OldCommit        string   `json:"old_commit,omitempty"`
+	NewCommit        string   `json:"new_commit,omitempty"`
 	OldBaseHash      string   `json:"old_base_hash"`
 	CurrentForkHash  string   `json:"current_fork_hash"`
 	OldPatchHash     string   `json:"old_patch_hash"`
@@ -105,7 +114,16 @@ func ForkSkill(config Config, name string, now time.Time) (SkillForkResult, erro
 	metadataPath := filepath.Join(config.MetaRoot, "managed", "skills", name+".json")
 	metadata, err := readFullSkillMetadata(metadataPath, name)
 	if err != nil {
-		return SkillForkResult{}, err
+		manager := NewExternalSkillManager(config, nil, NewCompose(config, nil))
+		result, externalErr := manager.Fork(context.Background(), name)
+		if externalErr != nil {
+			return SkillForkResult{}, externalErr
+		}
+		externalMetadata, readErr := readExternalSkillMetadata(filepath.Join(config.MetaRoot, "external-skills", name+".json"))
+		if readErr != nil {
+			return SkillForkResult{}, readErr
+		}
+		return SkillForkResult{OK: true, Action: result.Action, Skill: name, Ownership: externalMetadata.Ownership, PatchHash: externalMetadata.PatchHash, ForkHash: externalMetadata.ForkHash}, nil
 	}
 	if metadata.Ownership == "forked" {
 		return SkillForkResult{}, fmt.Errorf("skill is already forked: %s", name)
@@ -169,7 +187,10 @@ func PrepareSkillMigration(config Config, name string, now time.Time) (SkillMigr
 	metadataPath := filepath.Join(config.MetaRoot, "managed", "skills", name+".json")
 	metadata, err := readFullSkillMetadata(metadataPath, name)
 	if err != nil {
-		return SkillMigrationContextResult{}, err
+		if !errors.Is(err, os.ErrNotExist) {
+			return SkillMigrationContextResult{}, err
+		}
+		return prepareExternalSkillMigration(config, name, now)
 	}
 	if metadata.Ownership != "forked" {
 		return SkillMigrationContextResult{}, fmt.Errorf("skill is not forked: %s", name)
@@ -231,6 +252,76 @@ func PrepareSkillMigration(config Config, name string, now time.Time) (SkillMigr
 	return SkillMigrationContextResult{OK: true, Action: "migration-prepare", Skill: name, Context: contextRoot, Details: details}, nil
 }
 
+func prepareExternalSkillMigration(config Config, name string, now time.Time) (SkillMigrationContextResult, error) {
+	metadata, err := readExternalSkillMetadata(filepath.Join(config.MetaRoot, "external-skills", name+".json"))
+	if err != nil {
+		return SkillMigrationContextResult{}, err
+	}
+	if metadata.Ownership != "forked" {
+		return SkillMigrationContextResult{}, fmt.Errorf("skill is not forked: %s", name)
+	}
+	destination, _, err := locateExternalSkillTree(config, name)
+	if err != nil {
+		return SkillMigrationContextResult{}, fmt.Errorf("locate external skill %s: %w", name, err)
+	}
+	currentHash, err := DirectorySHA256(destination)
+	if err != nil {
+		return SkillMigrationContextResult{}, err
+	}
+	if "sha256:"+currentHash != metadata.ForkHash {
+		return SkillMigrationContextResult{}, fmt.Errorf("external fork has changed since it was refreshed: %s", name)
+	}
+	oldBase := filepath.Join(config.MetaRoot, filepath.FromSlash(metadata.BaseSnapshot))
+	oldBaseHash, err := DirectorySHA256(oldBase)
+	if err != nil || "sha256:"+oldBaseHash != metadata.ContentHash {
+		return SkillMigrationContextResult{}, fmt.Errorf("external skill base snapshot is missing or invalid")
+	}
+	patch, err := GenerateSkillPatch(oldBase, destination, name)
+	if err != nil {
+		return SkillMigrationContextResult{}, err
+	}
+	patchHash, err := SkillPatchHash(patch)
+	if err != nil {
+		return SkillMigrationContextResult{}, err
+	}
+	if patchHash != metadata.PatchHash {
+		return SkillMigrationContextResult{}, fmt.Errorf("external fork patch metadata is stale: %s", name)
+	}
+	manager := NewExternalSkillManager(config, nil, NewCompose(config, nil))
+	item, _, _, newBase, err := externalMigrationTarget(manager, metadata.Source, name, "")
+	if err != nil {
+		return SkillMigrationContextResult{}, err
+	}
+	newBaseHash, err := DirectorySHA256(newBase)
+	if err != nil {
+		return SkillMigrationContextResult{}, err
+	}
+	contextRoot := filepath.Join(config.DataRoot, ".openlia", "migrations", name)
+	if err := removeSafeDirectory(contextRoot); err != nil {
+		return SkillMigrationContextResult{}, err
+	}
+	if err := EnsureDir(filepath.Dir(contextRoot), 0o700); err != nil {
+		return SkillMigrationContextResult{}, err
+	}
+	for source, target := range map[string]string{oldBase: "old-base", destination: "current-fork", newBase: "new-base"} {
+		if err := CopyDir(source, filepath.Join(contextRoot, target)); err != nil {
+			return SkillMigrationContextResult{}, err
+		}
+	}
+	if _, err := WriteSkillPatch(filepath.Join(contextRoot, "customization.patch"), patch); err != nil {
+		return SkillMigrationContextResult{}, err
+	}
+	details := SkillMigrationContext{Schema: migrationProtocolSchema, Skill: name, Origin: "external", Source: metadata.Source, OldCommit: metadata.Commit, NewCommit: item.Commit, OldBaseHash: metadata.ContentHash, CurrentForkHash: metadata.ForkHash, CurrentPatchHash: patchHash, NewBaseHash: "sha256:" + newBaseHash, NewVersion: item.Version, NewSource: metadata.Source, CreatedAt: utcTimestamp(now)}
+	data, err := json.Marshal(details)
+	if err != nil {
+		return SkillMigrationContextResult{}, err
+	}
+	if err := AtomicWriteFile(filepath.Join(contextRoot, "context.json"), append(data, '\n'), 0o600); err != nil {
+		return SkillMigrationContextResult{}, err
+	}
+	return SkillMigrationContextResult{OK: true, Action: "migration-prepare", Skill: name, Context: contextRoot, Details: details}, nil
+}
+
 func ApplySkillMigration(config Config, proposalID string, now time.Time) (SkillMigrationResult, error) {
 	if err := config.ValidatePaths(); err != nil {
 		return SkillMigrationResult{}, err
@@ -238,11 +329,6 @@ func ApplySkillMigration(config Config, proposalID string, now time.Time) (Skill
 	if err := ValidateSafeComponent(proposalID, "proposal"); err != nil {
 		return SkillMigrationResult{}, err
 	}
-	resume, err := pauseHermesForSkillMutation(config)
-	if err != nil {
-		return SkillMigrationResult{}, err
-	}
-	defer resume()
 	proposalRoot := filepath.Join(config.DataRoot, ".openlia", "proposals", proposalID)
 	proposalPath := filepath.Join(proposalRoot, "proposal.json")
 	proposalData, err := os.ReadFile(proposalPath)
@@ -262,6 +348,17 @@ func ApplySkillMigration(config Config, proposalID string, now time.Time) (Skill
 	if err := ValidateSafeComponent(proposal.Skill, "skill"); err != nil {
 		return SkillMigrationResult{}, err
 	}
+	if proposal.Origin == "external" {
+		return applyExternalSkillMigration(config, proposalRoot, proposalPath, proposalData, proposal, now)
+	}
+	if proposal.Origin != "" {
+		return SkillMigrationResult{}, fmt.Errorf("unsupported migration proposal origin %q", proposal.Origin)
+	}
+	resume, err := pauseHermesForSkillMutation(config)
+	if err != nil {
+		return SkillMigrationResult{}, err
+	}
+	defer resume()
 	metadataPath := filepath.Join(config.MetaRoot, "managed", "skills", proposal.Skill+".json")
 	metadata, err := readFullSkillMetadata(metadataPath, proposal.Skill)
 	if err != nil {
@@ -346,13 +443,13 @@ func ApplySkillMigration(config Config, proposalID string, now time.Time) (Skill
 		return SkillMigrationResult{}, err
 	}
 	if err := replaceDirectory(proposedTree, destination); err != nil {
-		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, err)
+		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, proposalPath, proposalData, err)
 	}
 	if err := replaceDirectory(source, oldBase); err != nil {
-		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, err)
+		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, proposalPath, proposalData, err)
 	}
 	if err := AtomicWriteFile(oldPatch, mustPatchBytes(patch), 0o600); err != nil {
-		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, err)
+		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, proposalPath, proposalData, err)
 	}
 	metadata.ContentSHA256 = proposal.NewBaseHash
 	metadata.DistributionVersion, metadata.SourceID = (&ProfileOperator{Config: config}).distributionInfo()
@@ -361,24 +458,183 @@ func ApplySkillMigration(config Config, proposalID string, now time.Time) (Skill
 	metadata.UpdatedAt = utcTimestamp(now)
 	metadataData, err := json.Marshal(metadata)
 	if err != nil {
-		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, err)
+		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, proposalPath, proposalData, err)
 	}
 	if err := AtomicWriteFile(metadataPath, append(metadataData, '\n'), 0o600); err != nil {
-		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, err)
+		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, proposalPath, proposalData, err)
 	}
 	proposal.State = "applied"
 	proposal.AppliedAt = utcTimestamp(now)
 	updatedProposal, err := json.Marshal(proposal)
 	if err != nil {
-		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, err)
+		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, proposalPath, proposalData, err)
 	}
 	if err := AtomicWriteFile(proposalPath, append(updatedProposal, '\n'), 0o600); err != nil {
-		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, err)
+		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, proposalPath, proposalData, err)
 	}
 	if err := RecordChange(config, "skill-migration", "ok", backup.Archive, "skill="+proposal.Skill+" proposal="+proposalID, now); err != nil {
-		return SkillMigrationResult{}, err
+		return rollbackSkillMigration(destination, oldFork, oldBase, oldBaseCopy, oldPatch, oldPatchData, metadataPath, oldMetadata, proposalPath, proposalData, err)
 	}
 	return SkillMigrationResult{OK: true, Action: "skill-migration", Proposal: proposalID, Skill: proposal.Skill, State: proposal.State, Backup: backup.Archive, ForkHash: proposal.ProposedForkHash, PatchHash: patchHash}, nil
+}
+
+func applyExternalSkillMigration(config Config, proposalRoot, proposalPath string, oldProposalData []byte, proposal SkillMigrationProposal, now time.Time) (SkillMigrationResult, error) {
+	if ValidateSafeComponent(proposal.Source, "source") != nil || !isCommit(proposal.OldCommit) || !isCommit(proposal.NewCommit) {
+		return SkillMigrationResult{}, fmt.Errorf("invalid external migration provenance")
+	}
+	metadataPath := filepath.Join(config.MetaRoot, "external-skills", proposal.Skill+".json")
+	metadata, err := readExternalSkillMetadata(metadataPath)
+	if err != nil {
+		return SkillMigrationResult{}, err
+	}
+	if metadata.Ownership != "forked" {
+		return SkillMigrationResult{}, fmt.Errorf("skill is not forked: %s", proposal.Skill)
+	}
+	if metadata.Source != proposal.Source || metadata.Commit != proposal.OldCommit {
+		return markProposalStale(proposalPath, proposal, now, "external source or old commit changed")
+	}
+	if metadata.ContentHash != proposal.OldBaseHash || metadata.PatchHash != proposal.OldPatchHash {
+		return markProposalStale(proposalPath, proposal, now, "fork base or patch changed")
+	}
+	oldBase := filepath.Join(config.MetaRoot, filepath.FromSlash(metadata.BaseSnapshot))
+	oldBaseHash, err := DirectorySHA256(oldBase)
+	if err != nil || "sha256:"+oldBaseHash != proposal.OldBaseHash {
+		return markProposalStale(proposalPath, proposal, now, "fork base snapshot changed")
+	}
+	destination, _, err := locateExternalSkillTree(config, proposal.Skill)
+	if err != nil {
+		return SkillMigrationResult{}, err
+	}
+	currentHash, err := DirectorySHA256(destination)
+	if err != nil {
+		return SkillMigrationResult{}, err
+	}
+	if "sha256:"+currentHash != metadata.ForkHash || metadata.ForkHash != proposal.CurrentForkHash {
+		return markProposalStale(proposalPath, proposal, now, "current fork changed")
+	}
+	manager := NewExternalSkillManager(config, nil, NewCompose(config, nil))
+	item, _, manifestItem, newBase, err := externalMigrationTarget(manager, proposal.Source, proposal.Skill, proposal.NewCommit)
+	if err != nil {
+		return markProposalStale(proposalPath, proposal, now, "external source snapshot changed")
+	}
+	newBaseHash, err := DirectorySHA256(newBase)
+	if err != nil || "sha256:"+newBaseHash != proposal.NewBaseHash {
+		return markProposalStale(proposalPath, proposal, now, "upstream base changed")
+	}
+	patch, err := ReadSkillPatch(filepath.Join(proposalRoot, "customization.patch"))
+	if err != nil {
+		return SkillMigrationResult{}, err
+	}
+	if patch.Skill != proposal.Skill || patch.BaseHash != proposal.NewBaseHash {
+		return SkillMigrationResult{}, fmt.Errorf("migration proposal patch does not match the proposal")
+	}
+	patchHash, err := SkillPatchHash(patch)
+	if err != nil {
+		return SkillMigrationResult{}, err
+	}
+	if patchHash != proposal.NewPatchHash {
+		return SkillMigrationResult{}, fmt.Errorf("migration proposal patch hash mismatch")
+	}
+	proposedTree := filepath.Join(proposalRoot, ".validated-skill")
+	if err := removeSafeDirectory(proposedTree); err != nil {
+		return SkillMigrationResult{}, err
+	}
+	if err := ApplySkillPatch(newBase, proposedTree, patch); err != nil {
+		return SkillMigrationResult{}, fmt.Errorf("validate migration patch: %w", err)
+	}
+	proposedHash, err := DirectorySHA256(proposedTree)
+	if err != nil {
+		return SkillMigrationResult{}, err
+	}
+	if "sha256:"+proposedHash != proposal.ProposedForkHash {
+		return SkillMigrationResult{}, fmt.Errorf("migration proposal fork hash mismatch")
+	}
+	audit, err := manager.auditSkillTree(context.Background(), item, manifestItem, proposedTree)
+	if err != nil {
+		return SkillMigrationResult{}, fmt.Errorf("audit migrated external skill: %w", err)
+	}
+	backup, err := CreateBackup(config, "skill-migration", now, manager.Compose)
+	if err != nil {
+		return SkillMigrationResult{}, err
+	}
+	manager.Now = func() time.Time { return now }
+	err = manager.transactionalSkillMutation(destination, metadataPath, func() error {
+		return manager.withPausedHermes(context.Background(), func() error {
+			if err := replaceDirectory(proposedTree, destination); err != nil {
+				return err
+			}
+			if err := replaceDirectory(newBase, oldBase); err != nil {
+				return err
+			}
+			if err := AtomicWriteFile(filepath.Join(config.MetaRoot, filepath.FromSlash(metadata.PatchPath)), mustPatchBytes(patch), 0o600); err != nil {
+				return err
+			}
+			metadata.Commit, metadata.Version, metadata.ContentHash = item.Commit, item.Version, proposal.NewBaseHash
+			metadata.PatchHash, metadata.ForkHash, metadata.UpdatedAt, metadata.Environment = patchHash, proposal.ProposedForkHash, utcTimestamp(now), audit.EnvironmentHash
+			metadataData, err := json.Marshal(metadata)
+			if err != nil {
+				return err
+			}
+			if err := AtomicWriteFile(metadataPath, append(metadataData, '\n'), 0o600); err != nil {
+				return err
+			}
+			if err := activateSkillEnvironment(config.SkillsEnvRoot, proposal.Skill, audit.EnvironmentHash); err != nil {
+				return err
+			}
+			proposal.State, proposal.AppliedAt = "applied", utcTimestamp(now)
+			proposalData, err := json.Marshal(proposal)
+			if err != nil {
+				return err
+			}
+			if err := AtomicWriteFile(proposalPath, append(proposalData, '\n'), 0o600); err != nil {
+				return err
+			}
+			return RecordChange(config, "skill-migration", "ok", backup.Archive, "external skill="+proposal.Skill+" source="+proposal.Source+" commit="+proposal.NewCommit+" proposal="+proposal.ID, now)
+		})
+	})
+	if err != nil {
+		_ = AtomicWriteFile(proposalPath, oldProposalData, 0o600)
+		return SkillMigrationResult{}, err
+	}
+	return SkillMigrationResult{OK: true, Action: "skill-migration", Proposal: proposal.ID, Skill: proposal.Skill, State: proposal.State, Backup: backup.Archive, ForkHash: proposal.ProposedForkHash, PatchHash: patchHash}, nil
+}
+
+func externalMigrationTarget(manager *ExternalSkillManager, sourceID, name, expectedCommit string) (ExternalSkillCatalogItem, string, SkillCollectionManifestItem, string, error) {
+	source, err := manager.source(sourceID)
+	if err != nil {
+		return ExternalSkillCatalogItem{}, "", SkillCollectionManifestItem{}, "", err
+	}
+	currentData, err := os.ReadFile(filepath.Join(manager.Config.SkillsCacheRoot, sourceID, "current"))
+	if err != nil {
+		return ExternalSkillCatalogItem{}, "", SkillCollectionManifestItem{}, "", err
+	}
+	commit := strings.TrimSpace(string(currentData))
+	if !isCommit(commit) || expectedCommit != "" && commit != expectedCommit {
+		return ExternalSkillCatalogItem{}, "", SkillCollectionManifestItem{}, "", fmt.Errorf("external source current commit changed")
+	}
+	root := filepath.Join(manager.Config.SkillsCacheRoot, sourceID, commit)
+	digest, err := DirectorySHA256(root)
+	if err != nil {
+		return ExternalSkillCatalogItem{}, "", SkillCollectionManifestItem{}, "", err
+	}
+	stored, err := os.ReadFile(filepath.Join(manager.Config.SkillsCacheRoot, sourceID, commit+".sha256"))
+	if err != nil || strings.TrimSpace(string(stored)) != "sha256:"+digest {
+		return ExternalSkillCatalogItem{}, "", SkillCollectionManifestItem{}, "", fmt.Errorf("cached skill source %s failed digest revalidation", sourceID)
+	}
+	manifest, err := readCollectionManifest(root, source.Manifest)
+	if err != nil {
+		return ExternalSkillCatalogItem{}, "", SkillCollectionManifestItem{}, "", err
+	}
+	if err := validateCollectionTree(root, manifest); err != nil {
+		return ExternalSkillCatalogItem{}, "", SkillCollectionManifestItem{}, "", err
+	}
+	for _, candidate := range manifest.Skills {
+		if candidate.Name == name {
+			item := ExternalSkillCatalogItem{Name: name, Source: sourceID, Commit: commit, Version: candidate.Version, Path: candidate.Path}
+			return item, root, candidate, filepath.Join(root, filepath.FromSlash(candidate.Path)), nil
+		}
+	}
+	return ExternalSkillCatalogItem{}, "", SkillCollectionManifestItem{}, "", fmt.Errorf("external skill not found: %s", name)
 }
 
 func pauseHermesForSkillMutation(config Config) (func(), error) {
@@ -476,10 +732,11 @@ func markProposalStale(path string, proposal SkillMigrationProposal, now time.Ti
 	return SkillMigrationResult{}, fmt.Errorf("migration proposal is stale: %s", reason)
 }
 
-func rollbackSkillMigration(destination, oldFork, base, oldBase, patch string, oldPatch []byte, metadataPath string, oldMetadata []byte, cause error) (SkillMigrationResult, error) {
+func rollbackSkillMigration(destination, oldFork, base, oldBase, patch string, oldPatch []byte, metadataPath string, oldMetadata []byte, proposalPath string, oldProposal []byte, cause error) (SkillMigrationResult, error) {
 	_ = replaceDirectory(oldFork, destination)
 	_ = replaceDirectory(oldBase, base)
 	_ = AtomicWriteFile(patch, oldPatch, 0o600)
 	_ = AtomicWriteFile(metadataPath, oldMetadata, 0o600)
+	_ = AtomicWriteFile(proposalPath, oldProposal, 0o600)
 	return SkillMigrationResult{}, cause
 }

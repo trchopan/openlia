@@ -1,10 +1,123 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
+
+func TestSkillSourceAddAndRemoveDispatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("OPENLIA_CONFIG", path)
+	if err := saveConfig(defaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if code := commandSkillSources(Options{}, []string{"add", "team", "--repository", "https://github.com/example/skills", "--branch", "release/v2"}); code != ExitOK {
+		t.Fatalf("add exit code = %d", code)
+	}
+	config, err := loadConfig()
+	if err != nil || len(config.SkillSources) != 1 || config.SkillSources[0].Name != "team" {
+		t.Fatalf("source was not persisted: %#v, %v", config.SkillSources, err)
+	}
+	if code := commandSkillSources(Options{}, []string{"remove", "team"}); code != ExitOK {
+		t.Fatalf("remove exit code = %d", code)
+	}
+	config, err = loadConfig()
+	if err != nil || len(config.SkillSources) != 0 {
+		t.Fatalf("source was not removed: %#v, %v", config.SkillSources, err)
+	}
+}
+
+func TestSkillParsersAcceptExternalIdentifiers(t *testing.T) {
+	if !validExternalSkillIdentifier("team/research") || !validSkillIdentifier("team/research") || !validSkillIdentifier("daily-briefing") {
+		t.Fatal("valid skill identifier was rejected")
+	}
+	for _, value := range []string{"team", "team/research/extra", "../research", "team/.hidden", "team/re search"} {
+		if validExternalSkillIdentifier(value) {
+			t.Fatalf("invalid external identifier %q was accepted", value)
+		}
+	}
+}
+
+func TestSkillMutationsRejectNonInteractiveApproval(t *testing.T) {
+	t.Setenv("OPENLIA_CONFIG", filepath.Join(t.TempDir(), "missing.toml"))
+	for _, args := range [][]string{{"install", "team/research"}, {"update", "team/research"}, {"uninstall", "research"}, {"reset", "research"}} {
+		if code := commandSkills(Options{NonInteractive: true}, args, fstest.MapFS{}); code != ExitUsage {
+			t.Fatalf("skills %v exit code = %d, want %d", args, code, ExitUsage)
+		}
+	}
+}
+
+func TestAuthSetupPersistsPromptedSourceBeforeDeployment(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("OPENLIA_CONFIG", configPath)
+	config := defaultConfig()
+	config.Mode = "local"
+	config.Target = ""
+	config.InstallRoot = filepath.Join(t.TempDir(), "missing-deployment")
+	if err := saveConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "hermes.env")
+	if err := os.WriteFile(source, []byte("OPENAI_API_KEY=test-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	input, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.WriteString(source + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	previousStdin := os.Stdin
+	os.Stdin = input
+	t.Cleanup(func() {
+		os.Stdin = previousStdin
+		_ = input.Close()
+	})
+
+	if code := commandAuth(Options{}, []string{"setup"}); code != ExitFailure {
+		t.Fatalf("auth setup exit code = %d, want deployment failure", code)
+	}
+	stored, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.SecretSource != source {
+		t.Fatalf("persisted secret source = %q, want %q", stored.SecretSource, source)
+	}
+}
+
+func TestRunDispatchesSkillSources(t *testing.T) {
+	t.Setenv("OPENLIA_CONFIG", filepath.Join(t.TempDir(), "missing.toml"))
+	if code := Run([]string{"skill-sources", "list"}, fstest.MapFS{}); code != ExitPrereq {
+		t.Fatalf("skill-sources dispatch exit code = %d, want %d", code, ExitPrereq)
+	}
+}
+
+func TestSkillSourceAddDoesNotPersistEnvironmentToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("OPENLIA_CONFIG", path)
+	t.Setenv("OPENLIA_SKILLS_GIT_TOKEN", "github_pat_super_secret")
+	if err := saveConfig(defaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if code := commandSkillSources(Options{}, []string{"add", "team", "--repository", "https://github.com/example/skills"}); code != ExitOK {
+		t.Fatalf("add exit code = %d", code)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "github_pat_super_secret") || strings.Contains(string(data), "OPENLIA_SKILLS_GIT_TOKEN") {
+		t.Fatalf("token leaked to config: %s", data)
+	}
+}
 
 func TestInitRejectsSecretSourceOverride(t *testing.T) {
 	if got := commandInit(Options{}, []string{

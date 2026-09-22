@@ -53,5 +53,10 @@ conflicts, behavior changes, hashes, and a concise explanation in the response.
 Preserve the user's intent unless it conflicts with a clear upstream safety or
 correctness fix.
 
+When `context.json` has origin `external`, copy `origin`, `source`,
+`old_commit`, and `new_commit` unchanged into `proposal.json`. These fields bind
+the proposal to the configured external source and its cached commits. Omit
+them for bundled migrations so existing schema 1 proposals remain compatible.
+
 If the fork changed after the migration context was staged, stop and report a
 stale context. Do not overwrite the user's current skill.

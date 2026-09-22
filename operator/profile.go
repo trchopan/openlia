@@ -278,6 +278,9 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 			}
 		}
 	}
+	if err := p.syncExternalSkillLifecycle(&result); err != nil {
+		return ProfileSyncResult{}, err
+	}
 
 	runtimeSkills := filepath.Join(p.Config.DataRoot, "skills")
 	entries, err = os.ReadDir(runtimeSkills)
@@ -292,6 +295,9 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 			continue
 		}
 		name := entry.Name()
+		if _, externalErr := readExternalSkillMetadata(filepath.Join(p.Config.MetaRoot, "external-skills", name+".json")); externalErr == nil {
+			continue
+		}
 		if err := ValidateSafeComponent(name, "skill"); err != nil {
 			continue
 		}
@@ -548,7 +554,81 @@ func (p *ProfileOperator) Status(selected string) (SkillStatusResult, error) {
 		result.Skills.Results = append(result.Skills.Results, skillResult)
 		p.countStatusResult(&result.Summary, skillResult)
 	}
+	disabledEntries, err := os.ReadDir(filepath.Join(p.Config.DataRoot, "skills", ".openlia-disabled"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return SkillStatusResult{}, fmt.Errorf("read disabled skills: %w", err)
+	}
+	for _, entry := range disabledEntries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if _, err := readExternalSkillMetadata(filepath.Join(p.Config.MetaRoot, "external-skills", name+".json")); err != nil {
+			continue
+		}
+		skillResult, err := p.statusSkill(name, "", distributionVersion, distributionSource)
+		if err != nil {
+			return SkillStatusResult{}, err
+		}
+		skillResult.includeAvailable = true
+		result.Skills.Results = append(result.Skills.Results, skillResult)
+		p.countStatusResult(&result.Summary, skillResult)
+	}
 	return result, nil
+}
+
+func (p *ProfileOperator) syncExternalSkillLifecycle(result *ProfileSyncResult) error {
+	metadataRoot := filepath.Join(p.Config.MetaRoot, "external-skills")
+	entries, err := os.ReadDir(metadataRoot)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read external skill metadata: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		metadata, err := readExternalSkillMetadata(filepath.Join(metadataRoot, entry.Name()))
+		if err != nil || strings.TrimSuffix(entry.Name(), ".json") != metadata.Name {
+			continue
+		}
+		current, active, err := locateExternalSkillTree(p.Config, metadata.Name)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		wantActive := skillEnabled(p.Config, metadata.Name)
+		action, reason := "unchanged", "external_skill_unchanged"
+		if active != wantActive {
+			activePath, disabledPath := externalSkillPaths(p.Config, metadata.Name)
+			destination := disabledPath
+			action, reason = "disabled", "external_skill_disabled"
+			if wantActive {
+				destination = activePath
+				action, reason = "enabled", "external_skill_enabled"
+			}
+			if err := moveExternalSkillTree(current, destination, metadata.Name); err != nil {
+				return err
+			}
+			active = wantActive
+		}
+		state := "managed"
+		if metadata.Ownership == "forked" {
+			state = "forked"
+		}
+		resultState := state
+		if !active {
+			resultState = "disabled"
+		}
+		skillResult := SkillResult{Name: metadata.Name, State: state, Action: action, ResultState: resultState, Reason: reason, Provenance: "valid", ManagedSource: metadata.Source, InstalledVersion: metadata.Version, ManagedHash: externalExpectedHash(metadata), InstalledAt: metadata.InstalledAt, UpdatedAt: metadata.UpdatedAt}
+		result.Skills.Results = append(result.Skills.Results, skillResult)
+		p.countSyncResult(&result.Skills, skillResult)
+	}
+	return nil
 }
 
 func (p *ProfileOperator) syncFile(source, destination, marker string, mode fs.FileMode) error {
@@ -699,6 +779,37 @@ func (p *ProfileOperator) statusSkill(name, source, version, sourceID string) (S
 	destination := filepath.Join(p.Config.DataRoot, "skills", name)
 	metadataPath := filepath.Join(p.Config.MetaRoot, "managed", "skills", name+".json")
 	available := source != ""
+	if !available {
+		if external, externalErr := readExternalSkillMetadata(filepath.Join(p.Config.MetaRoot, "external-skills", name+".json")); externalErr == nil {
+			destination, active, locateErr := locateExternalSkillTree(p.Config, name)
+			if locateErr != nil {
+				return SkillResult{}, fmt.Errorf("locate external skill %s: %w", name, locateErr)
+			}
+			currentHash := ""
+			if hash, hashErr := DirectorySHA256(destination); hashErr == nil {
+				currentHash = "sha256:" + hash
+			}
+			state, action, reason := "managed", "unchanged", "external_skill_unchanged"
+			if external.Ownership == "forked" {
+				state = "forked"
+			}
+			expected := external.ContentHash
+			if external.Ownership == "forked" {
+				expected = external.ForkHash
+			}
+			if currentHash != expected {
+				state, action, reason = "customized", "blocked", "local_modifications_detected"
+			}
+			resultState := state
+			if !active && action != "blocked" {
+				state, action, reason, resultState = "disabled", "disabled", "external_skill_disabled", "disabled"
+			}
+			if item, _, _, catalogErr := NewExternalSkillManager(p.Config, nil, NewCompose(p.Config, nil)).catalogSkill(external.Source, name); catalogErr == nil && item.Commit != external.Commit && action != "blocked" {
+				action, reason = "update_available", "external_source_changed"
+			}
+			return SkillResult{Name: name, State: state, Action: action, ResultState: resultState, Reason: reason, Provenance: "valid", ManagedSource: external.Source, InstalledVersion: external.Version, ManagedHash: expected, CurrentHash: currentHash, InstalledAt: external.InstalledAt, UpdatedAt: external.UpdatedAt}, nil
+		}
+	}
 	if !available {
 		if _, err := os.Lstat(destination); errors.Is(err, os.ErrNotExist) {
 			return SkillResult{}, fmt.Errorf("skill is not bundled or installed: %s", name)

@@ -65,10 +65,13 @@ RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache \
     --requirement /tmp/claim-req.txt \
     --requirement /tmp/gemini-req.txt \
     --requirement /tmp/chatgpt-req.txt \
+	&& uv pip install --python /opt/hermes/.venv/bin/python --no-cache pip-audit==2.9.0 \
     && rm -f /tmp/*-req.txt
 
 COPY --chmod=0755 docker/secret-source.sh /usr/local/bin/openlia-secret-source
 COPY --chmod=0755 docker/git-askpass.sh /usr/local/bin/openlia-git-askpass
+COPY --chmod=0755 docker/skill-env-builder.sh /usr/local/bin/openlia-skill-env-builder
+COPY --chmod=0755 docker/skill-runner.py /usr/local/bin/openlia-skill
 
 # Keep the upstream default USER and ENTRYPOINT unchanged. s6 must start as
 # root so the upstream volume setup can drop supervised processes to hermes.

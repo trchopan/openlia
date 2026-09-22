@@ -1,12 +1,16 @@
 package operator
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+const migrationNewCommit = "abcdef0123456789abcdef0123456789abcdef01"
 
 func TestForkPreservesCustomizedSkillAcrossProfileUpdate(t *testing.T) {
 	config, now := migrationTestConfig(t)
@@ -135,6 +139,9 @@ func TestApplySkillMigrationUpdatesForkAndLineage(t *testing.T) {
 	if err := json.Unmarshal(contextData, &contextDetails); err != nil {
 		t.Fatal(err)
 	}
+	if contextDetails.Origin != "" || contextDetails.Source != "" || contextDetails.OldCommit != "" || contextDetails.NewCommit != "" {
+		t.Fatalf("bundled context contains external provenance: %+v", contextDetails)
+	}
 	proposal := SkillMigrationProposal{
 		Schema:           migrationProtocolSchema,
 		ID:               "proposal-1",
@@ -176,6 +183,186 @@ func TestApplySkillMigrationUpdatesForkAndLineage(t *testing.T) {
 	if metadata.Ownership != "forked" || metadata.ForkSHA256 != result.ForkHash || metadata.PatchSHA256 != result.PatchHash {
 		t.Fatalf("metadata was not updated: %+v", metadata)
 	}
+}
+
+func TestExternalSkillMigrationPrepareAndApply(t *testing.T) {
+	config, now, contextResult := prepareExternalMigrationFixture(t)
+	if contextResult.Details.Origin != "external" || contextResult.Details.Source != "team" || contextResult.Details.OldCommit != testSkillCommit || contextResult.Details.NewCommit != migrationNewCommit {
+		t.Fatalf("external context provenance = %+v", contextResult.Details)
+	}
+	proposal := writeMigrationProposal(t, config, contextResult, "external-success", nil)
+	result, err := ApplySkillMigration(config, proposal.ID, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := readExternalSkillMetadata(filepath.Join(config.MetaRoot, "external-skills", "example.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.State != "applied" || metadata.Commit != migrationNewCommit || metadata.ForkHash != result.ForkHash || metadata.PatchHash != result.PatchHash {
+		t.Fatalf("external migration result=%+v metadata=%+v", result, metadata)
+	}
+	contents, err := os.ReadFile(filepath.Join(config.DataRoot, "skills", "example", "SKILL.md"))
+	if err != nil || string(contents) != externalSkillText("upstream v2\nuser customization\n") {
+		t.Fatalf("migrated external skill = %q, %v", contents, err)
+	}
+}
+
+func TestExternalSkillMigrationRejectsStaleForkAndSource(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(t *testing.T, config Config)
+	}{
+		{name: "fork", mutate: func(t *testing.T, config Config) {
+			path := filepath.Join(config.DataRoot, "skills", "example", "SKILL.md")
+			if err := os.WriteFile(path, []byte(externalSkillText("changed again\n")), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "source", mutate: func(t *testing.T, config Config) {
+			if err := os.WriteFile(filepath.Join(config.SkillsCacheRoot, "team", "current"), []byte(testSkillCommit+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config, now, contextResult := prepareExternalMigrationFixture(t)
+			proposal := writeMigrationProposal(t, config, contextResult, "external-stale", nil)
+			test.mutate(t, config)
+			if _, err := ApplySkillMigration(config, proposal.ID, now.Add(2*time.Minute)); err == nil || !strings.Contains(err.Error(), "stale") {
+				t.Fatalf("ApplySkillMigration() error = %v", err)
+			}
+			stored, err := ReadSkillMigrationProposal(config, proposal.ID)
+			if err != nil || stored.State != "stale" {
+				t.Fatalf("stale proposal = %+v, %v", stored, err)
+			}
+		})
+	}
+}
+
+func TestExternalSkillMigrationRejectsConflicts(t *testing.T) {
+	config, now, contextResult := prepareExternalMigrationFixture(t)
+	proposal := writeMigrationProposal(t, config, contextResult, "external-conflict", []string{"SKILL.md"})
+	if _, err := ApplySkillMigration(config, proposal.ID, now.Add(2*time.Minute)); err == nil || !strings.Contains(err.Error(), "unresolved conflicts") {
+		t.Fatalf("ApplySkillMigration() error = %v", err)
+	}
+	stored, err := ReadSkillMigrationProposal(config, proposal.ID)
+	if err != nil || stored.State != "pending" {
+		t.Fatalf("conflicted proposal changed = %+v, %v", stored, err)
+	}
+}
+
+func TestExternalMigrationDependencyAuditUsesProposalComposePath(t *testing.T) {
+	config, fixture := externalSkillFixture(t, true)
+	if err := os.MkdirAll(config.SkillsEnvRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	proposalSkill := filepath.Join(config.DataRoot, ".openlia", "proposals", "proposal-deps", ".validated-skill")
+	if err := CopyDir(filepath.Join(fixture, "skills", "example"), proposalSkill); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordedRunner{}
+	manager := NewExternalSkillManager(config, &externalFixtureRunner{}, NewCompose(config, runner))
+	item := ExternalSkillCatalogItem{Name: "example", Source: "team", Commit: testSkillCommit, Version: "1.2.3", Path: "skills/example"}
+	manifestItem := SkillCollectionManifestItem{Name: "example", Path: "skills/example", Version: "1.2.3"}
+
+	if _, err := manager.auditSkillTree(context.Background(), item, manifestItem, proposalSkill); err != nil {
+		t.Fatal(err)
+	}
+	wantSource := "OPENLIA_SKILL_SOURCE=/opt/openlia/migration-source/proposal-deps/.validated-skill"
+	if len(runner.calls) != 2 {
+		t.Fatalf("dependency audit calls = %v", runner.calls)
+	}
+	for _, call := range runner.calls {
+		if !strings.Contains(call, wantSource) || !strings.Contains(call, "skill-env-builder audit") {
+			t.Fatalf("migration dependency audit used wrong Compose path: %s", call)
+		}
+	}
+}
+
+func prepareExternalMigrationFixture(t *testing.T) (Config, time.Time, SkillMigrationContextResult) {
+	t.Helper()
+	config, fixture := externalSkillFixture(t, false)
+	publishFixture(t, config, fixture)
+	for _, directory := range []string{config.DataRoot, config.MetaRoot, config.LochoRoot, config.BackupRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	manager := NewExternalSkillManager(config, &externalFixtureRunner{}, NewCompose(config, &recordedRunner{}))
+	manager.Now = func() time.Time { return now }
+	if _, err := manager.Install(context.Background(), "team", "example", false); err != nil {
+		t.Fatal(err)
+	}
+	active := filepath.Join(config.DataRoot, "skills", "example", "SKILL.md")
+	if err := os.WriteFile(active, []byte(externalSkillText("base\nuser customization\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Fork(context.Background(), "example"); err != nil {
+		t.Fatal(err)
+	}
+	newSnapshot := filepath.Join(config.SkillsCacheRoot, "team", migrationNewCommit)
+	if err := CopyDir(fixture, newSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(newSnapshot, "skills", "example", "SKILL.md"), []byte(externalSkillText("upstream v2\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := DirectorySHA256(newSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config.SkillsCacheRoot, "team", migrationNewCommit+".sha256"), []byte("sha256:"+digest+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config.SkillsCacheRoot, "team", "current"), []byte(migrationNewCommit+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := PrepareSkillMigration(config, "example", now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return config, now, result
+}
+
+func writeMigrationProposal(t *testing.T, config Config, contextResult SkillMigrationContextResult, id string, conflicts []string) SkillMigrationProposal {
+	t.Helper()
+	root := filepath.Join(config.DataRoot, ".openlia", "proposals", id)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	newBase := filepath.Join(contextResult.Context, "new-base")
+	proposed := filepath.Join(root, "proposed")
+	if err := CopyDir(newBase, proposed); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proposed, "SKILL.md"), []byte(externalSkillText("upstream v2\nuser customization\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	patch, err := GenerateSkillPatch(newBase, proposed, "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchHash, err := WriteSkillPatch(filepath.Join(root, "customization.patch"), patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposedHash, err := DirectorySHA256(proposed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	details := contextResult.Details
+	proposal := SkillMigrationProposal{Schema: 1, ID: id, Skill: details.Skill, State: "pending", Origin: details.Origin, Source: details.Source, OldCommit: details.OldCommit, NewCommit: details.NewCommit, OldBaseHash: details.OldBaseHash, CurrentForkHash: details.CurrentForkHash, OldPatchHash: details.CurrentPatchHash, NewBaseHash: details.NewBaseHash, NewPatchHash: patchHash, ProposedForkHash: "sha256:" + proposedHash, Conflicts: conflicts, CreatedAt: details.CreatedAt}
+	data, _ := json.Marshal(proposal)
+	if err := os.WriteFile(filepath.Join(root, "proposal.json"), append(data, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return proposal
+}
+
+func externalSkillText(body string) string {
+	return "---\nname: example\ndescription: Example external skill\n---\n# Example\n" + body
 }
 
 func migrationTestConfig(t *testing.T) (Config, time.Time) {

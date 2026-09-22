@@ -31,6 +31,10 @@ services:
         target: /opt/data/skills/openlia-skill-migration
         read_only: true
       - type: bind
+        source: "${OPENLIA_SKILLS_ENV_ROOT:-/srv/openlia/runtime/skill-envs}"
+        target: /opt/openlia/skill-envs
+        read_only: true
+      - type: bind
         source: "${OPENLIA_SECRET_DIR:-/srv/openlia/runtime/secrets}"
         target: /run/openlia-secrets
         read_only: true
@@ -62,6 +66,66 @@ services:
       options:
         max-size: "20m"
         max-file: "5"
+
+  skill-env-builder:
+    image: "${OPENLIA_HERMES_IMAGE:-openlia-hermes:v2026.9.14}"
+    profiles: ["operator"]
+    entrypoint: ["/usr/local/bin/openlia-skill-env-builder"]
+    command: ["audit"]
+    read_only: true
+    tmpfs:
+      - /run:rw,noexec,nosuid,size=16m
+      - /tmp:rw,exec,nosuid,size=512m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    volumes:
+      - type: bind
+        source: "${OPENLIA_SKILLS_CACHE_ROOT:-/srv/openlia/runtime/skill-cache}"
+        target: /opt/openlia/skill-cache
+        read_only: true
+      - type: bind
+        source: "${OPENLIA_SKILLS_ENV_ROOT:-/srv/openlia/runtime/skill-envs}"
+        target: /opt/openlia/skill-envs
+      - type: bind
+        source: "${OPENLIA_DATA_ROOT:-/srv/openlia/runtime/hermes}/.openlia/proposals"
+        target: /opt/openlia/migration-source
+        read_only: true
+    environment:
+      HOME: /tmp/openlia-home
+      UV_NO_CONFIG: "1"
+      PIP_CONFIG_FILE: /dev/null
+      npm_config_userconfig: /dev/null
+      BUN_INSTALL_CACHE_DIR: /tmp/bun-cache
+    networks:
+      - openlia-private
+    restart: "no"
+
+  skill-test-runner:
+    image: "${OPENLIA_HERMES_IMAGE:-openlia-hermes:v2026.9.14}"
+    profiles: ["operator"]
+    entrypoint: ["/usr/local/bin/openlia-skill-env-builder"]
+    command: ["test"]
+    read_only: true
+    tmpfs:
+      - /run:rw,noexec,nosuid,size=16m
+      - /tmp:rw,exec,nosuid,size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    volumes:
+      - type: bind
+        source: "${OPENLIA_SKILLS_CACHE_ROOT:-/srv/openlia/runtime/skill-cache}"
+        target: /opt/openlia/skill-cache
+        read_only: true
+      - type: bind
+        source: "${OPENLIA_SKILLS_ENV_ROOT:-/srv/openlia/runtime/skill-envs}"
+        target: /opt/openlia/skill-envs
+        read_only: true
+    environment:
+      HOME: /tmp/openlia-home
+    network_mode: none
+    restart: "no"
 
 networks:
   openlia-private:
