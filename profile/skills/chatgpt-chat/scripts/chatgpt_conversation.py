@@ -13,7 +13,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -458,6 +458,16 @@ class PlaywrightMcpClient:
         )
         urllib.request.urlopen(req, timeout=5)
 
+    def close(self) -> None:
+        """Close the local SSE connection without making another MCP call."""
+        self.running = False
+        response = getattr(self, "resp", None)
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+
     def call_tool(self, name: str, arguments: dict, timeout: float = 90.0) -> dict:
         return self.call("tools/call", {"name": name, "arguments": arguments}, timeout=timeout)
 
@@ -467,6 +477,47 @@ class PlaywrightMcpClient:
             if item.get("type") == "text":
                 text += item.get("text", "")
         return text
+
+
+def prepare_temporary_chat(
+    client: PlaywrightMcpClient,
+    client_factory: Callable[[], PlaywrightMcpClient] | None = None,
+    retries: int = 2,
+) -> PlaywrightMcpClient:
+    """Preflight MCP and open Temporary Chat before any prompt is typed.
+
+    A reconnect is safe here because the prompt has not been sent. Once this
+    function returns, callers must not retry the browser workflow.
+    """
+    last_error: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            tabs = client.call_tool("browser_tabs", {"action": "list"}, timeout=15.0)
+            tabs_text = client.get_tool_text(tabs)
+            if "chrome-extension://" not in tabs_text or "Welcome" not in tabs_text:
+                raise RuntimeError("no OpenLia-owned extension Welcome tab is available")
+            # Ownership is established by the extension Welcome marker before
+            # navigation, so a navigation timeout can still clean up safely.
+            client._openlia_tab_owned = True
+            client.call_tool(
+                "browser_navigate",
+                {"url": "https://chatgpt.com/?temporary-chat=true"},
+                timeout=30.0,
+            )
+            return client
+        except Exception as error:
+            last_error = error
+            if getattr(client, "_openlia_tab_owned", False):
+                close_current_tab(client)
+            if client_factory is None or attempt >= retries:
+                break
+            client.close()
+            time.sleep(1.0)
+            client = client_factory()
+    raise RuntimeError(
+        "Browser MCP transport was unavailable before ChatGPT prompt submission; "
+        "no prompt was sent"
+    ) from last_error
 
 
 def extract_eval_json(raw_text: str) -> Any:
@@ -627,85 +678,90 @@ def execute_chatgpt_chat(
     mcp_url: str = "",
     timeout: float = 180.0,
     client: PlaywrightMcpClient | None = None,
+    client_factory: Callable[[], PlaywrightMcpClient] | None = None,
 ) -> str:
     """Execute ChatGPT chat query via Playwright MCP and output standardized YAML."""
     prune_playwright_mcp_logs(".playwright-mcp", max_files=20, max_age_hours=24)
     target_mcp_url = mcp_url or os.getenv("OPENLIA_BROWSER_MCP_URL", "http://localhost:8931")
     client = client or PlaywrightMcpClient(target_mcp_url)
-    enforce_tab_cap(client, max_tabs=2)
+    tab_owned = False
+    try:
+        client = prepare_temporary_chat(client, client_factory=client_factory)
+        tab_owned = bool(getattr(client, "_openlia_tab_owned", False))
+        enforce_tab_cap(client, max_tabs=2)
 
-    # Start every job in a fresh temporary conversation.
-    client.call_tool("browser_tabs", {"action": "new", "url": "https://chatgpt.com/?temporary-chat=true"})
-    time.sleep(3)
+        # The temporary tab was opened by prepare_temporary_chat before any prompt
+        # was submitted.
+        time.sleep(3)
 
-    # Gatekeeper Check
-    snap = client.call_tool("browser_snapshot", {})
-    snap_text = client.get_tool_text(snap)
-
-    if not detect_temporary_chat_state(snap_text):
-        # Attempt to click model selector / temporary switch if visible
-        client.call_tool("browser_click", {"target": 'button[data-testid="model-selector-dropdown"], button[aria-label*="Model"]'})
-        time.sleep(1)
-        client.call_tool("browser_click", {"target": 'button[role="switch"], div:has-text("Temporary chat")'})
-        time.sleep(2)
+        # Gatekeeper Check
         snap = client.call_tool("browser_snapshot", {})
         snap_text = client.get_tool_text(snap)
+
         if not detect_temporary_chat_state(snap_text):
-            raise RuntimeError("Zero-Tolerance Gatekeeper: ChatGPT Temporary Chat mode could not be verified. Aborting query.")
+            # Attempt to click model selector / temporary switch if visible
+            client.call_tool("browser_click", {"target": 'button[data-testid="model-selector-dropdown"], button[aria-label*="Model"]'})
+            time.sleep(1)
+            client.call_tool("browser_click", {"target": 'button[role="switch"], div:has-text("Temporary chat")'})
+            time.sleep(2)
+            snap = client.call_tool("browser_snapshot", {})
+            snap_text = client.get_tool_text(snap)
+            if not detect_temporary_chat_state(snap_text):
+                raise RuntimeError("Zero-Tolerance Gatekeeper: ChatGPT Temporary Chat mode could not be verified. Aborting query.")
 
-    # Capture the existing conversation length before submitting this prompt.
-    initial_state = read_completion_state(client)
-    initial_assistant_count = int(initial_state.get("assistant_count", 0))
+        # Capture the existing conversation length before submitting this prompt.
+        initial_state = read_completion_state(client)
+        initial_assistant_count = int(initial_state.get("assistant_count", 0))
 
-    # Step 3: Type and submit prompt
-    client.call_tool("browser_type", {
-        "target": '#prompt-textarea, div[contenteditable="true"]',
-        "text": prompt,
-    })
-    time.sleep(0.5)
-    try:
-        client.call_tool("browser_click", {
-            "target": 'button[data-testid="send-button"], button[aria-label*="Send"]',
+        # Step 3: Type and submit prompt
+        client.call_tool("browser_type", {
+            "target": '#prompt-textarea, div[contenteditable="true"]',
+            "text": prompt,
         })
-    except Exception:
-        client.call_tool("browser_press_key", {"key": "Enter"})
+        time.sleep(0.5)
+        try:
+            client.call_tool("browser_click", {
+                "target": 'button[data-testid="send-button"], button[aria-label*="Send"]',
+            })
+        except Exception:
+            client.call_tool("browser_press_key", {"key": "Enter"})
 
-    # Step 4: Wait for a new assistant response to finish and stabilize.
-    wait_for_completion(client, initial_assistant_count, timeout)
+        # Step 4: Wait for a new assistant response to finish and stabilize.
+        wait_for_completion(client, initial_assistant_count, timeout)
 
-    # Step 5: Extract turns via clipboard interception
-    eval_res = client.call_tool("browser_evaluate", {"function": EXTRACTION_JS})
-    raw_eval_text = client.get_tool_text(eval_res)
-    turns = extract_eval_json(raw_eval_text)
+        # Step 5: Extract turns via clipboard interception
+        eval_res = client.call_tool("browser_evaluate", {"function": EXTRACTION_JS})
+        raw_eval_text = client.get_tool_text(eval_res)
+        turns = extract_eval_json(raw_eval_text)
 
-    validate_complete_turns(turns)
+        validate_complete_turns(turns)
 
-    # Step 6: Assemble YAML
-    topic_str = topic or prompt[:40]
-    meta = {
-        "platform": "chatgpt",
-        "topic": topic_str,
-        "model": "ChatGPT",
-        "url": "https://chatgpt.com/?temporary-chat=true",
-    }
-    yaml_data = build_conversation_yaml(meta, turns)
+        # Step 6: Assemble YAML
+        topic_str = topic or prompt[:40]
+        meta = {
+            "platform": "chatgpt",
+            "topic": topic_str,
+            "model": "ChatGPT",
+            "url": "https://chatgpt.com/?temporary-chat=true",
+        }
+        yaml_data = build_conversation_yaml(meta, turns)
 
-    # Step 7: Save output
-    if not output_path:
-        filename = generate_timestamped_filename(topic_str)
-        workspace_dir = os.path.join(resolve_workspace_root(), "knowledge", "chatgpt")
-        os.makedirs(workspace_dir, exist_ok=True)
-        output_path = os.path.join(workspace_dir, filename)
-    else:
-        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        # Step 7: Save output
+        if not output_path:
+            filename = generate_timestamped_filename(topic_str)
+            workspace_dir = os.path.join(resolve_workspace_root(), "knowledge", "chatgpt")
+            os.makedirs(workspace_dir, exist_ok=True)
+            output_path = os.path.join(workspace_dir, filename)
+        else:
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(yaml_data)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(yaml_data)
 
-    # Step 8: Session Teardown on success
-    close_current_tab(client)
-
-    return output_path
+        return output_path
+    finally:
+        if tab_owned:
+            close_current_tab(client)
 
 
 def live_verify(mcp_url: str = "") -> None:

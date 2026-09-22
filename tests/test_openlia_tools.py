@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from openlia_tools import JobStore, redact, safe_slug  # noqa: E402
+from openlia_tools import JobStore, close_browser_client, redact, safe_slug  # noqa: E402
 
 
 class OpenLiaToolsTest(unittest.TestCase):
@@ -55,6 +55,23 @@ class OpenLiaToolsTest(unittest.TestCase):
     def test_helpers_redact_and_slug(self) -> None:
         self.assertEqual(safe_slug("Latest Go / Gemini!"), "latest_go_gemini")
         self.assertNotIn("sk-secret", redact("OPENAI_API_KEY=sk-secret"))
+
+    def test_close_browser_client_does_not_make_rpc_cleanup_call(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.closed = False
+                self.rpc_calls = 0
+
+            def close(self) -> None:
+                self.closed = True
+
+            def call_tool(self, *_args, **_kwargs) -> None:
+                self.rpc_calls += 1
+
+        client = FakeClient()
+        close_browser_client(client)
+        self.assertTrue(client.closed)
+        self.assertEqual(client.rpc_calls, 0)
 
     def test_store_prunes_old_jobs(self) -> None:
         from datetime import datetime, timedelta, timezone
