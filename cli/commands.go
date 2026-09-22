@@ -55,6 +55,8 @@ func Run(args []string, assets fs.FS) int {
 		return commandUpdate(options, remaining[1:], assets)
 	case "skills":
 		return commandSkills(options, remaining[1:], assets)
+	case "skill-sources":
+		return commandSkillSources(options, remaining[1:])
 	case "auth":
 		return commandAuth(options, remaining[1:])
 	case "attachments":
@@ -531,7 +533,7 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 
 func commandSkills(options Options, args []string, assets fs.FS) int {
 	if len(args) == 0 {
-		return fail(options, ExitUsage, "skills requires list, show, status, fork, migrate, enable, disable, or test", nil)
+		return fail(options, ExitUsage, "skills requires list, show, audit, install, update, uninstall, test, reset, fork-refresh, status, fork, migrate, enable, or disable", nil)
 	}
 	action := args[0]
 	args = args[1:]
@@ -554,20 +556,53 @@ func commandSkills(options Options, args []string, assets fs.FS) int {
 			}
 			entries = append(entries, map[string]any{"name": skill, "enabled": contains(config.EnabledSkills, skill), "available": len(content) > 0})
 		}
-		return writeResult(options, map[string]any{"schema": 1, "ok": true, "skills": entries}, skillListHuman(config))
+		if len(config.SkillSources) == 0 {
+			return writeResult(options, map[string]any{"schema": 1, "ok": true, "skills": entries}, skillListHuman(config))
+		}
+		ctx, cancel := remoteContext()
+		defer cancel()
+		raw, operationErr := newDeployment(config).operation(ctx, "skills", nil, "list", "--json")
+		if operationErr != nil {
+			return fail(options, ExitFailure, operationErr.Error(), nil)
+		}
+		var external []map[string]any
+		if err := json.Unmarshal(raw, &external); err != nil {
+			return fail(options, ExitFailure, "could not parse external skill catalog", nil)
+		}
+		for _, skill := range entries {
+			skill["origin"] = "bundled"
+		}
+		lines := []string{skillListHuman(config)}
+		for _, skill := range external {
+			skill["origin"] = "external"
+			entries = append(entries, skill)
+			lines = append(lines, fmt.Sprintf("%s/%s: available=%t installed=%t update_available=%t", skill["source"], skill["name"], true, skill["installed"], skill["update_available"]))
+		}
+		return writeResult(options, map[string]any{"schema": 1, "ok": true, "skills": entries}, strings.Join(lines, "\n"))
 	case "show":
-		if len(args) != 1 || !safeComponent(args[0]) || !contains(defaultSkills, args[0]) {
-			return fail(options, ExitUsage, "skills show requires a known skill name", nil)
+		if len(args) != 1 || !validSkillIdentifier(args[0]) {
+			return fail(options, ExitUsage, "skills show requires a skill name or source/skill identifier", nil)
 		}
-		content, err := fs.ReadFile(assets, filepath.ToSlash(filepath.Join("profile", "skills", args[0], "SKILL.md")))
-		if err != nil {
-			return fail(options, ExitInternal, err.Error(), nil)
+		if safeComponent(args[0]) && contains(defaultSkills, args[0]) {
+			content, err := fs.ReadFile(assets, filepath.ToSlash(filepath.Join("profile", "skills", args[0], "SKILL.md")))
+			if err != nil {
+				return fail(options, ExitInternal, err.Error(), nil)
+			}
+			if options.JSON {
+				return writeResult(options, map[string]any{"schema": 1, "ok": true, "name": args[0], "content": string(content)}, "")
+			}
+			fmt.Fprint(os.Stdout, string(content))
+			return ExitOK
 		}
-		if options.JSON {
-			return writeResult(options, map[string]any{"schema": 1, "ok": true, "name": args[0], "content": string(content)}, "")
+		if config, err := loadConfig(); err == nil {
+			return runSkillOperator(options, config, "show", args)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fail(options, ExitFailure, err.Error(), nil)
 		}
-		fmt.Fprint(os.Stdout, string(content))
-		return ExitOK
+		if !safeComponent(args[0]) || !contains(defaultSkills, args[0]) {
+			return fail(options, ExitPrereq, "external skills require an initialized deployment", nil)
+		}
+		return fail(options, ExitPrereq, "external skills require an initialized deployment", nil)
 	case "status":
 		if len(args) > 1 || (len(args) == 1 && !safeComponent(args[0])) {
 			return fail(options, ExitUsage, "skills status accepts at most one safe skill name", nil)
@@ -591,8 +626,8 @@ func commandSkills(options Options, args []string, assets fs.FS) int {
 		}
 		return renderRemote(options, raw, "openlia skills status: read-only skill provenance inspection")
 	case "fork":
-		if len(args) != 1 || !safeComponent(args[0]) || !contains(defaultSkills, args[0]) {
-			return fail(options, ExitUsage, "skills fork requires a known user skill name", nil)
+		if len(args) != 1 || !safeComponent(args[0]) {
+			return fail(options, ExitUsage, "skills fork requires an installed safe skill name", nil)
 		}
 		config, code := configOrError(options)
 		if code != ExitOK {
@@ -608,13 +643,98 @@ func commandSkills(options Options, args []string, assets fs.FS) int {
 	case "migrate":
 		return commandSkillMigration(options, args)
 	case "test":
-		if len(args) != 1 || !safeComponent(args[0]) || !contains(defaultSkills, args[0]) {
-			return fail(options, ExitUsage, "skills test requires a known skill name", nil)
+		if len(args) != 1 || !validSkillIdentifier(args[0]) {
+			return fail(options, ExitUsage, "skills test requires a skill name or source/skill identifier", nil)
 		}
-		return testSkill(options, assets, args[0])
+		if safeComponent(args[0]) && contains(defaultSkills, args[0]) {
+			return testSkill(options, assets, args[0])
+		}
+		if config, err := loadConfig(); err == nil {
+			return runSkillOperator(options, config, "test", args)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fail(options, ExitFailure, err.Error(), nil)
+		}
+		if !safeComponent(args[0]) || !contains(defaultSkills, args[0]) {
+			return fail(options, ExitPrereq, "external skill tests require an initialized deployment", nil)
+		}
+		return fail(options, ExitPrereq, "external skill tests require an initialized deployment", nil)
+	case "audit", "fork-refresh":
+		if len(args) != 1 || !validSkillIdentifier(args[0]) {
+			return fail(options, ExitUsage, "skills "+action+" requires a skill name or source/skill identifier", nil)
+		}
+		config, code := configOrError(options)
+		if code != ExitOK {
+			return code
+		}
+		return runSkillOperator(options, config, action, args)
+	case "update":
+		if len(args) != 1 || !validSkillIdentifier(args[0]) {
+			return fail(options, ExitUsage, "skills update requires a skill name or source/skill identifier", nil)
+		}
+		if options.NonInteractive {
+			return fail(options, ExitUsage, "skill update requires explicit interactive approval", nil)
+		}
+		config, code := configOrError(options)
+		if code != ExitOK {
+			return code
+		}
+		commit, code := showSkillPlan(options, config, "plan-update", args[0])
+		if code != ExitOK {
+			return code
+		}
+		if !confirmExact(options, "Update external skill "+args[0]+"?", "update "+args[0]) {
+			return fail(options, approvalExitCode(options), "skill update cancelled; explicit interactive approval is required", nil)
+		}
+		return runSkillOperator(options, config, action, append(args, "--approve", "--commit", commit))
+	case "install":
+		disabled, args := removeArgument(args, "--disabled")
+		if len(args) != 1 || !validExternalSkillIdentifier(args[0]) {
+			return fail(options, ExitUsage, "skills install requires source/skill [--disabled]", nil)
+		}
+		if options.NonInteractive {
+			return fail(options, ExitUsage, "skill install requires explicit interactive approval", nil)
+		}
+		config, code := configOrError(options)
+		if code != ExitOK {
+			return code
+		}
+		commit, code := showSkillPlan(options, config, "plan-install", args[0])
+		if code != ExitOK {
+			return code
+		}
+		if !confirmExact(options, "Install external skill "+args[0]+"?", "install "+args[0]) {
+			return fail(options, approvalExitCode(options), "skill install cancelled; explicit interactive approval is required", nil)
+		}
+		name := strings.Split(args[0], "/")[1]
+		previousEnabled := append([]string(nil), config.EnabledSkills...)
+		if !disabled {
+			config.EnabledSkills = setSkill(config.EnabledSkills, name, true)
+			if err := saveConfig(config); err != nil {
+				return fail(options, ExitFailure, err.Error(), nil)
+			}
+		}
+		result := runSkillOperator(options, config, action, append(args, "--approve", "--commit", commit))
+		if result != ExitOK && !disabled {
+			config.EnabledSkills = previousEnabled
+			_ = saveConfig(config)
+		}
+		return result
+	case "uninstall", "reset":
+		if len(args) != 1 || !validSkillIdentifier(args[0]) {
+			return fail(options, ExitUsage, "skills "+action+" requires a skill name or source/skill identifier", nil)
+		}
+		expected := action + " skill " + args[0]
+		if !confirmExact(options, "Destructive skill "+action+" for "+args[0]+"?", expected) {
+			return fail(options, approvalExitCode(options), "skill "+action+" cancelled; exact interactive confirmation is required", nil)
+		}
+		config, code := configOrError(options)
+		if code != ExitOK {
+			return code
+		}
+		return runSkillOperator(options, config, action, append(args, "--approve"))
 	case "enable", "disable":
-		if len(args) != 1 || !safeComponent(args[0]) || !contains(defaultSkills, args[0]) {
-			return fail(options, ExitUsage, "skills enable/disable requires a known skill name", nil)
+		if len(args) != 1 || !safeComponent(args[0]) {
+			return fail(options, ExitUsage, "skills enable/disable requires an installed safe skill name", nil)
 		}
 		config, code := configOrError(options)
 		if code != ExitOK {
@@ -635,6 +755,246 @@ func commandSkills(options Options, args []string, assets fs.FS) int {
 	default:
 		return fail(options, ExitUsage, "unknown skills action "+action, nil)
 	}
+}
+
+func commandSkillSources(options Options, args []string) int {
+	if len(args) == 0 {
+		return fail(options, ExitUsage, "skill-sources requires add, list, remove, check, or fetch", nil)
+	}
+	action := args[0]
+	args = args[1:]
+	config, err := loadConfig()
+	if errors.Is(err, os.ErrNotExist) {
+		return fail(options, ExitPrereq, "OpenLia is not initialized", nil)
+	}
+	if err != nil {
+		return fail(options, ExitFailure, err.Error(), nil)
+	}
+	switch action {
+	case "list":
+		if len(args) != 0 {
+			return fail(options, ExitUsage, "skill-sources list takes no arguments", nil)
+		}
+		lines := make([]string, 0, len(config.SkillSources))
+		for _, source := range config.SkillSources {
+			lines = append(lines, fmt.Sprintf("%s: %s (%s)", source.Name, source.Repository, source.Branch))
+		}
+		return writeResult(options, map[string]any{"schema": 1, "ok": true, "skill_sources": config.SkillSources}, strings.Join(lines, "\n"))
+	case "add":
+		repository, remaining, extractErr := extractFlag(args, "--repository")
+		if extractErr != nil {
+			return fail(options, ExitUsage, extractErr.Error(), nil)
+		}
+		branch, remaining, extractErr := extractFlag(remaining, "--branch")
+		if extractErr != nil {
+			return fail(options, ExitUsage, extractErr.Error(), nil)
+		}
+		if branch == "" {
+			branch = "main"
+		}
+		if repository == "" && len(remaining) == 2 {
+			repository = remaining[1]
+			remaining = remaining[:1]
+		}
+		if len(remaining) != 1 || !safeComponent(remaining[0]) || repository == "" || !safeGitBranch(branch) {
+			return fail(options, ExitUsage, "skill-sources add requires NAME --repository https://github.com/OWNER/REPO [--branch BRANCH]", nil)
+		}
+		name := remaining[0]
+		for _, source := range config.SkillSources {
+			if source.Name == name {
+				return fail(options, ExitUsage, "skill source name already exists", nil)
+			}
+		}
+		config.SkillSources = append(config.SkillSources, SkillSourceConfig{Name: name, Repository: repository, Branch: branch})
+		if err := saveConfig(config); err != nil {
+			return fail(options, ExitFailure, err.Error(), nil)
+		}
+		if config.Mode == "local" || config.Target != "" {
+			ctx, cancel := remoteContext()
+			defer cancel()
+			raw, fetchErr := newDeployment(config).operation(ctx, "skill-sources", nil, "fetch", name, "--json")
+			if fetchErr != nil {
+				config.SkillSources = config.SkillSources[:len(config.SkillSources)-1]
+				if saveErr := saveConfig(config); saveErr != nil {
+					return fail(options, ExitFailure, "source validation failed and configuration rollback failed: "+fetchErr.Error()+"; "+saveErr.Error(), nil)
+				}
+				return fail(options, ExitFailure, "source was not added: "+fetchErr.Error(), nil)
+			}
+			return renderSkillOperation(options, raw, "source added and fetched")
+		}
+		return writeResult(options, map[string]any{"schema": 1, "ok": true, "skill_source": config.SkillSources[len(config.SkillSources)-1]}, "skill source configured: "+name+"; fetch it after initializing OpenLia")
+	case "remove":
+		if len(args) != 1 || !safeComponent(args[0]) {
+			return fail(options, ExitUsage, "skill-sources remove requires a safe source name", nil)
+		}
+		kept := make([]SkillSourceConfig, 0, len(config.SkillSources))
+		found := false
+		for _, source := range config.SkillSources {
+			if source.Name == args[0] {
+				found = true
+			} else {
+				kept = append(kept, source)
+			}
+		}
+		if !found {
+			return fail(options, ExitUsage, "unknown skill source "+args[0], nil)
+		}
+		if config.Mode == "local" || config.Target != "" {
+			ctx, cancel := remoteContext()
+			defer cancel()
+			raw, operationErr := newDeployment(config).operation(ctx, "skill-sources", nil, "used", args[0], "--json")
+			if operationErr != nil {
+				return fail(options, ExitFailure, "could not verify installed skills before removing source: "+operationErr.Error(), nil)
+			}
+			var usage struct {
+				InstalledSkills []string `json:"installed_skills"`
+			}
+			if err := json.Unmarshal(raw, &usage); err != nil {
+				return fail(options, ExitFailure, "could not parse installed skill catalog", nil)
+			}
+			if len(usage.InstalledSkills) > 0 {
+				return fail(options, ExitFailure, "skill source is still used by installed skill "+usage.InstalledSkills[0]+"; uninstall it first", nil)
+			}
+		}
+		config.SkillSources = kept
+		if err := saveConfig(config); err != nil {
+			return fail(options, ExitFailure, err.Error(), nil)
+		}
+		return writeResult(options, map[string]any{"schema": 1, "ok": true, "removed": args[0]}, "skill source removed: "+args[0])
+	case "check", "fetch":
+		if len(args) > 1 || (len(args) == 1 && !safeComponent(args[0])) {
+			return fail(options, ExitUsage, "skill-sources "+action+" accepts at most one source name", nil)
+		}
+		ctx, cancel := remoteContext()
+		defer cancel()
+		opArgs := append([]string{action}, args...)
+		opArgs = append(opArgs, "--json")
+		raw, err := newDeployment(config).operation(ctx, "skill-sources", nil, opArgs...)
+		if err != nil {
+			return fail(options, ExitFailure, err.Error(), nil)
+		}
+		return renderSkillOperation(options, raw, "skill source "+action+" completed")
+	default:
+		return fail(options, ExitUsage, "unknown skill-sources action "+action, nil)
+	}
+}
+
+func runSkillOperator(options Options, config Config, action string, args []string) int {
+	ctx, cancel := remoteContext()
+	defer cancel()
+	opArgs := append([]string{action}, args...)
+	opArgs = append(opArgs, "--json")
+	raw, err := newDeployment(config).operation(ctx, "skills", nil, opArgs...)
+	if err != nil {
+		return fail(options, ExitFailure, err.Error(), nil)
+	}
+	return renderSkillOperation(options, raw, "skill "+action+" completed")
+}
+
+func renderSkillOperation(options Options, raw []byte, fallback string) int {
+	if options.JSON {
+		return renderRemote(options, raw, "")
+	}
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return renderRemote(options, raw, fallback)
+	}
+	formatted, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return renderRemote(options, raw, fallback)
+	}
+	fmt.Fprintln(os.Stdout, string(formatted))
+	return ExitOK
+}
+
+func showSkillPlan(options Options, config Config, action, identifier string) (string, int) {
+	ctx, cancel := remoteContext()
+	defer cancel()
+	raw, err := newDeployment(config).operation(ctx, "skills", nil, action, identifier, "--json")
+	if err != nil {
+		return "", fail(options, ExitFailure, err.Error(), nil)
+	}
+	if options.JSON {
+		var envelope struct {
+			Skill struct {
+				Commit string `json:"commit"`
+			} `json:"skill"`
+		}
+		if json.Unmarshal(raw, &envelope) != nil || envelope.Skill.Commit == "" {
+			return "", fail(options, ExitFailure, "could not parse skill installation plan", nil)
+		}
+		return envelope.Skill.Commit, ExitOK
+	}
+	var plan struct {
+		Action           string `json:"action"`
+		InstalledCommit  string `json:"installed_commit"`
+		InstalledVersion string `json:"installed_version"`
+		Skill            struct {
+			Source  string `json:"source"`
+			Name    string `json:"name"`
+			Commit  string `json:"commit"`
+			Version string `json:"version"`
+		} `json:"skill"`
+		Audit struct {
+			Checks []struct {
+				Name string `json:"name"`
+			} `json:"checks"`
+		} `json:"audit"`
+	}
+	if json.Unmarshal(raw, &plan) != nil {
+		return "", fail(options, ExitFailure, "could not parse skill installation plan", nil)
+	}
+	fmt.Fprintf(os.Stdout, "%s %s/%s\n", titleWord(plan.Action), plan.Skill.Source, plan.Skill.Name)
+	if plan.InstalledCommit != "" {
+		fmt.Fprintf(os.Stdout, "Current: %s (%s)\n", plan.InstalledVersion, plan.InstalledCommit)
+	}
+	fmt.Fprintf(os.Stdout, "Proposed: %s (%s)\nAudit: passed (%d checks)\n", plan.Skill.Version, plan.Skill.Commit, len(plan.Audit.Checks))
+	return plan.Skill.Commit, ExitOK
+}
+
+func removeArgument(args []string, target string) (bool, []string) {
+	found := false
+	result := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == target {
+			found = true
+			continue
+		}
+		result = append(result, arg)
+	}
+	return found, result
+}
+
+func titleWord(value string) string {
+	if value == "" {
+		return "Skill"
+	}
+	return strings.ToUpper(value[:1]) + value[1:]
+}
+
+func validExternalSkillIdentifier(value string) bool {
+	parts := strings.Split(value, "/")
+	return len(parts) == 2 && safeComponent(parts[0]) && safeComponent(parts[1])
+}
+
+func validSkillIdentifier(value string) bool {
+	return safeComponent(value) || validExternalSkillIdentifier(value)
+}
+
+func confirmExact(options Options, prompt, expected string) bool {
+	if options.NonInteractive {
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "%s Type %q to continue: ", prompt, expected)
+	answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	return err == nil && strings.TrimSpace(answer) == expected
+}
+
+func approvalExitCode(options Options) int {
+	if options.NonInteractive {
+		return ExitUsage
+	}
+	return ExitFailure
 }
 
 func commandSkillMigration(options Options, args []string) int {
@@ -712,6 +1072,13 @@ func commandAuth(options Options, args []string) int {
 			return fail(options, ExitUsage, "could not read a protected source path", nil)
 		}
 		source = strings.TrimSpace(input)
+		config.SecretSource = source
+		if err := validateProtectedSourcePath(source, "secret source"); err != nil {
+			return fail(options, ExitUsage, err.Error(), nil)
+		}
+		if err := saveConfig(config); err != nil {
+			return fail(options, ExitFailure, "could not save secret source configuration: "+err.Error(), nil)
+		}
 	}
 	return rotateRemoteFile(options, "auth", source)
 }

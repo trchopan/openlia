@@ -119,7 +119,7 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 		_ = temporary.Close()
 		return BackupResult{}, err
 	}
-	for _, root := range []string{"hermes", "meta", "locho"} {
+	for _, root := range []string{"hermes", "meta", "locho", "skill-envs"} {
 		path := filepath.Join(config.RuntimeRoot, root)
 		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 			continue
@@ -364,8 +364,12 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 			return BackupResult{}, fmt.Errorf("restore extraction failed; archive is missing %s", root)
 		}
 	}
+	restoreRoots := []string{"hermes", "meta", "locho"}
+	if info, rootErr := os.Stat(filepath.Join(staging, "skill-envs")); rootErr == nil && info.IsDir() {
+		restoreRoots = append(restoreRoots, "skill-envs")
+	}
 	oldRoots := make(map[string]string)
-	for _, root := range []string{"hermes", "meta", "locho"} {
+	for _, root := range restoreRoots {
 		oldPath := filepath.Join(config.BackupRoot, fmt.Sprintf("pre-restore-%s-%s-%d", root, now.UTC().Format("20060102T150405Z"), os.Getpid()))
 		for suffix := 1; ; suffix++ {
 			if _, statErr := os.Lstat(oldPath); errors.Is(statErr, os.ErrNotExist) {
@@ -377,10 +381,10 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 		}
 		oldRoots[root] = oldPath
 	}
-	for _, root := range []string{"hermes", "meta", "locho"} {
+	for _, root := range restoreRoots {
 		currentPath := filepath.Join(config.RuntimeRoot, root)
 		if err := os.Rename(currentPath, oldRoots[root]); err != nil {
-			for _, movedRoot := range []string{"hermes", "meta", "locho"} {
+			for _, movedRoot := range restoreRoots {
 				if oldPath := oldRoots[movedRoot]; oldPath != "" {
 					if _, statErr := os.Lstat(oldPath); statErr == nil {
 						_ = os.Rename(oldPath, filepath.Join(config.RuntimeRoot, movedRoot))
@@ -390,9 +394,9 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 			return BackupResult{}, fmt.Errorf("current %s move failed; restore was not applied", root)
 		}
 	}
-	for _, root := range []string{"hermes", "meta", "locho"} {
+	for _, root := range restoreRoots {
 		if err := os.Rename(filepath.Join(staging, root), filepath.Join(config.RuntimeRoot, root)); err != nil {
-			for _, restoredRoot := range []string{"hermes", "meta", "locho"} {
+			for _, restoredRoot := range restoreRoots {
 				_ = os.RemoveAll(filepath.Join(config.RuntimeRoot, restoredRoot))
 				if oldPath := oldRoots[restoredRoot]; oldPath != "" {
 					_ = os.Rename(oldPath, filepath.Join(config.RuntimeRoot, restoredRoot))
@@ -403,7 +407,7 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 		}
 	}
 	if err := WriteState(config, stateStopped); err != nil {
-		for _, restoredRoot := range []string{"hermes", "meta", "locho"} {
+		for _, restoredRoot := range restoreRoots {
 			_ = os.RemoveAll(filepath.Join(config.RuntimeRoot, restoredRoot))
 			if oldPath := oldRoots[restoredRoot]; oldPath != "" {
 				_ = os.Rename(oldPath, filepath.Join(config.RuntimeRoot, restoredRoot))
@@ -516,7 +520,7 @@ func validateRestoreArchive(path string) error {
 		if name == "" || name == "manifest.json" {
 			continue
 		}
-		if !safeArchiveMember(name) || !(name == "hermes" || name == "meta" || name == "locho" || strings.HasPrefix(name, "hermes/") || strings.HasPrefix(name, "meta/") || strings.HasPrefix(name, "locho/")) {
+		if !safeArchiveMember(name) || !(name == "hermes" || name == "meta" || name == "locho" || name == "skill-envs" || strings.HasPrefix(name, "hermes/") || strings.HasPrefix(name, "meta/") || strings.HasPrefix(name, "locho/") || strings.HasPrefix(name, "skill-envs/")) {
 			_ = decompressor.Close()
 			_ = file.Close()
 			return fmt.Errorf("restore archive contains an unsupported or unsafe member")
@@ -562,7 +566,7 @@ func extractRestoreArchive(path, destination string) error {
 		if name == "" || name == "manifest.json" {
 			continue
 		}
-		if !safeArchiveMember(name) || !(name == "hermes" || name == "meta" || name == "locho" || strings.HasPrefix(name, "hermes/") || strings.HasPrefix(name, "meta/") || strings.HasPrefix(name, "locho/")) || (header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) || header.Size < 0 {
+		if !safeArchiveMember(name) || !(name == "hermes" || name == "meta" || name == "locho" || name == "skill-envs" || strings.HasPrefix(name, "hermes/") || strings.HasPrefix(name, "meta/") || strings.HasPrefix(name, "locho/") || strings.HasPrefix(name, "skill-envs/")) || (header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) || header.Size < 0 {
 			return fmt.Errorf("restore archive contains an unsupported or unsafe member")
 		}
 		target := filepath.Join(destination, filepath.FromSlash(name))

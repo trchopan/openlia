@@ -77,7 +77,14 @@ type Config struct {
 	ReleaseSource     string
 	EnabledSkills     []string
 	WorkspaceGit      WorkspaceGitConfig
+	SkillSources      []SkillSourceConfig
 	Services          []ServiceHostConfig
+}
+
+type SkillSourceConfig struct {
+	Name       string `json:"name"`
+	Repository string `json:"repository"`
+	Branch     string `json:"branch"`
 }
 
 type ServiceHostConfig struct {
@@ -189,6 +196,8 @@ func parseConfig(data string) (Config, error) {
 				config.Services = append(config.Services, ServiceHostConfig{Roles: make(map[string]string)})
 			case "fallback_providers":
 				config.FallbackProviders = append(config.FallbackProviders, FallbackProviderConfig{})
+			case "skill_sources":
+				config.SkillSources = append(config.SkillSources, SkillSourceConfig{})
 			}
 			continue
 		}
@@ -251,6 +260,21 @@ func parseConfig(data string) (Config, error) {
 				current.KeyEnv, err = parseString(value)
 			default:
 				return Config{}, fmt.Errorf("line %d contains unknown fallback provider setting %q", lineNumber, key)
+			}
+		} else if section == "skill_sources" {
+			if len(config.SkillSources) == 0 {
+				return Config{}, fmt.Errorf("line %d defines skill source fields without a table", lineNumber)
+			}
+			current := &config.SkillSources[len(config.SkillSources)-1]
+			switch strings.Trim(key, "\"") {
+			case "name":
+				current.Name, err = parseString(value)
+			case "repository":
+				current.Repository, err = parseString(value)
+			case "branch":
+				current.Branch, err = parseString(value)
+			default:
+				return Config{}, fmt.Errorf("line %d contains unknown skill source setting %q", lineNumber, key)
 			}
 		} else {
 			switch section + "." + key {
@@ -437,6 +461,22 @@ func validateConfig(config Config) error {
 			return fmt.Errorf("invalid skill name %q", skill)
 		}
 	}
+	sourceNames := make(map[string]bool)
+	for index, source := range config.SkillSources {
+		if !safeComponent(source.Name) {
+			return fmt.Errorf("skill source %d has invalid name %q", index, source.Name)
+		}
+		if sourceNames[source.Name] {
+			return fmt.Errorf("duplicate skill source name %q", source.Name)
+		}
+		sourceNames[source.Name] = true
+		if err := validateGitHubRepository(source.Repository); err != nil {
+			return fmt.Errorf("skill source %q: %w", source.Name, err)
+		}
+		if !safeGitBranch(source.Branch) {
+			return fmt.Errorf("skill source %q branch is invalid", source.Name)
+		}
+	}
 	if err := validateWorkspaceGit(config.WorkspaceGit); err != nil {
 		return err
 	}
@@ -507,13 +547,20 @@ func validateWorkspaceGit(gitConfig WorkspaceGitConfig) error {
 }
 
 func validateGitHubRemote(remote string) error {
+	if err := validateGitHubRepository(remote); err != nil {
+		return fmt.Errorf("workspace Git remote %w", err)
+	}
+	return nil
+}
+
+func validateGitHubRepository(remote string) error {
 	parsed, err := url.Parse(remote)
 	if err != nil || parsed.Scheme != "https" || parsed.Host != "github.com" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return errors.New("workspace Git remote must be an HTTPS GitHub repository URL")
+		return errors.New("must be an HTTPS github.com repository URL without credentials, query, or fragment")
 	}
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	if len(parts) != 2 || !safeGitHubSegment(parts[0]) || !safeGitHubSegment(strings.TrimSuffix(parts[1], ".git")) {
-		return errors.New("workspace Git remote must use https://github.com/OWNER/REPOSITORY[.git]")
+		return errors.New("must use https://github.com/OWNER/REPOSITORY[.git]")
 	}
 	return nil
 }
@@ -557,8 +604,13 @@ func safeGitHubSegment(value string) bool {
 }
 
 func safeGitBranch(value string) bool {
-	if value == "" || strings.HasPrefix(value, ".") || strings.HasPrefix(value, "-") || strings.Contains(value, "..") || strings.ContainsAny(value, " ~^:?*[\\\"\r\n") {
+	if value == "" || strings.HasPrefix(value, ".") || strings.HasPrefix(value, "-") || strings.HasSuffix(value, ".") || strings.HasSuffix(value, "/") || strings.Contains(value, "..") || strings.Contains(value, "//") || strings.Contains(value, "@{") || strings.ContainsAny(value, " ~^:?*[\\\"\r\n") {
 		return false
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "" || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
+			return false
+		}
 	}
 	for _, character := range value {
 		if !(character >= 'a' && character <= 'z') && !(character >= 'A' && character <= 'Z') && !(character >= '0' && character <= '9') && !strings.ContainsRune("._/-", character) {
@@ -706,6 +758,10 @@ func renderConfig(config Config) string {
 	fmt.Fprintf(&builder, "[components]\nhermes_image = %q\nhermes_tag = %q\nhermes_digest = %q\nlocho_image = %q\nlocho_version = %q\n\n", config.HermesImage, config.HermesTag, config.HermesDigest, config.LochoImage, config.LochoVersion)
 	fmt.Fprintf(&builder, "[api]\nenabled = %t\nhost = %q\n\n", config.APIEnabled, config.APIHost)
 	fmt.Fprintf(&builder, "[secrets]\nsource = %q\n\n", config.SecretSource)
+	for _, source := range config.SkillSources {
+		builder.WriteString("[[skill_sources]]\n")
+		fmt.Fprintf(&builder, "name = %q\nrepository = %q\nbranch = %q\n\n", source.Name, source.Repository, source.Branch)
+	}
 	builder.WriteString("[skills]\nenabled = [")
 	for index, skill := range config.EnabledSkills {
 		if index > 0 {

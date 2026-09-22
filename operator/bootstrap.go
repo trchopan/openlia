@@ -49,6 +49,10 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 		{config.SecretDir, 0o700},
 		{config.BackupRoot, 0o700},
 		{config.MetaRoot, 0o700},
+		{config.SkillsCacheRoot, 0o755},
+		{config.SkillsEnvRoot, 0o755},
+		{filepath.Join(config.MetaRoot, "external-skills"), 0o700},
+		{filepath.Join(config.MetaRoot, "locks"), 0o700},
 	} {
 		if err := EnsureDir(item.path, item.mode); err != nil {
 			return BootstrapResult{}, err

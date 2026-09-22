@@ -49,6 +49,8 @@ OpenLia:
 - Backup and restore behavior, including path and archive validation.
 - Container isolation, exposed listeners, and generated service configuration.
 - Workspace Git automation and credential handling.
+- External skill source validation, Git credential handling, dependency
+  environment isolation, provenance, and activation approval boundaries.
 - Release integrity, provenance, and checksum verification.
 
 Report vulnerabilities in Hermes Agent, Locho, Debian, Docker, Go, Python,
@@ -77,4 +79,15 @@ Security fixes should preserve the repository's existing safeguards, including
 protected out-of-repository secrets, private-by-default listeners, read-only
 container filesystems, restricted capabilities, and manual approval boundaries.
 See the [security boundaries in the README](README.md#security-boundaries) and
-the [contribution guidelines](CONTRIBUTING.md) for additional requirements.
+the [external skill repository guide](docs/EXTERNAL_SKILLS.md) for the exact
+third-party skill boundary. External skill audit results cover tree structure,
+locked dependency resolution, and known dependency vulnerabilities; they are
+not an endorsement or a source-code review. Review the resolved commit before
+installation and scope `OPENLIA_SKILLS_GIT_TOKEN` to read only the required
+private repositories. Install and update show an audited, immutable commit-bound
+plan before confirmation. The dependency builder uses the local operator UID/GID
+for non-root local deployments and UID/GID `10000` for remote or root-run
+operations; it has no deployment secret mount, though it retains network access
+for locked packages and vulnerability data.
+
+See the [contribution guidelines](CONTRIBUTING.md) for additional requirements.

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -20,6 +21,10 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 	want.Timezone = "Asia/Tokyo"
 	want.SecretSource = filepath.Join(temporary, "hermes.env")
+	want.SkillSources = []SkillSourceConfig{
+		{Name: "official", Repository: "https://github.com/openlia/skills.git", Branch: "main"},
+		{Name: "team", Repository: "https://github.com/example/team-skills", Branch: "release/v2"},
+	}
 	want.EnabledSkills = []string{"daily-briefing", "deep-research"}
 	want.WorkspaceGit = WorkspaceGitConfig{
 		Enabled:     true,
@@ -37,7 +42,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Target != want.Target || got.Model != want.Model || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || got.WorkspaceGit != want.WorkspaceGit {
+	if got.Target != want.Target || got.Model != want.Model || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || got.WorkspaceGit != want.WorkspaceGit || len(got.SkillSources) != 2 || got.SkillSources[0] != want.SkillSources[0] || got.SkillSources[1] != want.SkillSources[1] {
 		t.Fatalf("round trip mismatch: got %#v want %#v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -46,6 +51,38 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("config mode is %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestSkillSourcesRejectUnsafeConfiguration(t *testing.T) {
+	for _, repository := range []string{"http://github.com/example/skills", "https://user:token@github.com/example/skills", "https://github.com/example/skills?token=secret", "https://github.com/example/skills#main", "https://gitlab.com/example/skills", "https://github.com/example/skills/extra"} {
+		config := defaultConfig()
+		config.SkillSources = []SkillSourceConfig{{Name: "team", Repository: repository, Branch: "main"}}
+		if err := validateConfig(config); err == nil {
+			t.Fatalf("skill source repository %q was accepted", repository)
+		}
+	}
+	for _, branch := range []string{"", "../main", "feature//one", "main.lock", "main@{1}", "main/"} {
+		config := defaultConfig()
+		config.SkillSources = []SkillSourceConfig{{Name: "team", Repository: "https://github.com/example/skills", Branch: branch}}
+		if err := validateConfig(config); err == nil {
+			t.Fatalf("skill source branch %q was accepted", branch)
+		}
+	}
+	config := defaultConfig()
+	config.SkillSources = []SkillSourceConfig{{Name: "team", Repository: "https://github.com/example/one", Branch: "main"}, {Name: "team", Repository: "https://github.com/example/two", Branch: "main"}}
+	if err := validateConfig(config); err == nil {
+		t.Fatal("duplicate skill source names were accepted")
+	}
+}
+
+func TestSkillSourceConfigNeverContainsToken(t *testing.T) {
+	config := defaultConfig()
+	config.SkillSources = []SkillSourceConfig{{Name: "team", Repository: "https://github.com/example/skills", Branch: "main"}}
+	config.SecretSource = "/tmp/hermes.env"
+	rendered := renderConfig(config)
+	if strings.Contains(rendered, "OPENLIA_SKILLS_GIT_TOKEN") || strings.Contains(rendered, "github_pat_") {
+		t.Fatalf("token material leaked into config: %s", rendered)
 	}
 }
 

@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -44,10 +47,63 @@ func TestOperatorArgumentsMapAllOperationScripts(t *testing.T) {
 		"ops/healthcheck.sh",
 		"ops/workspace-git.sh",
 		"ops/uninstall.sh",
+		"skill-sources",
+		"skills",
 	} {
 		if _, ok := operatorArguments(script, []string{"--json"}); !ok {
 			t.Fatalf("script %s was not mapped to the Go operator", script)
 		}
+	}
+}
+
+func TestSkillSourcesTransportAsJSON(t *testing.T) {
+	config := defaultConfig()
+	config.Target = "operator@example.test"
+	config.SkillSources = []SkillSourceConfig{{Name: "team", Repository: "https://github.com/example/skills", Branch: "release/v2"}}
+	want := `[{"name":"team","repository":"https://github.com/example/skills","branch":"release/v2"}]`
+	command := (Remote{Config: config}).operationCommand("skills", "list", "--json")
+	if !strings.Contains(command, "OPENLIA_SKILL_SOURCES="+shellQuote(want)) {
+		t.Fatalf("remote command does not transport skill sources JSON: %s", command)
+	}
+	if !strings.Contains(strings.Join(operationEnvironment(config, "/tmp/release"), "\n"), "OPENLIA_SKILL_SOURCES="+want) {
+		t.Fatal("local environment does not transport skill sources JSON")
+	}
+}
+
+func TestNewSkillOperationsHaveNoLegacyFallback(t *testing.T) {
+	config := defaultConfig()
+	config.Target = "operator@example.test"
+	for _, operation := range []string{"skill-sources", "skills"} {
+		command := (Remote{Config: config}).operationCommand(operation, "list", "--json")
+		if strings.Contains(command, "ops/skills") || !strings.Contains(command, "Go operator is required") {
+			t.Fatalf("%s operation has unsafe fallback: %s", operation, command)
+		}
+	}
+}
+
+func TestRemoteExtractsOperatorErrorJSON(t *testing.T) {
+	bin := t.TempDir()
+	ssh := filepath.Join(bin, "ssh")
+	if err := os.WriteFile(ssh, []byte("#!/bin/sh\nprintf '%s\\n' '{\"schema\":1,\"ok\":false,\"error\":\"remote skill failure\"}'\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	config := defaultConfig()
+	config.Target = "operator@example.test"
+	_, err := (Remote{Config: config}).ssh(context.Background(), "ignored", nil)
+	if err == nil || err.Error() != "remote command failed: remote skill failure" {
+		t.Fatalf("Remote.ssh() error = %v", err)
+	}
+}
+
+func TestLocalExtractsOperatorErrorJSON(t *testing.T) {
+	config := defaultConfig()
+	config.Mode = "local"
+	config.Target = ""
+	config.InstallRoot = filepath.Join(t.TempDir(), "openlia")
+	_, err := (Local{Config: config}).operator(context.Background(), filepath.Join(config.InstallRoot, "release"), "unknown", "--json")
+	if err == nil || !strings.Contains(err.Error(), "local operator failed: unknown command") {
+		t.Fatalf("Local.operator() error = %v", err)
 	}
 }
 

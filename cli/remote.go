@@ -74,6 +74,9 @@ func (remote Remote) ssh(ctx context.Context, command string, input []byte) ([]b
 	err = process.Run()
 	if err != nil {
 		detail := strings.TrimSpace(redact(stderr.String()))
+		if parsed := operatorError(stdout.Bytes()); parsed != "" {
+			detail = parsed
+		}
 		if detail != "" {
 			return stdout.Bytes(), fmt.Errorf("remote command failed: %s", detail)
 		}
@@ -112,11 +115,14 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"OPENLIA_SECRET_DIR=" + shellQuote(remote.rootPath("runtime", "secrets")),
 		"OPENLIA_BACKUP_ROOT=" + shellQuote(remote.rootPath("runtime", "backups")),
 		"OPENLIA_META_ROOT=" + shellQuote(remote.rootPath("runtime", "meta")),
+		"OPENLIA_SKILLS_CACHE_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-cache")),
+		"OPENLIA_SKILLS_ENV_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-envs")),
 		"OPENLIA_COMPOSE_FILE=" + shellQuote(filepath.Join(operationRoot, "docker", "compose.yaml")),
 		"OPENLIA_COMPOSE_PROJECT_DIR=" + shellQuote(filepath.Join(operationRoot, "docker")),
 		"OPENLIA_GENERATED_COMPOSE=" + shellQuote(filepath.Join(operationRoot, "docker", "compose.generated.yaml")),
 		"OPENLIA_ENABLED_SKILLS=" + shellQuote(strings.Join(remote.Config.EnabledSkills, ",")),
 		"OPENLIA_SKILLS_CONFIGURED='true'",
+		"OPENLIA_SKILL_SOURCES=" + shellQuote(renderSkillSourcesJSON(remote.Config.SkillSources)),
 		"OPENLIA_SERVICE_ROLES=" + shellQuote(renderServicesJSON(remote.Config.Services)),
 		"OPENLIA_CONFIGURED_HOSTS=" + shellQuote(configuredHosts(remote.Config.Services)),
 	}
@@ -126,6 +132,9 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		operatorPaths := map[string]string{
 			"amd64": filepath.Join(operationRoot, "operator", "linux-amd64", "openlia-operator"),
 			"arm64": filepath.Join(operationRoot, "operator", "linux-arm64", "openlia-operator"),
+		}
+		if operatorOnlyOperation(operation) {
+			return "operator_path=''; case \"$(uname -m)\" in x86_64|amd64) operator_path=" + shellQuote(operatorPaths["amd64"]) + ";; aarch64|arm64) operator_path=" + shellQuote(operatorPaths["arm64"]) + ";; esac; if [ -n \"$operator_path\" ] && [ -x \"$operator_path\" ]; then " + privilegedEnvironmentCommand(environment, "\"$operator_path\"", operatorArgs...) + "; else printf '%s\\n' 'OpenLia Go operator is required for this operation' >&2; exit 3; fi"
 		}
 		return "operator_path=''; case \"$(uname -m)\" in x86_64|amd64) operator_path=" + shellQuote(operatorPaths["amd64"]) + ";; aarch64|arm64) operator_path=" + shellQuote(operatorPaths["arm64"]) + ";; esac; if [ -n \"$operator_path\" ] && [ -x \"$operator_path\" ]; then " + privilegedEnvironmentCommand(environment, "\"$operator_path\"", operatorArgs...) + "; else " + privilegedEnvironmentCommand(environment, scriptCommand, args...) + "; fi"
 	}
@@ -172,6 +181,10 @@ func operatorArguments(operation string, args []string) ([]string, bool) {
 		command = "workspace-git"
 	case "uninstall":
 		command = "uninstall"
+	case "skill-sources":
+		command = "skill-sources"
+	case "skills":
+		command = "skills"
 	case "ops/bootstrap.sh":
 		command = "bootstrap"
 	case "ops/profile.sh":
@@ -196,6 +209,15 @@ func operatorArguments(operation string, args []string) ([]string, bool) {
 		return nil, false
 	}
 	return append([]string{command}, args...), true
+}
+
+func operatorOnlyOperation(operation string) bool {
+	switch filepath.ToSlash(operation) {
+	case "skill-sources", "skills":
+		return true
+	default:
+		return false
+	}
 }
 
 func legacyOperationScript(operation string) string {
@@ -384,17 +406,28 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_SECRET_DIR=" + filepath.Join(config.InstallRoot, "runtime", "secrets"),
 		"OPENLIA_BACKUP_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "backups"),
 		"OPENLIA_META_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "meta"),
+		"OPENLIA_SKILLS_CACHE_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "skill-cache"),
+		"OPENLIA_SKILLS_ENV_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "skill-envs"),
 		"OPENLIA_COMPOSE_FILE=" + filepath.Join(operationRoot, "docker", "compose.yaml"),
 		"OPENLIA_COMPOSE_PROJECT_DIR=" + filepath.Join(operationRoot, "docker"),
 		"OPENLIA_GENERATED_COMPOSE=" + filepath.Join(operationRoot, "docker", "compose.generated.yaml"),
 		"OPENLIA_ENABLED_SKILLS=" + strings.Join(config.EnabledSkills, ","),
 		"OPENLIA_SKILLS_CONFIGURED=true",
+		"OPENLIA_SKILL_SOURCES=" + renderSkillSourcesJSON(config.SkillSources),
 		"OPENLIA_SERVICE_ROLES=" + renderServicesJSON(config.Services),
 		"OPENLIA_CONFIGURED_HOSTS=" + configuredHosts(config.Services),
 	}
 }
 
 func renderFallbackProvidersJSON(values []FallbackProviderConfig) string {
+	data, err := json.Marshal(values)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
+func renderSkillSourcesJSON(values []SkillSourceConfig) string {
 	data, err := json.Marshal(values)
 	if err != nil {
 		return "[]"
@@ -492,7 +525,9 @@ func (local Local) operator(ctx context.Context, operationRoot string, args ...s
 	code := operator.RunContext(ctx, args, nil, &stdout, &stderr)
 	if code != operator.ExitOK {
 		detail := strings.TrimSpace(redact(stderr.String()))
-		if detail == "" {
+		if parsed := operatorError(stdout.Bytes()); parsed != "" {
+			detail = parsed
+		} else if detail == "" {
 			detail = strings.TrimSpace(redact(stdout.String()))
 		}
 		if detail == "" {
@@ -501,6 +536,16 @@ func (local Local) operator(ctx context.Context, operationRoot string, args ...s
 		return stdout.Bytes(), fmt.Errorf("local operator failed: %s", detail)
 	}
 	return stdout.Bytes(), nil
+}
+
+func operatorError(data []byte) string {
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(data, &payload) == nil && payload.Error != "" {
+		return redact(payload.Error)
+	}
+	return ""
 }
 
 func (local Local) workspaceGit(ctx context.Context, action string, gitConfig WorkspaceGitConfig) ([]byte, error) {

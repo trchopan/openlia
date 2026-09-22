@@ -24,6 +24,8 @@ func testConfig(repo, runtime string) Config {
 		BackupRoot:        filepath.Join(runtime, "backups"),
 		MetaRoot:          filepath.Join(runtime, "meta"),
 		StateFile:         filepath.Join(runtime, "meta", "stack-state"),
+		SkillsCacheRoot:   filepath.Join(runtime, "skill-cache"),
+		SkillsEnvRoot:     filepath.Join(runtime, "skill-envs"),
 		APIHost:           "127.0.0.1",
 	}
 }

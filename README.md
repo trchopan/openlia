@@ -18,6 +18,8 @@ or a remote Linux VM:
 - A claim ledger records reusable personal context with evidence and lifecycle
   metadata rather than treating every model inference as a fact.
 - Hermes skills provide workflows that operate across those concepts.
+- Audited external skill repositories add optional workflows without folding
+  their dependencies into the Hermes global environment.
 - Locho attachments provide private access to selected external services.
 - Authentication is kept outside Git and supports provider credential rotation.
 - A derived image makes `bun` and `uv` available to Hermes and its skills.
@@ -317,8 +319,9 @@ underlying personal model consistent.
 
 The first implementation is a thin operations layer, not a new agent runtime.
 It provides a Go operator CLI, pinned Docker/Compose assets, a file-based
-Personal OS template, ten workflow skills, credential rotation, Locho
-attachments, and backup/recovery operations for local or remote deployments.
+Personal OS template, twelve bundled workflow skills, external skill repository
+management, credential rotation, Locho attachments, and backup/recovery
+operations for local or remote deployments.
 
 The initial implementation will establish:
 
@@ -470,7 +473,8 @@ runtime backups when that recovery point is no longer needed.
 as command-line arguments.
 
 The source file may contain `COPILOT_GITHUB_TOKEN`, `OPENAI_GATEWAY_API_KEY`,
-`OPENAI_API_KEY`, numbered OpenAI key siblings, or `OPENLIA_GIT_TOKEN`.
+`OPENAI_API_KEY`, numbered OpenAI key siblings, `OPENLIA_GIT_TOKEN`, or
+`OPENLIA_SKILLS_GIT_TOKEN` for private external skill repositories.
 Classic `ghp_*` tokens are not valid for Copilot. Hermes reads the file through
 its `secrets.command` source; its values are never printed by OpenLia.
 
@@ -552,15 +556,20 @@ openlia skills fork daily-briefing
 
 When a fork has an upstream update, `openlia update openlia` leaves the active
 fork untouched and stages a migration context for Hermes. The protected
-`openlia-skill-migration` system skill can propose a migrated fork using the old
-base, the customization patch, and the new upstream base. The active skill is
-not changed until the proposal is reviewed and applied through the host CLI:
+`openlia-skill-migration` system skill can create a migration proposal when you
+ask for the migration in chat. It uses the old base, customization patch, and
+new upstream base from the staged context. Do not run `migrate prepare` after an
+update has already staged that context. The active skill is not changed until
+the proposal is reviewed and applied through the host CLI:
 
 ```sh
-openlia skills migrate prepare daily-briefing
 openlia skills migrate show PROPOSAL_ID
 openlia skills migrate apply PROPOSAL_ID
 ```
+
+`openlia skills migrate prepare SKILL` is only a manual context-staging command
+when an update has not already prepared the context; it does not create a
+proposal.
 
 Migration patches are internal tooling artifacts. Users review the proposed
 behavior and conflict summary rather than editing patch files directly. The
@@ -576,12 +585,56 @@ Skills are workflow-oriented rather than domain-specific:
   openlia skills test deep-research
 ```
 
+External skills can be sourced from public or private GitHub HTTPS repositories,
+resolved to immutable commits, audited with frozen per-skill dependencies, and
+installed with explicit approval. For a private repository, put
+`OPENLIA_SKILLS_GIT_TOKEN` in the protected dotenv configured by
+`[secrets].source`, then run `openlia auth rotate` on an initialized deployment
+(`openlia auth setup` can persist the source path when it has not been set):
+
+```text
+  openlia skill-sources add team https://github.com/OWNER/REPOSITORY --branch main
+  openlia skills list
+  openlia skills show team/release-notes
+  openlia skills install team/release-notes
+  openlia skills update release-notes
+  openlia skills uninstall release-notes
+```
+
+On an initialized deployment, source addition validates and fetches
+automatically. Install fetches, audits, and displays an immutable commit-bound
+plan before confirmation, then enables the skill by default; use `--disabled`
+to install without exposing it to Hermes. Update likewise fetches, audits, and
+shows a commit-bound plan before confirmation. `skill-sources check`,
+`skill-sources fetch`, and `skills audit` remain available as diagnostics, not
+required ceremony. For an installed external skill, `skills fork` is
+idempotent and refreshes the recorded patch when the skill is already forked;
+`skills fork-refresh` is the advanced refresh-only alias.
+
+External Python and JavaScript dependencies use checked-in `uv.lock` and
+`bun.lock` files and content-addressed isolated environments. They are not
+installed into Hermes globally. See
+[`docs/EXTERNAL_SKILLS.md`](docs/EXTERNAL_SKILLS.md) for repository format,
+commands, approvals, testing, updates, customization, and limitations. See
+[`docs/SKILL_DEVELOPMENT.md`](docs/SKILL_DEVELOPMENT.md) for the distinction
+between bundled and external development.
+
 ## Security Boundaries
 
 - Hermes runs inside the derived image as the upstream unprivileged runtime user.
 - `/opt/data` is the only mutable Hermes volume.
 - The OpenLia migration resolver is distribution-owned and mounted read-only;
   it can propose migrations but cannot edit active skills.
+- External sources are resolved to immutable Git commits and cached with a
+  SHA-256 digest; unsafe trees and bundled-name collisions are rejected.
+- External dependency builds use frozen lockfiles in a restricted one-shot
+  container. In local non-root mode the builder uses the operator account's
+  UID/GID; remote and root-run operations use UID/GID `10000`. The builder has
+  no deployment secret mount. External tests run without a network or
+  deployment secrets.
+- External install, update, uninstall, reset, and migration apply operations
+  require exact interactive confirmation where documented; audits do not prove
+  that third-party instructions or code are safe.
 - The default Compose stack has no public ports and no Docker socket mount.
 - Locho listeners use the private Compose network and are never published.
 - Workspace initialization is copy-once; later deployments preserve user files.

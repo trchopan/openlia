@@ -21,7 +21,7 @@ Run the relevant checks from the repository root:
 ```sh
 make venv            # Sets up .venv/ and installs all dependencies (uses uv if present)
 make test            # Runs Go, Python, and skill self-tests
-make skills-test     # Offline skill self-test suite across all 13 skills
+make skills-test     # Offline bundled skill self-test suite across all 12 skills
 make skills-verify   # Live browser verifications (with Playwright MCP running locally)
 make lint
 make compose-config
@@ -33,7 +33,10 @@ make smoke-local-live \
   OPENLIA_SMOKE_LOCHO_HOST=genai
 ```
 
-For developing and verifying skills locally without deploying them to a running agent, see [`docs/SKILL_DEVELOPMENT.md`](docs/SKILL_DEVELOPMENT.md).
+For bundled skill development, see
+[`docs/SKILL_DEVELOPMENT.md`](docs/SKILL_DEVELOPMENT.md). For the separate
+external repository contract, see
+[`docs/EXTERNAL_SKILLS.md`](docs/EXTERNAL_SKILLS.md).
 
 The CLI smoke mode uses synthetic data and must not require provider
 credentials, Telegram, Locho, SSH, or a remote target. The local deployment
