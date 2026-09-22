@@ -168,7 +168,6 @@ func generateAttachmentsFile(config Config) error {
 	}
 	var allServices []LochoService
 	browserURL := ""
-	openaiURL := ""
 	for _, host := range hosts.Hosts {
 		for _, svc := range host.Services {
 			allServices = append(allServices, svc)
@@ -177,8 +176,6 @@ func generateAttachmentsFile(config Config) error {
 					return fmt.Errorf("multiple Playwright attachment endpoints are configured")
 				}
 				browserURL = svc.Endpoint
-			} else if svc.Role == "openai-endpoint" && openaiURL == "" {
-				openaiURL = svc.Endpoint
 			}
 		}
 		if browserURL == "" && host.BrowserPort > 0 {
@@ -202,7 +199,7 @@ func generateAttachmentsFile(config Config) error {
 	}
 
 	var builder strings.Builder
-	hasHermesEnv := config.APIEnabled || config.ExternalNetwork != "" || browserURL != "" || openaiURL != "" || len(allServices) > 0
+	hasHermesEnv := config.APIEnabled || config.ExternalNetwork != "" || browserURL != "" || len(allServices) > 0
 	if len(hosts.Hosts) == 0 && !hasHermesEnv {
 		builder.WriteString("services: {}\n")
 	} else {
@@ -219,9 +216,6 @@ func generateAttachmentsFile(config Config) error {
 			if browserURL != "" {
 				fmt.Fprintf(&builder, "      OPENLIA_BROWSER_MCP_URL: %q\n", browserURL)
 				builder.WriteString("      OPENLIA_TOOLS_URL: \"http://openlia-tools:8787\"\n")
-			}
-			if openaiURL != "" {
-				fmt.Fprintf(&builder, "      OPENLIA_OPENAI_ENDPOINT_URL: %q\n", openaiURL)
 			}
 			for _, svc := range allServices {
 				if svc.Role != "unassigned" {
@@ -265,53 +259,7 @@ func generateAttachmentsFile(config Config) error {
 	if err := AtomicWriteFile(config.GeneratedCompose, []byte(builder.String()), 0o600); err != nil {
 		return err
 	}
-	// Keep OPENAI_BASE_URL in hermes.env in sync with the configured openai endpoint.
-	// Hermes reads OPENAI_BASE_URL from its secret helper (which sources hermes.env) to
-	// resolve the provider base URL at runtime. If this value is stale (e.g. after a host
-	// rename), Hermes silently calls the wrong — or non-existent — endpoint.
-	// We patch the file here so attachments generate is the single source of truth.
-	if config.SecretFile != "" {
-		if err := patchSecretBaseURL(config.SecretFile, openaiURL); err != nil {
-			// Non-fatal: compose was written successfully; log via return so caller sees it.
-			return fmt.Errorf("compose generated OK but could not sync OPENAI_BASE_URL in secret file: %w", err)
-		}
-	}
 	return nil
-}
-
-// patchSecretBaseURL rewrites the OPENAI_BASE_URL line in the hermes secrets
-// file so it always matches the currently configured openai-endpoint service.
-// If openaiURL is empty the line is removed; otherwise it is set to openaiURL+"/v1".
-// All other lines are preserved verbatim.
-func patchSecretBaseURL(secretFile, openaiURL string) error {
-	data, err := os.ReadFile(secretFile)
-	if os.IsNotExist(err) {
-		// Nothing to patch — file doesn't exist yet (first deploy before auth rotate).
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var out []string
-	for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "OPENAI_BASE_URL=") {
-			continue // drop old value; we'll append the fresh one below
-		}
-		out = append(out, line)
-	}
-	// Remove trailing blank lines added by previous iterations, then append new value.
-	for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
-		out = out[:len(out)-1]
-	}
-	if openaiURL != "" {
-		out = append(out, "OPENAI_BASE_URL="+strings.TrimRight(openaiURL, "/")+"/v1")
-	}
-	content := strings.Join(out, "\n")
-	if content != "" {
-		content += "\n"
-	}
-	return AtomicWriteFile(secretFile, []byte(content), 0o600)
 }
 
 func RotateAttachment(config Config, host, source string, now time.Time, composers ...Compose) error {

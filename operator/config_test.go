@@ -63,17 +63,19 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	repo := t.TempDir()
 	runtime := filepath.Join(t.TempDir(), "runtime")
 	config, err := LoadConfigFromEnv(map[string]string{
-		"OPENLIA_REPO_ROOT":         repo,
-		"OPENLIA_RUNTIME_ROOT":      runtime,
-		"OPENLIA_PROJECT_NAME":      "example",
-		"OPENLIA_LOCAL_MODE":        "true",
-		"OPENLIA_ENABLED_SKILLS":    "daily-briefing,workspace-git",
-		"OPENLIA_SKILLS_CONFIGURED": "true",
+		"OPENLIA_REPO_ROOT":          repo,
+		"OPENLIA_RUNTIME_ROOT":       runtime,
+		"OPENLIA_PROJECT_NAME":       "example",
+		"OPENLIA_PROVIDER":           "copilot",
+		"OPENLIA_FALLBACK_PROVIDERS": `[{"provider":"custom","model":"gateway-model","base_url":"https://gateway.example.test/v1","key_env":"OPENAI_GATEWAY_API_KEY"},{"provider":"openai-api","model":"official-model"}]`,
+		"OPENLIA_LOCAL_MODE":         "true",
+		"OPENLIA_ENABLED_SKILLS":     "daily-briefing,workspace-git",
+		"OPENLIA_SKILLS_CONFIGURED":  "true",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !config.LocalMode || !config.SkillsConfigured || len(config.EnabledSkills) != 2 || config.NetworkName != "example-private" {
+	if !config.LocalMode || !config.SkillsConfigured || len(config.EnabledSkills) != 2 || config.NetworkName != "example-private" || config.Provider != "copilot" || len(config.FallbackProviders) != 2 || config.FallbackProviders[0].BaseURL != "https://gateway.example.test/v1" || config.FallbackProviders[1].Model != "official-model" {
 		t.Fatalf("unexpected typed config: %+v", config)
 	}
 }

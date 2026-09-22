@@ -393,6 +393,33 @@ Build the host CLI and the Linux target operators with Go 1.26 or newer:
 
 ```sh
 make build
+```
+
+Configure the primary provider and ordered fallback list in the OpenLia operator
+config before initializing the deployment:
+
+```toml
+[openlia]
+provider = "copilot"
+model = "copilot-model"
+
+[[fallback_providers]]
+provider = "custom"
+model = "gateway-model"
+base_url = "http://locho-laptop:11434/v1"
+key_env = "OPENAI_GATEWAY_API_KEY"
+
+[[fallback_providers]]
+provider = "openai-api"
+model = "official-openai-model"
+```
+
+The `fallback_providers` table order is the failover order. Use the actual
+Locho Compose hostname, service port, and model IDs for your deployment.
+
+Then initialize:
+
+```sh
 ./openlia init --local --root "$HOME/.openlia"
 ```
 
@@ -442,11 +469,14 @@ runtime backups when that recovery point is no longer needed.
 `init` and `auth rotate` use the configured source; source paths are not accepted
 as command-line arguments.
 
-The source file may contain `OPENAI_API_KEY`, numbered OpenAI key siblings,
-`OPENAI_BASE_URL`, `OPENLIA_MODEL`, a supported `COPILOT_GITHUB_TOKEN`, or
-`OPENLIA_GIT_TOKEN`.
+The source file may contain `COPILOT_GITHUB_TOKEN`, `OPENAI_GATEWAY_API_KEY`,
+`OPENAI_API_KEY`, numbered OpenAI key siblings, or `OPENLIA_GIT_TOKEN`.
 Classic `ghp_*` tokens are not valid for Copilot. Hermes reads the file through
 its `secrets.command` source; its values are never printed by OpenLia.
+
+Do not set `OPENAI_BASE_URL` for this provider chain. Assign the Locho service
+the `openai-gateway` role and declare its explicit `/v1` URL in the matching
+`fallback_providers` entry. Hermes keeps `openai-api` pointed at official OpenAI.
 
 To enable the workspace Git backup, add a repository-scoped GitHub personal
 access token to the same protected source. The token must be limited to the

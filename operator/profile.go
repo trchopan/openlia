@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +20,8 @@ const (
 	distributionName   = "openlia-personal-os"
 	hashScope          = "skill-files-v1"
 	protectedSkillName = "openlia-skill-migration"
+	fallbackBlockStart = "# BEGIN OPENLIA MANAGED FALLBACK PROVIDERS"
+	fallbackBlockEnd   = "# END OPENLIA MANAGED FALLBACK PROVIDERS"
 )
 
 // ProfileOperator synchronizes distribution-owned profile files while leaving
@@ -207,7 +210,13 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 		{filepath.Join(p.Config.RepositoryRoot, "profile", "config.yaml"), filepath.Join(p.Config.DataRoot, "config.yaml"), filepath.Join(managedRoot, "config.yaml.sha256"), 0o600},
 		{filepath.Join(p.Config.RepositoryRoot, "profile", "cron", "scripts", "openlia-workspace-git-sync.sh"), filepath.Join(p.Config.DataRoot, "scripts", "openlia-workspace-git-sync.sh"), filepath.Join(managedRoot, "openlia-workspace-git-sync.sh.sha256"), 0o700},
 	} {
-		if err := p.syncFile(item.source, item.dest, item.marker, item.mode); err != nil {
+		var err error
+		if filepath.Base(item.dest) == "config.yaml" {
+			err = p.syncHermesConfig(item.source, item.dest, item.marker, item.mode)
+		} else {
+			err = p.syncFile(item.source, item.dest, item.marker, item.mode)
+		}
+		if err != nil {
 			return ProfileSyncResult{}, err
 		}
 	}
@@ -298,6 +307,140 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 		return ProfileSyncResult{}, err
 	}
 	return result, nil
+}
+
+func (p *ProfileOperator) syncHermesConfig(source, destination, marker string, mode fs.FileMode) error {
+	sourceData, err := os.ReadFile(source)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	sourceHash := hashConfigWithoutFallback(sourceData)
+	destinationData, destinationErr := os.ReadFile(destination)
+	if errors.Is(destinationErr, os.ErrNotExist) {
+		destinationData = sourceData
+	} else if destinationErr != nil {
+		return destinationErr
+	}
+	previousHash := ""
+	if contents, readErr := os.ReadFile(marker); readErr == nil {
+		previousHash = strings.TrimSpace(string(contents))
+	}
+	destinationHash := hashConfigWithoutFallback(destinationData)
+	legacyDestinationHash := ""
+	if destinationErr == nil {
+		legacyDestinationHash, err = fileSHA256(destination)
+		if err != nil {
+			return err
+		}
+	}
+	managed := destinationErr != nil || (previousHash == "" && destinationHash == sourceHash) || (previousHash != "" && (destinationHash == previousHash || legacyDestinationHash == previousHash))
+	if managed {
+		destinationData = sourceData
+		if err := writeMarker(marker, sourceHash); err != nil {
+			return err
+		}
+	}
+	updated, err := renderFallbackBlock(destinationData, p.Config.FallbackProviders)
+	if err != nil {
+		return err
+	}
+	if err := AtomicWriteFile(destination, updated, mode); err != nil {
+		return err
+	}
+	return os.Chmod(destination, mode)
+}
+
+func hashConfigWithoutFallback(data []byte) string {
+	normalized := normalizeFallbackBlock(data)
+	digest := sha256.Sum256(normalized)
+	return "sha256:" + hex.EncodeToString(digest[:])
+}
+
+func normalizeFallbackBlock(data []byte) []byte {
+	lines := strings.Split(string(data), "\n")
+	result := make([]string, 0, len(lines))
+	inBlock := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == fallbackBlockStart {
+			inBlock = true
+			result = append(result, fallbackBlockStart, fallbackBlockEnd)
+			continue
+		}
+		if inBlock {
+			if strings.TrimSpace(line) == fallbackBlockEnd {
+				inBlock = false
+			}
+			continue
+		}
+		result = append(result, line)
+	}
+	return []byte(strings.Join(result, "\n"))
+}
+
+func renderFallbackBlock(data []byte, providers []FallbackProviderConfig) ([]byte, error) {
+	lines := strings.Split(string(data), "\n")
+	block := renderFallbackLines(providers)
+	start, end := -1, -1
+	for index, line := range lines {
+		if strings.TrimSpace(line) == fallbackBlockStart {
+			start = index
+		}
+		if start >= 0 && strings.TrimSpace(line) == fallbackBlockEnd {
+			end = index
+			break
+		}
+	}
+	if start >= 0 && end >= start {
+		updated := append([]string{}, lines[:start]...)
+		updated = append(updated, block...)
+		updated = append(updated, lines[end+1:]...)
+		return []byte(strings.Join(updated, "\n")), nil
+	}
+	for index, line := range lines {
+		if strings.TrimSpace(line) != "fallback_providers:" || strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+			continue
+		}
+		end = index + 1
+		for end < len(lines) {
+			trimmed := strings.TrimSpace(lines[end])
+			if trimmed != "" && !strings.HasPrefix(lines[end], " ") && !strings.HasPrefix(lines[end], "\t") && !strings.HasPrefix(trimmed, "#") {
+				break
+			}
+			end++
+		}
+		updated := append([]string{}, lines[:index]...)
+		updated = append(updated, block...)
+		updated = append(updated, lines[end:]...)
+		return []byte(strings.Join(updated, "\n")), nil
+	}
+	if len(lines) > 0 && lines[len(lines)-1] != "" {
+		lines = append(lines, "")
+	}
+	lines = append(lines, block...)
+	return []byte(strings.Join(lines, "\n")), nil
+}
+
+func renderFallbackLines(providers []FallbackProviderConfig) []string {
+	lines := []string{fallbackBlockStart}
+	if len(providers) == 0 {
+		lines = append(lines, "fallback_providers: []")
+	} else {
+		lines = append(lines, "fallback_providers:")
+		for _, provider := range providers {
+			lines = append(lines, "  - provider: "+strconv.Quote(provider.Provider), "    model: "+strconv.Quote(provider.Model))
+			if provider.BaseURL != "" {
+				lines = append(lines, "    base_url: "+strconv.Quote(provider.BaseURL))
+			}
+			if provider.KeyEnv != "" {
+				lines = append(lines, "    key_env: "+strconv.Quote(provider.KeyEnv))
+			}
+		}
+	}
+	lines = append(lines, fallbackBlockEnd)
+	return lines
 }
 
 func (p *ProfileOperator) syncProtectedSkills() error {

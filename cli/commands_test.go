@@ -58,7 +58,7 @@ func TestAttachmentsMapRejectsMissingArgs(t *testing.T) {
 		{"map"},
 		{"map", "laptop"},
 		{"map", "laptop", "ollama"},
-		{"map", "laptop", "ollama", "--wrong", "openai-endpoint"},
+		{"map", "laptop", "ollama", "--wrong", "openai-gateway"},
 	} {
 		code := commandAttachments(Options{}, args)
 		if code != ExitUsage {

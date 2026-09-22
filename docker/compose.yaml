@@ -38,7 +38,7 @@ services:
     # enabled; this read-only runtime directory is its only credential input.
     environment:
       HERMES_HOME: /opt/data
-      OPENLIA_PROVIDER: "${OPENLIA_PROVIDER:-openai-api}"
+      OPENLIA_PROVIDER: "${OPENLIA_PROVIDER:-copilot}"
       OPENLIA_MODEL: "${OPENLIA_MODEL:-gpt-5.6-luna}"
       HERMES_TIMEZONE: "${HERMES_TIMEZONE:-Asia/Ho_Chi_Minh}"
       TZ: "${HERMES_TIMEZONE:-Asia/Ho_Chi_Minh}"

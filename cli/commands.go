@@ -260,8 +260,8 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	if _, err := deployment.bootstrap(ctx); err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
-	// Generate the compose sidecar file (and sync OPENAI_BASE_URL into hermes.env)
-	// before the full deploy so Hermes starts with the correct provider endpoint.
+	// Generate the Compose sidecar file before the full deploy so Hermes starts
+	// with the correct Locho gateway endpoint.
 	if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
 		return fail(options, ExitFailure, "attachment Compose generation failed: "+err.Error(), nil)
 	}

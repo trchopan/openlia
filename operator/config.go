@@ -3,6 +3,7 @@ package operator
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -32,6 +33,7 @@ type Config struct {
 	LocalMode         bool
 	Provider          string
 	Model             string
+	FallbackProviders []FallbackProviderConfig
 	HermesImage       string
 	LochoImage        string
 	EnabledSkills     []string
@@ -41,6 +43,13 @@ type Config struct {
 	APIHost           string
 	ServiceRoles      map[string]string
 	ConfiguredHosts   []string
+}
+
+type FallbackProviderConfig struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	BaseURL  string `json:"base_url,omitempty"`
+	KeyEnv   string `json:"key_env,omitempty"`
 }
 
 // LoadConfig reads the process environment.
@@ -77,6 +86,12 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 	}
 	installRoot := getOr(values, "OPENLIA_INSTALL_ROOT", strings.TrimSuffix(runtimeRoot, "/runtime"))
 	project := getOr(values, "OPENLIA_PROJECT_NAME", "openlia")
+	fallbackProviders := []FallbackProviderConfig{}
+	if rawFallbacks := values["OPENLIA_FALLBACK_PROVIDERS"]; rawFallbacks != "" {
+		if err := json.Unmarshal([]byte(rawFallbacks), &fallbackProviders); err != nil {
+			return Config{}, fmt.Errorf("OPENLIA_FALLBACK_PROVIDERS must be valid JSON: %w", err)
+		}
+	}
 
 	config := Config{
 		RepositoryRoot:    repositoryRoot,
@@ -96,8 +111,9 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		BackupRetention:   5,
 		MetaRoot:          getOr(values, "OPENLIA_META_ROOT", filepath.Join(runtimeRoot, "meta")),
 		StateFile:         getOr(values, "OPENLIA_STATE_FILE", filepath.Join(runtimeRoot, "meta", "stack-state")),
-		Provider:          getOr(values, "OPENLIA_PROVIDER", "openai-api"),
+		Provider:          getOr(values, "OPENLIA_PROVIDER", "copilot"),
 		Model:             getOr(values, "OPENLIA_MODEL", "gpt-5.6-luna"),
+		FallbackProviders: fallbackProviders,
 		HermesImage:       getOr(values, "OPENLIA_HERMES_IMAGE", "openlia-hermes:v2026.9.14"),
 		LochoImage:        getOr(values, "OPENLIA_LOCHO_IMAGE", "openlia-locho:v1.2.0-beta.1"),
 		ExternalNetwork:   values["OPENLIA_EXTERNAL_NETWORK"],
@@ -186,6 +202,9 @@ func (c Config) ValidatePaths() error {
 	if c.APIHost != "127.0.0.1" {
 		return fmt.Errorf("API host must remain 127.0.0.1")
 	}
+	if err := validateFallbackProviders(c.FallbackProviders); err != nil {
+		return err
+	}
 	if err := ValidateAbsolutePath(c.ComposeFile, "compose-file"); err != nil {
 		return err
 	}
@@ -243,6 +262,30 @@ func (c Config) ValidatePaths() error {
 	for _, skill := range c.EnabledSkills {
 		if err := ValidateSafeComponent(skill, "skill"); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateFallbackProviders(values []FallbackProviderConfig) error {
+	for index, fallback := range values {
+		if fallback.Provider == "" || (fallback.Provider != "custom" && fallback.Provider != "openai-api" && ValidateSafeComponent(fallback.Provider, "fallback-provider") != nil) {
+			return fmt.Errorf("fallback provider %d has an invalid provider", index)
+		}
+		if fallback.Model == "" {
+			return fmt.Errorf("fallback provider %d requires a model", index)
+		}
+		if fallback.Provider == "custom" && fallback.BaseURL == "" {
+			return fmt.Errorf("fallback provider %d requires an explicit base URL", index)
+		}
+		if fallback.BaseURL != "" {
+			parsed, err := url.Parse(fallback.BaseURL)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+				return fmt.Errorf("fallback provider %d has an invalid base URL", index)
+			}
+		}
+		if fallback.KeyEnv != "" && !validEnvKey(fallback.KeyEnv) {
+			return fmt.Errorf("fallback provider %d has an invalid key_env", index)
 		}
 	}
 	return nil

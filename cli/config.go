@@ -39,50 +39,58 @@ var defaultSkills = []string{
 
 const (
 	RolePlaywrightBrowser = "playwright-browser"
-	RoleOpenAIEndpoint    = "openai-endpoint"
+	RoleOpenAIGateway     = "openai-gateway"
 )
 
 var allowedServiceRoles = map[string]bool{
 	RolePlaywrightBrowser: true,
-	RoleOpenAIEndpoint:    true,
+	RoleOpenAIGateway:     true,
 }
 
 func ValidateServiceRole(role string) error {
 	if !allowedServiceRoles[role] {
-		return fmt.Errorf("invalid service role %q; must be one of: %s, %s", role, RolePlaywrightBrowser, RoleOpenAIEndpoint)
+		return fmt.Errorf("invalid service role %q; must be one of: %s, %s", role, RolePlaywrightBrowser, RoleOpenAIGateway)
 	}
 	return nil
 }
 
 type Config struct {
-	Schema          int
-	Version         string
-	Mode            string
-	Target          string
-	InstallRoot     string
-	Project         string
-	Model           string
-	Timezone        string
-	Provider        string
-	ExternalNetwork string
-	HermesImage     string
-	HermesTag       string
-	HermesDigest    string
-	LochoImage      string
-	LochoVersion    string
-	APIEnabled      bool
-	APIHost         string
-	SecretSource    string
-	ReleaseSource   string
-	EnabledSkills   []string
-	WorkspaceGit    WorkspaceGitConfig
-	Services        []ServiceHostConfig
+	Schema            int
+	Version           string
+	Mode              string
+	Target            string
+	InstallRoot       string
+	Project           string
+	Model             string
+	FallbackProviders []FallbackProviderConfig
+	Timezone          string
+	Provider          string
+	ExternalNetwork   string
+	HermesImage       string
+	HermesTag         string
+	HermesDigest      string
+	LochoImage        string
+	LochoVersion      string
+	APIEnabled        bool
+	APIHost           string
+	SecretSource      string
+	ReleaseSource     string
+	EnabledSkills     []string
+	WorkspaceGit      WorkspaceGitConfig
+	Services          []ServiceHostConfig
 }
 
 type ServiceHostConfig struct {
 	Name   string
 	Source string
 	Roles  map[string]string
+}
+
+type FallbackProviderConfig struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	BaseURL  string `json:"base_url,omitempty"`
+	KeyEnv   string `json:"key_env,omitempty"`
 }
 
 type WorkspaceGitConfig struct {
@@ -104,7 +112,7 @@ func defaultConfig() Config {
 		Project:       defaultProject,
 		Model:         "gpt-5.6-luna",
 		Timezone:      defaultTimezone,
-		Provider:      "openai-api",
+		Provider:      "copilot",
 		HermesImage:   "openlia-hermes:v2026.9.14",
 		HermesTag:     "v2026.9.14",
 		HermesDigest:  "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294",
@@ -176,8 +184,11 @@ func parseConfig(data string) (Config, error) {
 		}
 		if strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]]") {
 			section = strings.TrimSpace(line[2 : len(line)-2])
-			if section == "services" {
+			switch section {
+			case "services":
 				config.Services = append(config.Services, ServiceHostConfig{Roles: make(map[string]string)})
+			case "fallback_providers":
+				config.FallbackProviders = append(config.FallbackProviders, FallbackProviderConfig{})
 			}
 			continue
 		}
@@ -223,6 +234,23 @@ func parseConfig(data string) (Config, error) {
 					}
 					current.Roles[cleanKey] = role
 				}
+			}
+		} else if section == "fallback_providers" {
+			if len(config.FallbackProviders) == 0 {
+				return Config{}, fmt.Errorf("line %d defines fallback provider fields without a table", lineNumber)
+			}
+			current := &config.FallbackProviders[len(config.FallbackProviders)-1]
+			switch strings.Trim(key, "\"") {
+			case "provider":
+				current.Provider, err = parseString(value)
+			case "model":
+				current.Model, err = parseString(value)
+			case "base_url":
+				current.BaseURL, err = parseString(value)
+			case "key_env":
+				current.KeyEnv, err = parseString(value)
+			default:
+				return Config{}, fmt.Errorf("line %d contains unknown fallback provider setting %q", lineNumber, key)
 			}
 		} else {
 			switch section + "." + key {
@@ -390,6 +418,20 @@ func validateConfig(config Config) error {
 	if !safeReference(config.Model) {
 		return errors.New("model must contain only URL-safe model identifier characters")
 	}
+	for index, fallback := range config.FallbackProviders {
+		if !safeReference(fallback.Provider) || fallback.Provider == "custom" && fallback.BaseURL == "" {
+			return fmt.Errorf("fallback provider %d requires a provider and explicit base_url", index)
+		}
+		if !safeReference(fallback.Model) {
+			return fmt.Errorf("fallback provider %d model must contain only URL-safe model identifier characters", index)
+		}
+		if err := validateOpenAIEndpoint(fallback.BaseURL); err != nil {
+			return fmt.Errorf("fallback provider %d: %w", index, err)
+		}
+		if fallback.KeyEnv != "" && !safeEnvName(fallback.KeyEnv) {
+			return fmt.Errorf("fallback provider %d key_env is invalid", index)
+		}
+	}
 	for _, skill := range config.EnabledSkills {
 		if !safeComponent(skill) {
 			return fmt.Errorf("invalid skill name %q", skill)
@@ -474,6 +516,32 @@ func validateGitHubRemote(remote string) error {
 		return errors.New("workspace Git remote must use https://github.com/OWNER/REPOSITORY[.git]")
 	}
 	return nil
+}
+
+func validateOpenAIEndpoint(value string) error {
+	if value == "" {
+		return nil
+	}
+	if strings.ContainsAny(value, " \t\r\n") {
+		return errors.New("gateway base URL must not contain whitespace")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("gateway base URL must be an HTTP(S) URL without credentials, query, or fragment")
+	}
+	return nil
+}
+
+func safeEnvName(value string) bool {
+	if value == "" || !((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z') || value[0] == '_') {
+		return false
+	}
+	for _, character := range value[1:] {
+		if !((character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func safeGitHubSegment(value string) bool {
@@ -623,6 +691,17 @@ func saveConfig(config Config) error {
 func renderConfig(config Config) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "[openlia]\nschema = %d\nversion = %q\nmode = %q\ntarget = %q\nroot = %q\nproject = %q\nmodel = %q\ntimezone = %q\nprovider = %q\nexternal_network = %q\n\n", config.Schema, config.Version, config.Mode, config.Target, config.InstallRoot, config.Project, config.Model, config.Timezone, config.Provider, config.ExternalNetwork)
+	for _, fallback := range config.FallbackProviders {
+		builder.WriteString("[[fallback_providers]]\n")
+		fmt.Fprintf(&builder, "provider = %q\nmodel = %q\n", fallback.Provider, fallback.Model)
+		if fallback.BaseURL != "" {
+			fmt.Fprintf(&builder, "base_url = %q\n", fallback.BaseURL)
+		}
+		if fallback.KeyEnv != "" {
+			fmt.Fprintf(&builder, "key_env = %q\n", fallback.KeyEnv)
+		}
+		builder.WriteString("\n")
+	}
 	fmt.Fprintf(&builder, "[release]\nsource = %q\n\n", config.ReleaseSource)
 	fmt.Fprintf(&builder, "[components]\nhermes_image = %q\nhermes_tag = %q\nhermes_digest = %q\nlocho_image = %q\nlocho_version = %q\n\n", config.HermesImage, config.HermesTag, config.HermesDigest, config.LochoImage, config.LochoVersion)
 	fmt.Fprintf(&builder, "[api]\nenabled = %t\nhost = %q\n\n", config.APIEnabled, config.APIHost)

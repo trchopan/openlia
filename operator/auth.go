@@ -25,13 +25,15 @@ func ListAuth(config Config) (AuthListResult, error) {
 	if err := config.ValidatePaths(); err != nil {
 		return AuthListResult{}, err
 	}
-	openAISlots, copilot, baseURL, err := providerInventory(config.SecretFile)
+	openAISlots, copilot, gateway, baseURL, err := providerInventory(config.SecretFile)
 	if err != nil {
 		return AuthListResult{}, err
 	}
+	gatewayEndpoint := hasGatewayProvider(config.FallbackProviders)
 	return AuthListResult{OK: true, Providers: []ProviderStatus{
-		{Name: "openai-api", Configured: openAISlots > 0, Slots: openAISlots, EndpointConfigured: baseURL},
 		{Name: "copilot", Configured: copilot, Slots: boolInt(copilot)},
+		{Name: "openai-gateway", Configured: gatewayEndpoint, Slots: boolInt(gateway), EndpointConfigured: gatewayEndpoint},
+		{Name: "openai-api", Configured: openAISlots > 0, Slots: openAISlots, EndpointConfigured: baseURL},
 	}, SecretValues: "redacted"}, nil
 }
 
@@ -142,13 +144,13 @@ func rotateAuthWithCompose(ctx context.Context, config Config, compose Compose, 
 	return RecordChange(config, "auth-rotate", "ok", secretBackup, "provider credentials replaced atomically", now)
 }
 
-func providerInventory(path string) (openAISlots int, copilot, baseURL bool, err error) {
+func providerInventory(path string) (openAISlots int, copilot, gateway, baseURL bool, err error) {
 	data, readErr := os.ReadFile(path)
 	if os.IsNotExist(readErr) {
-		return 0, false, false, nil
+		return 0, false, false, false, nil
 	}
 	if readErr != nil {
-		return 0, false, false, readErr
+		return 0, false, false, false, readErr
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSuffix(line, "\r")
@@ -161,11 +163,13 @@ func providerInventory(path string) (openAISlots int, copilot, baseURL bool, err
 			openAISlots++
 		case key == "COPILOT_GITHUB_TOKEN":
 			copilot = true
+		case key == "OPENAI_GATEWAY_API_KEY":
+			gateway = true
 		case key == "OPENAI_BASE_URL":
 			baseURL = true
 		}
 	}
-	return openAISlots, copilot, baseURL, nil
+	return openAISlots, copilot, gateway, baseURL, nil
 }
 
 func parseBaseURL(path string) string {
@@ -268,4 +272,13 @@ func boolInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func hasGatewayProvider(providers []FallbackProviderConfig) bool {
+	for _, provider := range providers {
+		if provider.Provider == "custom" {
+			return true
+		}
+	}
+	return false
 }

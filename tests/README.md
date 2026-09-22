@@ -59,6 +59,11 @@ checkout, and never prints their values. The source files must be regular files
 outside the checkout. Reports are redacted but may still contain operational
 data; keep them outside the repository.
 
+The current live smoke configuration uses Copilot as its primary provider and
+requires `COPILOT_GITHUB_TOKEN`, `TELEGRAM_BOT_TOKEN`, and
+`TELEGRAM_ALLOWED_USERS`. Do not include `OPENAI_BASE_URL`; gateway URLs belong
+in the configured `fallback_providers` entries instead.
+
 ## Workspace Git
 
 The provider-free CLI and local smoke checks validate the bundled workspace Git
