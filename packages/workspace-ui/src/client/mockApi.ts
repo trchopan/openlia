@@ -5,12 +5,19 @@ import type {
   WorkspaceFile,
   WorkspaceFileMetadata,
   WorkspaceGitStatus,
+  WorkspaceTreeEntry,
   WorkspaceTreeResponse,
   WorkspaceWriteResponse,
 } from "../shared/api";
 import { ApiError, type WorkspaceApi } from "./api";
 
-export type MockWorkspaceScenario = "default" | "auth" | "conflict";
+export type MockWorkspaceScenario =
+  | "default"
+  | "auth"
+  | "conflict"
+  | "empty"
+  | "error"
+  | "loading";
 
 export interface MockWorkspaceOptions {
   scenario?: MockWorkspaceScenario;
@@ -50,6 +57,27 @@ export function createMockWorkspaceApi({
   let saveCount = 0;
   let authenticated = scenario !== "auth";
   let conflictPending = scenario === "conflict";
+  const entries: WorkspaceTreeEntry[] = [
+    { kind: "directory", path: "calendar" },
+    {
+      ...metadata(
+        "calendar/event.md",
+        "# Calendar event\n\nA sample event for UI development.\n",
+      ),
+      kind: "file",
+    },
+    { kind: "directory", path: "projects" },
+    {
+      ...metadata("projects/project.md", "# Project\n\nA sample project.\n"),
+      kind: "file",
+    },
+    { kind: "directory", path: "tasks" },
+    {
+      ...metadata("tasks/task.md", "# Task\n\nA sample task.\n"),
+      kind: "file",
+    },
+    { ...metadata(path, content), kind: "file" },
+  ];
 
   function requireAuthentication() {
     if (!authenticated) throw error(401, "authentication_required");
@@ -66,7 +94,7 @@ export function createMockWorkspaceApi({
 
   function treeResponse(): WorkspaceTreeResponse {
     return {
-      entries: [{ ...metadata(path, content), kind: "file" }],
+      entries,
       schema: 1,
       truncated: false,
     };
@@ -75,9 +103,13 @@ export function createMockWorkspaceApi({
   return {
     async loadTree() {
       requireAuthentication();
-      return treeResponse();
+      return scenario === "empty"
+        ? { ...treeResponse(), entries: [] }
+        : treeResponse();
     },
     async loadSession(): Promise<AuthSessionResponse> {
+      if (scenario === "error") throw error(500, "request_failed");
+      if (scenario === "loading") await new Promise<void>(() => undefined);
       return {
         auth_required: scenario === "auth",
         authenticated,

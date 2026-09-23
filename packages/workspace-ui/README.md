@@ -33,7 +33,13 @@ VITE_WORKSPACE_UI_SCENARIO=auth bun run dev
 VITE_WORKSPACE_UI_SCENARIO=conflict bun run dev
 ```
 
-The available scenarios are `auth` and `conflict`.
+The available scenarios are `auth`, `conflict`, `empty`, `error`, and
+`loading`. The query parameter takes precedence over the environment variable,
+so scenarios can be switched without restarting Vite:
+
+```text
+http://127.0.0.1:5173/?scenario=conflict
+```
 
 ## Real Backend Development
 
@@ -56,6 +62,47 @@ bun run dev:real
 
 The Vite proxy keeps the browser same-origin with the API, matching production
 authentication and origin behavior.
+
+To use a local workspace snapshot for real-data development, copy it into the
+ignored development root:
+
+```sh
+rsync -a --delete /path/to/mock-workspace/ .dev-workspace/
+bun run dev:real
+```
+
+The source workspace remains outside this repository. `.dev-workspace/` is
+local-only and must not be committed.
+
+## Playwright Screenshots
+
+Install the local Chromium browser once:
+
+```sh
+bunx playwright install chromium
+```
+
+Run the mock visual catalog:
+
+```sh
+bun run screenshots
+bun run screenshots:headed
+```
+
+Screenshots are written to `.playwright/screenshots/`, with separate desktop
+and mobile directories. The suite covers populated, selected, edited, filtered,
+empty, authentication, conflict, loading, and error states.
+
+Run the same automation against the ignored copied workspace:
+
+```sh
+bun run screenshots:real
+```
+
+The real-data suite uses `.dev-workspace/` and covers the populated tree,
+filtering, and opening a real document. Reports, traces, videos, temporary
+results, screenshots, and copied workspace data are all ignored by Git. They
+may contain personal workspace data and should remain local.
 
 ## Checks and Builds
 
