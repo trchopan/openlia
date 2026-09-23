@@ -13,3 +13,6 @@ backups
 docker/compose.generated.yaml
 tests
 cli/*_test.go
+packages/*/src
+packages/*/node_modules
+packages/*/coverage

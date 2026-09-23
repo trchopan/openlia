@@ -10,5 +10,10 @@
     "linux_x86_64_sha256": "9d257c856f0a9c8220285db45c28c6227dfa76017d160f74490cfef7bd784ad4",
     "linux_arm64_sha256": "1c0e67b130734467783e5e48a69d3003d218a4da624ba5841f3c5e6840f19c18"
   },
+  "bun": {
+    "version": "1.2.22",
+    "linux_x86_64_sha256": "4c446af1a01d7b40e1e11baebc352f9b2bfd12887e51b97dd3b59879cee2743a",
+    "linux_arm64_sha256": "a97c687fb5e54de4e2fb0869a7ac9a2d9c3af75ac182e2b68138c1dd8f98131b"
+  },
   "secret_policy": "credentials and capabilities are supplied out of band"
 }

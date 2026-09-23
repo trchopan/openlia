@@ -21,3 +21,18 @@ func TestEmbeddedWorkspaceIncludesControlFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestEmbeddedBunRuntimeAssets(t *testing.T) {
+	for _, path := range []string{
+		"packages/openlia-tools/dist/server.js",
+		"packages/workspace-ui/dist/server.js",
+		"packages/workspace-ui/dist/public/index.html",
+		"packages/openlia-job/dist/openlia-job.js",
+		"docker/tools.Dockerfile",
+		"docker/workspace-ui.Dockerfile",
+	} {
+		if _, err := fs.ReadFile(releaseAssets, path); err != nil {
+			t.Fatalf("embedded Bun runtime is missing %s: %v", path, err)
+		}
+	}
+}
