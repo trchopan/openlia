@@ -7,6 +7,7 @@ impact.
 ## Development Requirements
 
 - Go 1.26 or newer
+- Bun 1.2.22 or newer for JavaScript packages
 - Python 3.9 or newer (with virtual environment setup via `make venv`)
 - Docker Compose v2 for Compose validation
 - Bash and ShellCheck for the small container and cron adapters
@@ -32,6 +33,19 @@ make smoke-local-live \
   OPENLIA_SMOKE_ATTACHMENTS_FILE="$HOME/.config/openlia/dev/locho-attachments.toml" \
   OPENLIA_SMOKE_LOCHO_HOST=genai
 ```
+
+For frontend-only work, the Workspace UI can be developed without Go, Docker,
+Hermes, or an OpenLia deployment:
+
+```sh
+cd packages/workspace-ui
+bun install
+bun run dev          # Mock API, default
+bun run dev:real     # Real Bun filesystem API and disposable workspace
+```
+
+See [`packages/workspace-ui/README.md`](packages/workspace-ui/README.md) for
+package-local checks, scenarios, and preview commands.
 
 For bundled skill development, see
 [`docs/SKILL_DEVELOPMENT.md`](docs/SKILL_DEVELOPMENT.md). For the separate

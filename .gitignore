@@ -1,4 +1,5 @@
 local/
+.DS_Store
 
 # Deployment runtime state and secrets
 runtime/
@@ -35,6 +36,9 @@ docker/compose.generated.yaml
 
 # Generated Bun runtime and frontend artifacts
 /packages/*/dist/
+/packages/workspace-ui/.dev-workspace/
+/packages/workspace-ui/.preview-workspace/
+/packages/workspace-ui/.playwright/
 node_modules/
 *.test
 coverage.out

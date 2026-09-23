@@ -4,17 +4,7 @@ import type {
   WorkspaceGitStatus,
   WorkspaceTreeEntry,
 } from "../shared/api";
-import {
-  ApiError,
-  downloadUrl,
-  loadFile,
-  loadGitStatus,
-  loadSession,
-  loadTree,
-  login as loginSession,
-  logout as logoutSession,
-  saveFile,
-} from "./api";
+import { ApiError, httpWorkspaceApi, type WorkspaceApi } from "./api";
 import { diffLines, type MarkdownBlock, markdownBlocks } from "./markdown";
 import "./styles.css";
 
@@ -166,7 +156,7 @@ function LoginScreen({
   );
 }
 
-export function App() {
+export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   const filterId = useId();
   const [tree, setTree] = useState<WorkspaceTreeEntry[]>([]);
   const [filter, setFilter] = useState("");
@@ -187,7 +177,8 @@ export function App() {
 
   useEffect(() => {
     let active = true;
-    void loadSession()
+    void api
+      .loadSession()
       .then((session) => {
         if (!active) return;
         setAuthRequired(session.auth_required);
@@ -197,7 +188,7 @@ export function App() {
           setLoading(false);
           return;
         }
-        return Promise.all([loadTree(), loadGitStatus()]).then(
+        return Promise.all([api.loadTree(), api.loadGitStatus()]).then(
           ([treeResponse, gitResponse]) => {
             if (!active) return;
             setTree(treeResponse.entries);
@@ -218,7 +209,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [api]);
 
   function handleUnauthorized() {
     setTree([]);
@@ -233,13 +224,13 @@ export function App() {
   async function submitLogin() {
     setAuthError("");
     try {
-      await loginSession(password);
+      await api.login(password);
       setPassword("");
       setNeedsLogin(false);
       setLoading(true);
       const [treeResponse, gitResponse] = await Promise.all([
-        loadTree(),
-        loadGitStatus(),
+        api.loadTree(),
+        api.loadGitStatus(),
       ]);
       setTree(treeResponse.entries);
       setGit(gitResponse);
@@ -263,7 +254,7 @@ export function App() {
   }
 
   async function signOut() {
-    await logoutSession().catch(() => undefined);
+    await api.logout().catch(() => undefined);
     handleUnauthorized();
     setAuthError("");
   }
@@ -274,7 +265,7 @@ export function App() {
     setError("");
     setConflict("");
     try {
-      const response = await loadFile(path);
+      const response = await api.loadFile(path);
       if (requestSequence !== fileRequestSequence.current) return;
       setFile(response);
       setDraft(response.content);
@@ -294,9 +285,9 @@ export function App() {
     setError("");
     setConflict("");
     try {
-      const response = await saveFile(file.path, draft, file.revision);
+      const response = await api.saveFile(file.path, draft, file.revision);
       setFile({ ...file, ...response, content: draft });
-      const treeResponse = await loadTree();
+      const treeResponse = await api.loadTree();
       setTree(treeResponse.entries);
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
@@ -443,7 +434,7 @@ export function App() {
               className="btn btn-outline btn-sm"
               disabled={!file}
               onClick={() => {
-                if (file) window.location.href = downloadUrl(file.path);
+                if (file) window.location.href = api.downloadUrl(file.path);
               }}
               type="button"
             >

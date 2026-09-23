@@ -4,6 +4,7 @@
     "includes": [
       "packages/**/*.{js,jsx,ts,tsx,json,jsonc,css}",
       "!packages/**/dist",
+      "!packages/**/.playwright",
       "package.json",
       "tsconfig*.json"
     ]
