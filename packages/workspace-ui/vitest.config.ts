@@ -1,14 +1,17 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
+import { fileURLToPath } from "node:url";
+
+const packageRoot = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
   test: {
     environment: "happy-dom",
     include: [
-      "packages/workspace-ui/src/client/**/*.test.ts",
-      "packages/workspace-ui/src/client/**/*.test.tsx",
+      `${packageRoot}/src/client/**/*.test.ts`,
+      `${packageRoot}/src/client/**/*.test.tsx`,
     ],
-    setupFiles: ["packages/workspace-ui/src/client/test/setup.ts"],
+    setupFiles: [`${packageRoot}/src/client/test/setup.ts`],
   },
 });

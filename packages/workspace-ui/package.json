@@ -2,8 +2,43 @@
   "name": "@openlia/workspace-ui",
   "private": true,
   "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:real": "bun scripts/dev-real.ts",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "test:server": "bun test src/server",
+    "typecheck": "bun run typecheck:server && bun run typecheck:client && bun run typecheck:scripts",
+    "typecheck:client": "tsc -p tsconfig.client.json --noEmit",
+    "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
+    "build": "bun run build:client && bun run build:server",
+    "build:verified": "bun run typecheck && bun run build",
+    "build:client": "vite build",
+    "build:server": "bun build src/server/main.ts --target=bun --format=esm --outfile=dist/server.js",
+    "preview": "bun run build && bun scripts/preview.ts",
+    "format:check": "biome format src scripts package.json tsconfig*.json *.config.ts",
+    "lint": "biome lint src scripts package.json tsconfig*.json *.config.ts",
+    "check": "bun run format:check && bun run lint && bun run typecheck"
+  },
   "dependencies": {
     "react": "19.1.1",
     "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.1",
+    "@tailwindcss/vite": "4",
+    "@testing-library/jest-dom": "6.8.0",
+    "@testing-library/react": "16.3.0",
+    "@types/bun": "1.3.14",
+    "@types/react": "19.1.12",
+    "@types/react-dom": "19.1.9",
+    "@vitejs/plugin-react": "5.0.2",
+    "daisyui": "5",
+    "happy-dom": "18.0.1",
+    "tailwindcss": "4",
+    "typescript": "5.9.3",
+    "vite": "7.1.5",
+    "vitest": "3.2.4"
   }
 }

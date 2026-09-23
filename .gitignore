@@ -35,6 +35,8 @@ docker/compose.generated.yaml
 
 # Generated Bun runtime and frontend artifacts
 /packages/*/dist/
+/packages/workspace-ui/.dev-workspace/
+/packages/workspace-ui/.preview-workspace/
 node_modules/
 *.test
 coverage.out
