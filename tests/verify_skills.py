@@ -16,6 +16,7 @@ import time
 
 SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "profile", "skills")
 LIVE_VERIFIABLE_SKILLS = ["browser-pilot", "gemini-chat", "chatgpt-chat"]
+BUN_JOB_SCRIPT = os.path.join(SKILLS_DIR, "browser-pilot", "scripts", "openlia_job.ts")
 
 
 def run_command(cmd: list[str], timeout: float = 120.0) -> tuple[int, str, str, float]:
@@ -40,7 +41,7 @@ def run_offline_tests(selected_skill: str = "") -> bool:
     pattern = os.path.join(SKILLS_DIR, selected_skill or "*", "scripts", "*.py")
     scripts = sorted(glob.glob(pattern))
 
-    if not scripts:
+    if not scripts and selected_skill not in {"browser-pilot", "chatgpt-chat", "gemini-chat"}:
         print(f"No skill scripts found matching pattern: {pattern}")
         return False
 
@@ -55,6 +56,11 @@ def run_offline_tests(selected_skill: str = "") -> bool:
         if not passed:
             all_passed = False
         results.append((skill_name, script_name, passed, duration, stderr.strip() or stdout.strip()))
+
+    if not selected_skill or selected_skill in {"browser-pilot", "chatgpt-chat", "gemini-chat"}:
+        code, stdout, stderr, duration = run_command(["bun", BUN_JOB_SCRIPT, "--self-test"], timeout=15)
+        results.append(("browser-runtime", "openlia_job.ts", code == 0, duration, stderr.strip() or stdout.strip()))
+        all_passed = all_passed and code == 0
 
     # Print table
     print(f"{'Skill':<20} {'Script':<26} {'Status':<10} {'Duration':<10}")
@@ -84,17 +90,14 @@ def run_live_verifications(selected_skill: str = "", mcp_url: str = "") -> bool:
     results = []
 
     for skill in target_skills:
-        pattern = os.path.join(SKILLS_DIR, skill, "scripts", "*.py")
-        scripts = sorted(glob.glob(pattern))
-        if not scripts:
-            print(f"Skipping {skill}: script not found")
+        if not os.path.isfile(BUN_JOB_SCRIPT):
+            print(f"Missing browser runtime verifier: {BUN_JOB_SCRIPT}")
+            all_passed = False
             continue
-
-        script = scripts[0]
-        script_name = os.path.basename(script)
-        cmd = [sys.executable, script, "--verify"]
+        script_name = os.path.basename(BUN_JOB_SCRIPT)
+        cmd = ["bun", BUN_JOB_SCRIPT, "--verify"]
         if mcp_url:
-            cmd.append(mcp_url)
+            os.environ["OPENLIA_BROWSER_MCP_URL"] = mcp_url
 
         print(f"Verifying {skill} via {script_name}...")
         code, stdout, stderr, duration = run_command(cmd, timeout=90)

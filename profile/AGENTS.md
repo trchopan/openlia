@@ -50,7 +50,16 @@ rather than editing its generated state files directly.
 
 - Whenever the user asks to query, research, or converse with **ChatGPT** (`chatgpt.com`) or **Google Gemini** (`gemini.google.com`):
   - **MANDATORY**: You MUST execute through the dedicated automated scripts. NEVER attempt manual, low-level browser tool loops (`browser_type`, `browser_click`).
-  - **For ChatGPT**: Submit `python3 /opt/data/skills/browser-pilot/scripts/openlia_job.py submit chatgpt-chat --prompt "<prompt>" --topic "<topic>"`, then poll the returned job ID with `status` and fetch it with `result`.
-  - **For Gemini**: Submit `python3 /opt/data/skills/browser-pilot/scripts/openlia_job.py submit gemini-chat --prompt "<prompt>" --topic "<topic>"`, then poll the returned job ID with `status` and fetch it with `result`.
+  - **For ChatGPT**: Submit `bun /opt/data/skills/browser-pilot/scripts/openlia_job.ts submit chatgpt-chat --prompt "<prompt>" --topic "<topic>"`, then poll the returned job ID with `status` and fetch it with `result`.
+  - **For Gemini**: Submit `bun /opt/data/skills/browser-pilot/scripts/openlia_job.ts submit gemini-chat --prompt "<prompt>" --topic "<topic>"`, then poll the returned job ID with `status` and fetch it with `result`.
   - **Zero-Tolerance Temporary Chat**: Both scripts automatically enforce the zero-retention Temporary Chat gatekeeper before submitting prompts, and halt immediately if unverified.
   - **Authentic Markdown & Export**: Both scripts automatically intercept authentic Markdown, sanitize citations, and save standardized YAML files with timestamp prefixes to `workspace/knowledge/<platform>/YYYYMMDD_HHMMSS_<slug>.yaml`.
+
+## Attached Playwright MCP
+
+When a `playwright-browser` attachment is configured, Hermes' native browser
+toolset is disabled and the attached MCP tools are the only generic browser
+surface. Use the registered `mcp__openlia_playwright__browser_*` tools for Maps,
+shopping, and ordinary web navigation. Do not invent terminal scripts such as
+`maps_client.py`, and do not use the queued OpenLia job client for generic web
+navigation; that client is only for the ChatGPT/Gemini workflows above.
