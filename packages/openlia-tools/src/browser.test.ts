@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { McpClient, buildConversationYaml, cleanUrl } from "./browser";
+import { buildConversationYaml, cleanUrl, McpClient } from "./browser";
 
 describe("browser compatibility helpers", () => {
   test("normalizes the MCP host header independently of the relay hostname", () => {

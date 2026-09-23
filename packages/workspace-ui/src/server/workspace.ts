@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { Dirent, Stats } from "node:fs";
 import {
   closeSync,
   existsSync,
@@ -13,7 +14,6 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
-import type { Dirent, Stats } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type {
   WorkspaceFile,

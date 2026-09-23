@@ -1,11 +1,11 @@
 import {
+  closeSync,
+  existsSync,
+  fsyncSync,
   mkdirSync,
   openSync,
-  closeSync,
-  fsyncSync,
   renameSync,
   unlinkSync,
-  existsSync,
   writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";

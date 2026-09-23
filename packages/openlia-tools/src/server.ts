@@ -271,7 +271,7 @@ class JobService {
   }
   async run(id: string): Promise<void> {
     const row = this.store.get(id);
-    if (!row || row.status !== "queued") return;
+    if (row?.status !== "queued") return;
     this.store.update(id, "running", "running");
     this.activeJobId = id;
     try {

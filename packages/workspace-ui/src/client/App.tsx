@@ -1,4 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
+import type {
+  WorkspaceFile,
+  WorkspaceGitStatus,
+  WorkspaceTreeEntry,
+} from "../shared/api";
 import {
   ApiError,
   downloadUrl,
@@ -10,12 +15,7 @@ import {
   logout as logoutSession,
   saveFile,
 } from "./api";
-import { diffLines, markdownBlocks, type MarkdownBlock } from "./markdown";
-import type {
-  WorkspaceFile,
-  WorkspaceGitStatus,
-  WorkspaceTreeEntry,
-} from "../shared/api";
+import { diffLines, type MarkdownBlock, markdownBlocks } from "./markdown";
 import "./styles.css";
 
 function formatBytes(size: number): string {
@@ -289,7 +289,7 @@ export function App() {
   }
 
   async function save() {
-    if (!file || !file.editable || saving) return;
+    if (!file?.editable || saving) return;
     setSaving(true);
     setError("");
     setConflict("");
@@ -433,7 +433,7 @@ export function App() {
             </span>
             <button
               className="btn btn-primary btn-sm"
-              disabled={!file || !file.editable || !dirty || saving}
+              disabled={!file?.editable || !dirty || saving}
               onClick={() => void save()}
               type="button"
             >
@@ -467,7 +467,7 @@ export function App() {
             <textarea
               aria-label="Document editor"
               className="textarea textarea-ghost h-full min-h-[500px] w-full resize-none rounded-none border-0 border-r border-base-content/10 bg-base-100 p-6 font-mono text-[15px] leading-relaxed text-base-content outline-none focus:border-primary focus:outline-none max-[700px]:min-h-[320px] max-[700px]:border-r-0 max-[700px]:border-b"
-              disabled={!file || !file.editable || fileLoading}
+              disabled={!file?.editable || fileLoading}
               onChange={(event) => setDraft(event.target.value)}
               spellCheck={false}
               value={draft}
