@@ -110,8 +110,24 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 		}
 		toolsWasRunning = true
 	}
+	openWebUIWasRunning := false
+	if compose != nil && config.OpenWebUIHost != "" && compose.ServiceRunning(ctx, "open-webui") {
+		if _, err := compose.Run(ctx, "stop", "open-webui"); err != nil {
+			if wasRunning {
+				_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "hermes")
+			}
+			if uiWasRunning {
+				_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "workspace-ui")
+			}
+			if toolsWasRunning {
+				_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "openlia-tools")
+			}
+			return BackupResult{}, fmt.Errorf("cannot stop open-webui for a consistent backup")
+		}
+		openWebUIWasRunning = true
+	}
 	defer func() {
-		if !wasRunning && !uiWasRunning && !toolsWasRunning {
+		if !wasRunning && !uiWasRunning && !toolsWasRunning && !openWebUIWasRunning {
 			return
 		}
 		if wasRunning {
@@ -156,6 +172,20 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 				}
 			}
 		}
+		if openWebUIWasRunning {
+			if res, restartErr := compose.Run(ctx, "up", "-d", "--no-deps", "open-webui"); restartErr != nil {
+				msg := strings.TrimSpace(string(res.Stderr))
+				if msg == "" {
+					msg = strings.TrimSpace(string(res.Stdout))
+				}
+				failure := fmt.Errorf("open-webui could not be restarted (%s): %w", msg, restartErr)
+				if err == nil {
+					err = fmt.Errorf("backup completed but %w", failure)
+				} else {
+					err = fmt.Errorf("%v; %w", err, failure)
+				}
+			}
+		}
 	}()
 	stamp := now.UTC().Format("20060102T150405Z")
 	temporary, err := os.CreateTemp(config.BackupRoot, ".archive-*.tar.gz")
@@ -177,7 +207,11 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 		_ = temporary.Close()
 		return BackupResult{}, err
 	}
-	for _, root := range []string{"hermes", "meta", "locho", "skill-envs"} {
+	backupRoots := []string{"hermes", "meta", "locho", "skill-envs"}
+	if config.OpenWebUIHost != "" {
+		backupRoots = append(backupRoots, "open-webui")
+	}
+	for _, root := range backupRoots {
 		path := filepath.Join(config.RuntimeRoot, root)
 		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 			continue
@@ -440,6 +474,9 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 	if info, rootErr := os.Stat(filepath.Join(staging, "skill-envs")); rootErr == nil && info.IsDir() {
 		restoreRoots = append(restoreRoots, "skill-envs")
 	}
+	if info, rootErr := os.Stat(filepath.Join(staging, "open-webui")); rootErr == nil && info.IsDir() {
+		restoreRoots = append(restoreRoots, "open-webui")
+	}
 	oldRoots := make(map[string]string)
 	for _, root := range restoreRoots {
 		oldPath := filepath.Join(config.BackupRoot, fmt.Sprintf("pre-restore-%s-%s-%d", root, now.UTC().Format("20060102T150405Z"), os.Getpid()))
@@ -567,6 +604,19 @@ func safeArchiveMember(name string) bool {
 	return !strings.HasPrefix(name, "/") && !strings.ContainsAny(name, " \t\r\n") && name != ".." && !strings.HasPrefix(name, "../") && !strings.Contains(name, "/../") && filepath.ToSlash(filepath.Clean(filepath.FromSlash(name))) == name
 }
 
+func allowedArchiveMember(name string) bool {
+	if !safeArchiveMember(name) {
+		return false
+	}
+	allowedRoots := []string{"hermes", "meta", "locho", "skill-envs", "open-webui"}
+	for _, root := range allowedRoots {
+		if name == root || strings.HasPrefix(name, root+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 func validateRestoreArchive(path string) error {
 	file, err := os.Open(path)
 	if err != nil {
@@ -592,7 +642,7 @@ func validateRestoreArchive(path string) error {
 		if name == "" || name == "manifest.json" {
 			continue
 		}
-		if !safeArchiveMember(name) || !(name == "hermes" || name == "meta" || name == "locho" || name == "skill-envs" || strings.HasPrefix(name, "hermes/") || strings.HasPrefix(name, "meta/") || strings.HasPrefix(name, "locho/") || strings.HasPrefix(name, "skill-envs/")) {
+		if !allowedArchiveMember(name) {
 			_ = decompressor.Close()
 			_ = file.Close()
 			return fmt.Errorf("restore archive contains an unsupported or unsafe member")
@@ -638,7 +688,7 @@ func extractRestoreArchive(path, destination string) error {
 		if name == "" || name == "manifest.json" {
 			continue
 		}
-		if !safeArchiveMember(name) || !(name == "hermes" || name == "meta" || name == "locho" || name == "skill-envs" || strings.HasPrefix(name, "hermes/") || strings.HasPrefix(name, "meta/") || strings.HasPrefix(name, "locho/") || strings.HasPrefix(name, "skill-envs/")) || (header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) || header.Size < 0 {
+		if !allowedArchiveMember(name) || (header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) || header.Size < 0 {
 			return fmt.Errorf("restore archive contains an unsupported or unsafe member")
 		}
 		target := filepath.Join(destination, filepath.FromSlash(name))

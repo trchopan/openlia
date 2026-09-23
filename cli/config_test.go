@@ -17,6 +17,10 @@ func TestConfigRoundTrip(t *testing.T) {
 	want.WorkspaceUIHost = "127.0.0.1"
 	want.WorkspaceUIPort = 8089
 	want.WorkspaceUIPublicOrigin = "https://workspace.example.test"
+	want.OpenWebUIHost = "127.0.0.1"
+	want.OpenWebUIPort = 8090
+	want.OpenWebUIImage = "ghcr.io/open-webui/open-webui:v0.5.20"
+	want.OpenWebUIAuth = false
 	want.Model = "test-model"
 	want.FallbackProviders = []FallbackProviderConfig{
 		{Provider: "custom", Model: "gateway-model", BaseURL: "https://gateway.example.test/v1", KeyEnv: "OPENAI_GATEWAY_API_KEY"},
@@ -45,7 +49,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Target != want.Target || got.Model != want.Model || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || got.WorkspaceGit != want.WorkspaceGit || len(got.SkillSources) != 2 || got.SkillSources[0] != want.SkillSources[0] || got.SkillSources[1] != want.SkillSources[1] {
+	if got.Target != want.Target || got.Model != want.Model || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || got.WorkspaceGit != want.WorkspaceGit || len(got.SkillSources) != 2 || got.SkillSources[0] != want.SkillSources[0] || got.SkillSources[1] != want.SkillSources[1] {
 		t.Fatalf("round trip mismatch: got %#v want %#v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -457,5 +461,44 @@ func TestConfigServicesRejectsDuplicateHost(t *testing.T) {
 	}
 	if err := validateConfig(config); err == nil {
 		t.Fatal("expected error on duplicate host name, got nil")
+	}
+}
+
+func TestOpenWebUIValidation(t *testing.T) {
+	config := defaultConfig()
+	config.OpenWebUIHost = "invalid-host"
+	if err := validateConfig(config); err == nil {
+		t.Fatal("expected error on invalid open-webui.host, got nil")
+	}
+
+	config = defaultConfig()
+	config.OpenWebUIHost = "127.0.0.1"
+	config.OpenWebUIPort = 0
+	if err := validateConfig(config); err == nil {
+		t.Fatal("expected error on invalid open-webui.port, got nil")
+	}
+
+	config = defaultConfig()
+	config.OpenWebUIHost = "127.0.0.1"
+	config.OpenWebUIPort = 8090
+	if err := validateConfig(config); err != nil {
+		t.Fatalf("valid open-webui rejected: %v", err)
+	}
+}
+
+func TestOpenWebUIRender(t *testing.T) {
+	config := defaultConfig()
+	config.OpenWebUIHost = "127.0.0.1"
+	config.OpenWebUIPort = 8090
+	config.OpenWebUIAuth = true
+	rendered := renderConfig(config)
+	if !strings.Contains(rendered, "[open-webui]\nhost = \"127.0.0.1\"\nport = 8090\n") {
+		t.Fatalf("rendered config missing [open-webui]:\n%s", rendered)
+	}
+
+	config.OpenWebUIAuth = false
+	rendered = renderConfig(config)
+	if !strings.Contains(rendered, "auth = false\n") {
+		t.Fatalf("rendered config missing auth = false:\n%s", rendered)
 	}
 }

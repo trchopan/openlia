@@ -61,7 +61,9 @@ operations directly or uses SSH for a remote target. The default Compose stack
 contains only the Hermes and Locho runtime services. When a browser attachment
 is configured, the private `openlia-tools` Bun service is generated as a
 single-worker browser-job queue. The optional Workspace UI is disabled unless a
-`[workspace-ui]` section is present in `config.toml`.
+`[workspace-ui]` section is present in `config.toml`. The optional Open WebUI
+chat interface is disabled unless an `[open-webui]` section is present in
+`config.toml` or `--open-webui` is provided during `openlia init`.
 
 The target repository layout is:
 
@@ -480,6 +482,44 @@ When a service is mapped to the `playwright-browser` role, OpenLia registers its
 SSE MCP endpoint directly with Hermes and disables Hermes' native `agent-browser`
 toolset. This prevents two browser runtimes from competing for the same session.
 
+### Open WebUI Chat Interface
+
+OpenLia supports [Open WebUI](https://openwebui.com/) as an integrated web chat interface for communicating with your Hermes Agent.
+
+Add an `[open-webui]` section to `config.toml`:
+
+```toml
+[open-webui]
+host = "127.0.0.1"
+port = 8090
+```
+
+Or enable it directly during initialization:
+
+```sh
+./openlia init --local --root "$HOME/.openlia" --open-webui
+```
+
+Optional flags:
+- `--open-webui`: Enable the Open WebUI service.
+- `--open-webui-host <host>`: Bind host (default: `127.0.0.1`). Use `0.0.0.0` to expose on all interfaces.
+- `--open-webui-port <port>`: Host port mapping (default: `8090`).
+
+Key integration details:
+- **Hermes API Server**: Enabling Open WebUI automatically activates Hermes Agent's OpenAI-compatible API server (`API_SERVER_ENABLED=true`, `API_SERVER_HOST=0.0.0.0`) on container port `8642`.
+- **Zero-Config Secret Synchronization**: Secure random API keys (`API_SERVER_KEY` for Hermes and `OPENAI_API_KEY` / `WEBUI_SECRET_KEY` for Open WebUI) are automatically generated and synchronized into mode-`0600` secret files (`hermes.env` and `open-webui.env`). Secrets are never written to `compose.generated.yaml`.
+- **Internal Network**: Open WebUI communicates with Hermes over the private Docker network at `http://hermes:8642/v1`.
+- **Persistent Data**: Open WebUI's database, user profiles, and chat histories persist under `<root>/runtime/open-webui` (mounted to `/app/backend/data`), and are included in `openlia backup create` and `openlia backup restore`.
+- **Authentication**: Built-in authentication is enabled by default (`auth = true`). The first user created in Open WebUI is granted administrator privileges.
+- **Remote Access**: For remote VM deployments, access Open WebUI securely through an SSH tunnel:
+  ```sh
+  ssh -L 8090:127.0.0.1:8090 user@host
+  ```
+- **Updates**: Open WebUI can be updated independently:
+  ```sh
+  openlia update open-webui
+  ```
+
 Then initialize:
 
 ```sh
@@ -602,8 +642,8 @@ openlia workspace git setup
 
 `openlia update` is read-only without a component. `openlia update openlia`
 synchronizes the Go operator, profile, templates, and bundled skills.
-The Hermes and Locho commands reconcile only their pinned runtime boundaries;
-they do not silently replace desired digests.
+The Hermes, Locho, and Open WebUI commands reconcile only their pinned runtime
+boundaries; they do not silently replace desired digests.
 
 Profile synchronization tracks distribution-owned skill provenance in
 `meta/managed/skills/<skill>.json`, including the upstream base version, source

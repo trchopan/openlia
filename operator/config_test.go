@@ -29,6 +29,9 @@ func testConfig(repo, runtime string) Config {
 		APIHost:           "127.0.0.1",
 		WorkspaceUIHost:   "",
 		WorkspaceUIPort:   8089,
+		OpenWebUIHost:     "",
+		OpenWebUIPort:     8090,
+		OpenWebUIDataRoot: filepath.Join(runtime, "open-webui"),
 	}
 }
 
@@ -79,11 +82,15 @@ func TestLoadConfigFromEnv(t *testing.T) {
 		"OPENLIA_WORKSPACE_UI_PORT":          "8090",
 		"OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN": "https://workspace.example.test",
 		"OPENLIA_WORKSPACE_UI_AUTH_REQUIRED": "true",
+		"OPENLIA_OPEN_WEBUI_HOST":            "127.0.0.1",
+		"OPENLIA_OPEN_WEBUI_PORT":            "8090",
+		"OPENLIA_OPEN_WEBUI_IMAGE":           "ghcr.io/open-webui/open-webui:main",
+		"OPENLIA_OPEN_WEBUI_AUTH":            "false",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !config.LocalMode || !config.SkillsConfigured || config.WorkspaceUIHost != "0.0.0.0" || config.WorkspaceUIPort != 8090 || config.WorkspaceUIPublicOrigin != "https://workspace.example.test" || len(config.EnabledSkills) != 2 || config.NetworkName != "example-private" || config.Provider != "copilot" || len(config.FallbackProviders) != 2 || config.FallbackProviders[0].BaseURL != "https://gateway.example.test/v1" || config.FallbackProviders[1].Model != "official-model" {
+	if !config.LocalMode || !config.SkillsConfigured || config.WorkspaceUIHost != "0.0.0.0" || config.WorkspaceUIPort != 8090 || config.WorkspaceUIPublicOrigin != "https://workspace.example.test" || config.OpenWebUIHost != "127.0.0.1" || config.OpenWebUIPort != 8090 || config.OpenWebUIImage != "ghcr.io/open-webui/open-webui:main" || config.OpenWebUIAuth != false || len(config.EnabledSkills) != 2 || config.NetworkName != "example-private" || config.Provider != "copilot" || len(config.FallbackProviders) != 2 || config.FallbackProviders[0].BaseURL != "https://gateway.example.test/v1" || config.FallbackProviders[1].Model != "official-model" {
 		t.Fatalf("unexpected typed config: %+v", config)
 	}
 }
@@ -102,6 +109,24 @@ func TestWorkspaceUIHostValidation(t *testing.T) {
 		config.WorkspaceUIPort = port
 		if err := config.ValidatePaths(); err == nil {
 			t.Fatalf("workspace UI port %d was accepted", port)
+		}
+	}
+}
+
+func TestOpenWebUIHostValidation(t *testing.T) {
+	for _, host := range []string{"localhost", "192.168.1.10", "127.0.0.2"} {
+		config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+		config.OpenWebUIHost = host
+		if err := config.ValidatePaths(); err == nil {
+			t.Fatalf("open-webui host %q was accepted", host)
+		}
+	}
+	for _, port := range []int{0, 65536} {
+		config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+		config.OpenWebUIHost = "127.0.0.1"
+		config.OpenWebUIPort = port
+		if err := config.ValidatePaths(); err == nil {
+			t.Fatalf("open-webui port %d was accepted", port)
 		}
 	}
 }

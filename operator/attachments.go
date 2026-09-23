@@ -2,9 +2,12 @@ package operator
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -191,6 +194,9 @@ func generateAttachmentsFile(config Config) error {
 	if err := validateWorkspaceUI(config.WorkspaceUIHost, config.WorkspaceUIPort, config.WorkspaceUIAuthRequired, config.WorkspaceUIPasswordHashFile); err != nil {
 		return err
 	}
+	if err := validateOpenWebUI(config.OpenWebUIHost, config.OpenWebUIPort); err != nil {
+		return err
+	}
 	workspaceUIHost, workspaceUIPort := config.WorkspaceUIHost, config.WorkspaceUIPort
 	hosts, err := ListAttachments(config)
 	if err != nil {
@@ -231,8 +237,8 @@ func generateAttachmentsFile(config Config) error {
 	}
 
 	var builder strings.Builder
-	hasHermesEnv := config.APIEnabled || config.ExternalNetwork != "" || browserURL != "" || len(allServices) > 0
-	hasGeneratedServices := hasHermesEnv || config.WorkspaceUIHost != "" || len(hosts.Hosts) > 0
+	hasHermesEnv := config.APIEnabled || config.OpenWebUIHost != "" || config.ExternalNetwork != "" || browserURL != "" || len(allServices) > 0
+	hasGeneratedServices := hasHermesEnv || config.WorkspaceUIHost != "" || config.OpenWebUIHost != "" || len(hosts.Hosts) > 0
 	if !hasGeneratedServices {
 		builder.WriteString("services: {}\n")
 	} else {
@@ -243,7 +249,7 @@ func generateAttachmentsFile(config Config) error {
 				fmt.Fprintf(&builder, "    ports:\n      - %q\n", config.APIHost+":8642:8642")
 			}
 			builder.WriteString("    environment:\n")
-			if config.APIEnabled {
+			if config.APIEnabled || config.OpenWebUIHost != "" {
 				builder.WriteString("      API_SERVER_ENABLED: \"true\"\n      API_SERVER_HOST: \"0.0.0.0\"\n")
 			}
 			if browserURL != "" {
@@ -283,6 +289,39 @@ func generateAttachmentsFile(config Config) error {
 			builder.WriteString("\n        target: /run/openlia-secrets/workspace-ui-password.hash\n        read_only: true")
 		}
 		builder.WriteString(fmt.Sprintf("\n    ports:\n      - %q\n    networks:\n      - openlia-private\n    healthcheck:\n      test: [\"CMD\", \"bun\", \"-e\", \"fetch('http://127.0.0.1:%d/health').then(r => { if (!r.ok) process.exit(1) })\"]\n      interval: 10s\n      timeout: 3s\n      retries: 5\n    deploy:\n      resources:\n        limits:\n          cpus: \"0.5\"\n          memory: 256M\n    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n", fmt.Sprintf("%s:%d:%d", workspaceUIHost, workspaceUIPort, workspaceUIPort), workspaceUIPort))
+	}
+	if config.OpenWebUIHost != "" {
+		if err := EnsureOpenWebUISecrets(config); err != nil {
+			return err
+		}
+		dataRoot, _ := json.Marshal(config.OpenWebUIDataRoot)
+		envFilePath, _ := json.Marshal(filepath.Join(config.SecretDir, "open-webui.env"))
+		image := config.OpenWebUIImage
+		if image == "" {
+			image = "${OPENLIA_OPEN_WEBUI_IMAGE:-ghcr.io/open-webui/open-webui:main}"
+		}
+		builder.WriteString("  open-webui:\n")
+		fmt.Fprintf(&builder, "    image: %q\n", image)
+		builder.WriteString("    restart: unless-stopped\n")
+		fmt.Fprintf(&builder, "    ports:\n      - %q\n", fmt.Sprintf("%s:%d:8080", config.OpenWebUIHost, config.OpenWebUIPort))
+		builder.WriteString("    volumes:\n      - type: bind\n        source: ")
+		builder.Write(dataRoot)
+		builder.WriteString("\n        target: /app/backend/data\n")
+		builder.WriteString("    env_file:\n      - ")
+		builder.Write(envFilePath)
+		builder.WriteString("\n    environment:\n")
+		builder.WriteString("      OPENAI_API_BASE_URL: \"http://hermes:8642/v1\"\n")
+		builder.WriteString("      ENABLE_OLLAMA_API: \"False\"\n")
+		builder.WriteString("      WEBUI_NAME: \"OpenLia\"\n")
+		if config.OpenWebUIAuth {
+			builder.WriteString("      WEBUI_AUTH: \"True\"\n")
+		} else {
+			builder.WriteString("      WEBUI_AUTH: \"False\"\n")
+		}
+		builder.WriteString("    networks:\n      - openlia-private\n")
+		builder.WriteString("    healthcheck:\n      test: [\"CMD\", \"python3\", \"-c\", \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)\"]\n      interval: 10s\n      timeout: 5s\n      retries: 5\n")
+		builder.WriteString("    deploy:\n      resources:\n        limits:\n          cpus: \"1.0\"\n          memory: 1G\n")
+		builder.WriteString("    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n")
 	}
 	if browserURL != "" {
 		dataRoot, _ := json.Marshal(config.DataRoot)
@@ -448,8 +487,8 @@ func rotateAttachmentWithCompose(ctx context.Context, config Config, compose Com
 		if previousState == stateRunning {
 			_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "locho-"+host)
 		}
-		_ = RecordChange(config, "locho-"+host+"-rotate", "failed", configBackup, "sidecar configuration replacement failed", now)
-		return fmt.Errorf("sidecar configuration replacement failed; previous attachment was restored")
+		_ = RecordChange(config, "locho-"+host+"-rotate", "failed", configBackup, "sidecar configuration replacement failed: "+err.Error(), now)
+		return fmt.Errorf("sidecar configuration replacement failed (%w); previous attachment was restored", err)
 	}
 	if _, err := compose.Run(ctx, "config", "--quiet"); err != nil {
 		restore()
@@ -658,4 +697,90 @@ func FormatAttachmentListHuman(result AttachmentListResult) string {
 		}
 	}
 	return strings.TrimRight(builder.String(), "\n")
+}
+
+func EnsureOpenWebUISecrets(config Config) error {
+	if config.OpenWebUIHost == "" {
+		return nil
+	}
+	if err := EnsureDir(config.SecretDir, 0o700); err != nil {
+		return err
+	}
+	if err := EnsureDir(config.OpenWebUIDataRoot, 0o777); err != nil {
+		return err
+	}
+	openWebUIEnvPath := filepath.Join(config.SecretDir, "open-webui.env")
+
+	hermesDotEnv := filepath.Join(config.DataRoot, ".env")
+	apiKey, err := readSecretValue(hermesDotEnv, "API_SERVER_KEY")
+	if err != nil || apiKey == "" {
+		apiKey, err = readSecretValue(config.SecretFile, "API_SERVER_KEY")
+	}
+	if err != nil || apiKey == "" {
+		buf := make([]byte, 16)
+		if _, randErr := rand.Read(buf); randErr != nil {
+			return fmt.Errorf("generate api key: %w", randErr)
+		}
+		apiKey = "sk-openlia-" + hex.EncodeToString(buf)
+		currentData, readErr := os.ReadFile(config.SecretFile)
+		if os.IsNotExist(readErr) {
+			currentData = []byte("# Add KEY=VALUE lines through the operator's secret rotation workflow.\n")
+		} else if readErr != nil {
+			return fmt.Errorf("read secret file: %w", readErr)
+		}
+		newContent := string(currentData)
+		if !strings.HasSuffix(newContent, "\n") && len(newContent) > 0 {
+			newContent += "\n"
+		}
+		newContent += fmt.Sprintf("API_SERVER_KEY=%s\n", apiKey)
+		if writeErr := AtomicWriteFile(config.SecretFile, []byte(newContent), 0o600); writeErr != nil {
+			return fmt.Errorf("write api server key: %w", writeErr)
+		}
+	}
+
+	if apiKey != "" && config.DataRoot != "" {
+		if _, statErr := os.Stat(config.DataRoot); statErr == nil {
+			hermesKey, _ := readSecretValue(hermesDotEnv, "API_SERVER_KEY")
+			if hermesKey != apiKey {
+				currentDotEnv, readErr := os.ReadFile(hermesDotEnv)
+				if os.IsNotExist(readErr) {
+					currentDotEnv = []byte{}
+				}
+				dotEnvText := string(currentDotEnv)
+				if !strings.HasSuffix(dotEnvText, "\n") && len(dotEnvText) > 0 {
+					dotEnvText += "\n"
+				}
+				dotEnvText += fmt.Sprintf("API_SERVER_KEY=%s\n", apiKey)
+				_ = AtomicWriteFile(hermesDotEnv, []byte(dotEnvText), 0o600)
+			}
+		}
+	}
+
+	webuiSecret, _ := readSecretValue(openWebUIEnvPath, "WEBUI_SECRET_KEY")
+	if webuiSecret == "" {
+		buf := make([]byte, 16)
+		if _, randErr := rand.Read(buf); randErr != nil {
+			return fmt.Errorf("generate webui secret: %w", randErr)
+		}
+		webuiSecret = hex.EncodeToString(buf)
+	}
+
+	content := fmt.Sprintf("OPENAI_API_KEY=%s\nWEBUI_SECRET_KEY=%s\n", apiKey, webuiSecret)
+	syncWebUIDatabaseKey(filepath.Join(config.OpenWebUIDataRoot, "webui.db"), apiKey)
+	return AtomicWriteFile(openWebUIEnvPath, []byte(content), 0o600)
+}
+
+func syncWebUIDatabaseKey(dbPath, apiKey string) {
+	if _, err := os.Stat(dbPath); err != nil {
+		return
+	}
+	query := fmt.Sprintf("UPDATE config SET value = json_array(%q) WHERE key = 'openai.api_keys';", apiKey)
+	if _, lookErr := exec.LookPath("sqlite3"); lookErr == nil {
+		cmd := exec.Command("sqlite3", dbPath, query)
+		if cmd.Run() == nil {
+			return
+		}
+	}
+	pyScript := fmt.Sprintf("import sqlite3, json; conn = sqlite3.connect(%q); conn.execute('UPDATE config SET value = ? WHERE key = \"openai.api_keys\"', (json.dumps([%q]),)); conn.commit(); conn.close()", dbPath, apiKey)
+	_ = exec.Command("python3", "-c", pyScript).Run()
 }

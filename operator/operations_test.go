@@ -33,6 +33,22 @@ func (r *workspaceUIRunner) Run(_ context.Context, name string, args ...string) 
 	return CommandResult{}, nil
 }
 
+type openWebUIRunner struct {
+	calls []string
+}
+
+func (r *openWebUIRunner) Run(_ context.Context, name string, args ...string) (CommandResult, error) {
+	call := strings.Join(append([]string{name}, args...), " ")
+	r.calls = append(r.calls, call)
+	if strings.Contains(call, "ps --services --filter status=running") {
+		return CommandResult{Stdout: []byte("open-webui\n")}, nil
+	}
+	if strings.Contains(call, "port open-webui 8080") {
+		return CommandResult{Stdout: []byte("127.0.0.1:8090\n")}, nil
+	}
+	return CommandResult{}, nil
+}
+
 func (r *recordedRunner) Run(_ context.Context, name string, args ...string) (CommandResult, error) {
 	r.calls = append(r.calls, strings.Join(append([]string{name}, args...), " "))
 	if name == "docker" && len(args) >= 2 && args[0] == "info" {
@@ -110,6 +126,43 @@ func TestDeployWorkspaceUIComponentTargetsOnlyWorkspaceUI(t *testing.T) {
 	}
 	if strings.Contains(joined, "hermes") || strings.Contains(joined, "locho") {
 		t.Fatalf("targeted workspace-ui deploy touched another service: %s", joined)
+	}
+}
+
+func TestDeployOpenWebUIComponentTargetsOnlyOpenWebUI(t *testing.T) {
+	repo := t.TempDir()
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	config := testConfig(repo, runtimeRoot)
+	config.OpenWebUIHost = "127.0.0.1"
+	config.OpenWebUIPort = 8090
+	if err := os.MkdirAll(filepath.Join(repo, "docker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.ComposeFile, []byte("services: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SecretDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.SecretFile, []byte("# test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.MetaRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteState(config, stateNeverStarted); err != nil {
+		t.Fatal(err)
+	}
+	runner := &openWebUIRunner{}
+	if _, err := Deploy(context.Background(), config, NewCompose(config, runner), DeployOptions{Action: "start", Component: "open-webui", HealthAttempts: 1}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(runner.calls, "\n")
+	if !strings.Contains(joined, "up -d --no-deps --force-recreate open-webui") {
+		t.Fatalf("open-webui target was not started directly: %s", joined)
+	}
+	if strings.Contains(joined, "hermes") || strings.Contains(joined, "locho") || strings.Contains(joined, "workspace-ui") {
+		t.Fatalf("targeted open-webui deploy touched another service: %s", joined)
 	}
 }
 
@@ -292,6 +345,77 @@ func TestGeneratedAttachmentsContainWorkspaceUIWhenEnabled(t *testing.T) {
 				t.Fatal("loopback Workspace UI unexpectedly enabled authentication")
 			}
 		})
+	}
+}
+
+func TestGeneratedAttachmentsContainOpenWebUI(t *testing.T) {
+	repo := t.TempDir()
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	config := testConfig(repo, runtimeRoot)
+	config.OpenWebUIHost = "127.0.0.1"
+	config.OpenWebUIPort = 8090
+	config.OpenWebUIImage = "ghcr.io/open-webui/open-webui:main"
+	config.OpenWebUIAuth = true
+	if err := os.MkdirAll(filepath.Join(repo, "docker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SecretDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.SecretFile, []byte("COPILOT_GITHUB_TOKEN=gho_testtoken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := GenerateAttachments(config); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(config.GeneratedCompose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, expected := range []string{
+		"open-webui:",
+		"ghcr.io/open-webui/open-webui:main",
+		"127.0.0.1:8090:8080",
+		"target: /app/backend/data",
+		"OPENAI_API_BASE_URL: \"http://hermes:8642/v1\"",
+		"ENABLE_OLLAMA_API: \"False\"",
+		"WEBUI_NAME: \"OpenLia\"",
+		"WEBUI_AUTH: \"True\"",
+		"API_SERVER_ENABLED: \"true\"",
+		"API_SERVER_HOST: \"0.0.0.0\"",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated Compose missing %q:\n%s", expected, text)
+		}
+	}
+
+	// Verify secrets were provisioned
+	openWebUIEnvPath := filepath.Join(config.SecretDir, "open-webui.env")
+	envData, err := os.ReadFile(openWebUIEnvPath)
+	if err != nil {
+		t.Fatalf("open-webui.env missing: %v", err)
+	}
+	envText := string(envData)
+	if !strings.Contains(envText, "OPENAI_API_KEY=sk-openlia-") || !strings.Contains(envText, "WEBUI_SECRET_KEY=") {
+		t.Fatalf("open-webui.env missing expected keys:\n%s", envText)
+	}
+
+	apiKey, err := readSecretValue(openWebUIEnvPath, "OPENAI_API_KEY")
+	if err != nil || apiKey == "" {
+		t.Fatalf("failed to read OPENAI_API_KEY: %v", err)
+	}
+	serverKey, err := readSecretValue(config.SecretFile, "API_SERVER_KEY")
+	if err != nil || serverKey == "" {
+		t.Fatalf("failed to read API_SERVER_KEY: %v", err)
+	}
+	if apiKey != serverKey {
+		t.Fatalf("key mismatch: open-webui=%q hermes=%q", apiKey, serverKey)
+	}
+
+	// Ensure secret token NEVER leaks into generated compose
+	if strings.Contains(text, apiKey) {
+		t.Fatalf("API key %q leaked into generated Compose file:\n%s", apiKey, text)
 	}
 }
 

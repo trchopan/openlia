@@ -188,3 +188,14 @@ func TestAttachmentsMapRejectsMissingArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateOpenWebUIRejectsUnconfigured(t *testing.T) {
+	temporary := t.TempDir()
+	t.Setenv("OPENLIA_CONFIG", filepath.Join(temporary, "config.toml"))
+	if err := saveConfig(defaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if got := commandUpdate(Options{}, []string{"open-webui"}, fstest.MapFS{}); got != ExitUsage {
+		t.Fatalf("update open-webui exit code = %d, want %d", got, ExitUsage)
+	}
+}
