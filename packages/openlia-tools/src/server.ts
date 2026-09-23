@@ -8,13 +8,14 @@ import {
   statSync,
 } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
-import { executeBrowserChat } from "./browser";
+import { executeBrowserChat, executeBrowserRoute } from "./browser";
 
 const maxBodyBytes = 1024 * 1024;
 const dataRoot = resolve(process.env.OPENLIA_TOOLS_DATA_ROOT ?? "/opt/data");
 const workspaceRoot = resolve(dataRoot, "workspace");
 const databasePath = resolve(dataRoot, "openlia", "jobs.sqlite3");
-const tools = new Set(["chatgpt-chat", "gemini-chat"]);
+const tools = new Set(["chatgpt-chat", "gemini-chat", "maps-route"]);
+const routeModes = new Set(["driving", "transit", "walking", "bicycling"]);
 
 type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 type JobRow = {
@@ -31,6 +32,7 @@ type JobRow = {
   error: string;
   created_at: string;
   updated_at: string;
+  input_json: string;
 };
 type JsonObject = Record<string, unknown>;
 
@@ -95,8 +97,16 @@ class JobStore {
       id TEXT PRIMARY KEY, tool TEXT NOT NULL, prompt TEXT NOT NULL, topic TEXT NOT NULL,
       output_path TEXT NOT NULL, fingerprint TEXT NOT NULL, idempotency_key TEXT NOT NULL,
       timeout_seconds INTEGER NOT NULL, status TEXT NOT NULL, phase TEXT NOT NULL,
-      error TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      error TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      input_json TEXT NOT NULL DEFAULT '{}'
     )`);
+    const columns = this.db.query("PRAGMA table_info(jobs)").all() as Array<{
+      name: string;
+    }>;
+    if (!columns.some((column) => column.name === "input_json"))
+      this.db.exec(
+        "ALTER TABLE jobs ADD COLUMN input_json TEXT NOT NULL DEFAULT '{}'",
+      );
     try {
       chmodSync(databasePath, 0o600);
     } catch {
@@ -149,10 +159,11 @@ class JobStore {
     idempotencyKey: string;
     timeout: number;
     created: string;
+    inputJson: string;
   }): void {
     this.db
       .query(
-        `INSERT INTO jobs (id,tool,prompt,topic,output_path,fingerprint,idempotency_key,timeout_seconds,status,phase,error,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,'queued','queued','',?,?)`,
+        `INSERT INTO jobs (id,tool,prompt,topic,output_path,fingerprint,idempotency_key,timeout_seconds,status,phase,error,created_at,updated_at,input_json) VALUES (?,?,?,?,?,?,?,?,'queued','queued','',?,?,?)`,
       )
       .run(
         values.id,
@@ -165,6 +176,7 @@ class JobStore {
         values.timeout,
         values.created,
         values.created,
+        values.inputJson,
       );
   }
   get(id: string): JobRow | null {
@@ -216,20 +228,61 @@ class JobService {
   submit(tool: string, body: JsonObject): [JsonObject, number] {
     if (!tools.has(tool))
       return [{ ok: false, error: "unknown browser tool" }, 400];
-    const prompt = body.prompt;
-    if (
-      typeof prompt !== "string" ||
-      !prompt.trim() ||
-      [...prompt].length > 200_000
-    )
-      return [
-        {
-          ok: false,
-          error: "prompt must be a non-empty string under 200000 characters",
-        },
-        400,
-      ];
-    const topic = body.topic ?? "";
+    let prompt = "";
+    let inputJson = "{}";
+    let topic = body.topic ?? "";
+    if (tool === "maps-route") {
+      const start = body.start;
+      const destination = body.destination;
+      const mode = body.mode ?? "driving";
+      if (
+        typeof start !== "string" ||
+        !start.trim() ||
+        [...start].length > 1_000 ||
+        typeof destination !== "string" ||
+        !destination.trim() ||
+        [...destination].length > 1_000
+      )
+        return [
+          {
+            ok: false,
+            error:
+              "start and destination must be non-empty strings under 1000 characters",
+          },
+          400,
+        ];
+      if (typeof mode !== "string" || !routeModes.has(mode))
+        return [
+          {
+            ok: false,
+            error: "mode must be driving, transit, walking, or bicycling",
+          },
+          400,
+        ];
+      prompt = `Google Maps ${mode} route from ${start.trim()} to ${destination.trim()}`;
+      topic = topic || `${start.trim()} to ${destination.trim()}`;
+      inputJson = JSON.stringify({
+        start: start.trim(),
+        destination: destination.trim(),
+        mode,
+      });
+    } else {
+      const rawPrompt = body.prompt;
+      if (
+        typeof rawPrompt !== "string" ||
+        !rawPrompt.trim() ||
+        [...rawPrompt].length > 200_000
+      )
+        return [
+          {
+            ok: false,
+            error: "prompt must be a non-empty string under 200000 characters",
+          },
+          400,
+        ];
+      prompt = rawPrompt;
+      inputJson = JSON.stringify({ prompt });
+    }
     if (typeof topic !== "string")
       return [{ ok: false, error: "topic must be a string" }, 400];
     const rawTimeout = body.timeout_seconds ?? 300;
@@ -254,7 +307,10 @@ class JobService {
     const platform = tool === "chatgpt-chat" ? "chatgpt" : "gemini";
     const created = timestamp();
     const filename = `${created.slice(0, 19).replaceAll("-", "").replace("T", "_").replaceAll(":", "")}_${safeSlug(topic || prompt.slice(0, 40))}_${id.slice(4, 12)}.yaml`;
-    const outputPath = resolve(workspaceRoot, "knowledge", platform, filename);
+    const outputPath =
+      tool === "maps-route"
+        ? resolve(workspaceRoot, "travel", filename)
+        : resolve(workspaceRoot, "knowledge", platform, filename);
     this.store.create({
       id,
       tool,
@@ -265,6 +321,7 @@ class JobService {
       idempotencyKey: key,
       timeout,
       created,
+      inputJson,
     });
     this.enqueue(id);
     return [publicJob(this.store.get(id)), 202];
@@ -275,16 +332,38 @@ class JobService {
     this.store.update(id, "running", "running");
     this.activeJobId = id;
     try {
-      const platform = row.tool === "chatgpt-chat" ? "chatgpt" : "gemini";
-      await executeBrowserChat(
-        platform,
-        row.prompt,
-        row.topic,
-        row.output_path,
-        process.env.OPENLIA_BROWSER_MCP_URL ?? "",
-        row.timeout_seconds,
-        dataRoot,
-      );
+      if (row.tool === "maps-route") {
+        const input = JSON.parse(row.input_json) as {
+          start?: unknown;
+          destination?: unknown;
+          mode?: unknown;
+        };
+        if (
+          typeof input.start !== "string" ||
+          typeof input.destination !== "string" ||
+          typeof input.mode !== "string"
+        )
+          throw new Error("maps route job has invalid persisted input");
+        await executeBrowserRoute(
+          input.start,
+          input.destination,
+          input.mode,
+          row.output_path,
+          process.env.OPENLIA_BROWSER_MCP_URL ?? "",
+          row.timeout_seconds,
+        );
+      } else {
+        const platform = row.tool === "chatgpt-chat" ? "chatgpt" : "gemini";
+        await executeBrowserChat(
+          platform,
+          row.prompt,
+          row.topic,
+          row.output_path,
+          process.env.OPENLIA_BROWSER_MCP_URL ?? "",
+          row.timeout_seconds,
+          dataRoot,
+        );
+      }
       if (!existsSync(row.output_path) || !statSync(row.output_path).isFile())
         this.store.update(
           id,

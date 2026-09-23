@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { buildConversationYaml, cleanUrl, McpClient } from "./browser";
+import {
+  buildConversationYaml,
+  buildRouteYaml,
+  cleanUrl,
+  currentTabIndex,
+  mapsRouteUrl,
+  McpClient,
+} from "./browser";
 
 describe("browser compatibility helpers", () => {
   test("normalizes the MCP host header independently of the relay hostname", () => {
@@ -45,5 +52,33 @@ describe("browser compatibility helpers", () => {
         "https://www.google.com/url?q=https%3A%2F%2Fexample.test%2Fdocs%3Futm_source%3Dgoogle&sa=U",
       ),
     ).toBe("https://example.test/docs");
+  });
+
+  test("tracks the explicit current tab without relying on tab order", () => {
+    expect(
+      currentTabIndex(
+        "- 0: https://maps.google.com/\n- 4: https://chatgpt.com/ (current)\n",
+      ),
+    ).toBe(4);
+  });
+
+  test("builds a queued Maps route URL and YAML result", () => {
+    const url = mapsRouteUrl("Home", "Office", "driving");
+    expect(url).toContain("origin=Home");
+    expect(url).toContain("destination=Office");
+    expect(url).toContain("travelmode=driving");
+    const output = buildRouteYaml(
+      {
+        start: "Home",
+        destination: "Office",
+        mode: "driving",
+        url,
+        snapshot: "45 min\nHeavy traffic",
+      },
+      "2026-09-23T00:00:00.000Z",
+    );
+    expect(output).toContain("type: google_maps_route");
+    expect(output).toContain('observed_at: "2026-09-23T00:00:00.000Z"');
+    expect(output).toContain("Heavy traffic");
   });
 });

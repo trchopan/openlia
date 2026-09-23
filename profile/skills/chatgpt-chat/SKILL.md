@@ -56,7 +56,7 @@ for the full remote-browser conversation.
 5. **Streaming Completion**: Monitors generation until streaming finishes, the stop button disappears, and the send button is re-enabled.
 6. **Authentic Markdown & Citation Extraction**: Intercepts `navigator.clipboard.writeText` and triggers ChatGPT's "Copy response" button to capture 100% authentic Markdown (tables, code blocks, headers), cleans tracking query parameters, and derives clean citation titles.
 7. **YAML Serialization**: Writes the conversation to `workspace/knowledge/chatgpt/YYYYMMDD_HHMMSS_<slug>.yaml`.
-8. **Session Cleanup**: Resets the browser tab to `about:blank`.
+8. **Session Cleanup**: Closes only the worker-owned browser tab; unrelated user or Maps tabs are left open.
 
 ---
 

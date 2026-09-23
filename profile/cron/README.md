@@ -8,6 +8,11 @@ script on the configured schedule and does not spend model tokens.
 Other jobs are not enabled by this profile. Scheduled agent work must be
 reviewed after the interactive workflows and credentials are configured.
 
+Scheduled browser work must use the shared OpenLia browser-job queue rather than
+calling Playwright MCP directly. For Google Maps traffic checks, use the
+`maps-route` job through `openlia_job.ts`; this serializes route checks with
+ChatGPT/Gemini jobs and keeps browser tab cleanup scoped to the job.
+
 When ready, create additional jobs through the Hermes cron interface and keep
 them paused until reviewed. Safe candidates are read-only daily briefings and
 weekly reviews that write no files and deliver only a report. Cron is configured

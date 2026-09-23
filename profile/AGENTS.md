@@ -61,5 +61,11 @@ When a `playwright-browser` attachment is configured, Hermes' native browser
 toolset is disabled and the attached MCP tools are the only generic browser
 surface. Use the registered `mcp__openlia_playwright__browser_*` tools for Maps,
 shopping, and ordinary web navigation. Do not invent terminal scripts such as
-`maps_client.py`, and do not use the queued OpenLia job client for generic web
-navigation; that client is only for the ChatGPT/Gemini workflows above.
+`maps_client.py`. For scheduled or unattended Maps route checks, use the queued
+OpenLia job client instead:
+`bun /opt/data/skills/browser-pilot/scripts/openlia_job.ts submit maps-route
+--start "..." --destination "..." --mode driving --topic "..."`. Poll the job
+with `status` and fetch it with `result`; this shares the single browser worker
+with ChatGPT/Gemini and prevents scheduled route work from racing those jobs.
+Use direct MCP for interactive Maps and ordinary web navigation only when the
+task is not an unattended scheduled browser job.

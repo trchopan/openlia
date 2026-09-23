@@ -60,7 +60,8 @@ service. The `openlia` CLI runs on the operator machine and either invokes local
 operations directly or uses SSH for a remote target. The default Compose stack
 contains only the Hermes and Locho runtime services. When a browser attachment
 is configured, the private `openlia-tools` Bun service is generated as a
-single-worker browser-job queue. The optional Workspace UI is disabled unless a
+single-worker browser-job queue for ChatGPT, Gemini, and scheduled Maps route
+checks. The optional Workspace UI is disabled unless a
 `[workspace-ui]` section is present in `config.toml`. The optional Open WebUI
 chat interface is disabled unless an `[open-webui]` section is present in
 `config.toml` or `--open-webui` is provided during `openlia init`.

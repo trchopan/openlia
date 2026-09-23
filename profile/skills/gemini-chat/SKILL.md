@@ -56,7 +56,7 @@ for the full remote-browser conversation.
 5. **Streaming Completion**: Monitors generation until the response completes and action buttons appear.
 6. **Authentic Markdown & Grounding Extraction**: Intercepts `navigator.clipboard.writeText` and triggers Gemini's Copy response button to extract 100% authentic Markdown (tables, code blocks), unwraps Google redirect URLs (`https://www.google.com/url?q=...`), and derives clean citation titles.
 7. **YAML Serialization**: Writes the conversation to `workspace/knowledge/gemini/YYYYMMDD_HHMMSS_<slug>.yaml`.
-8. **Session Cleanup**: Resets the browser tab to `about:blank`.
+8. **Session Cleanup**: Closes only the worker-owned browser tab; unrelated user or Maps tabs are left open.
 
 ---
 

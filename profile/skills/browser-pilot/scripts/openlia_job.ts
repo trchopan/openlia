@@ -55,8 +55,21 @@ async function main(): Promise<void> {
   const action = args[0];
   if (action === "submit") {
     const tool = args[1];
-    if (tool !== "chatgpt-chat" && tool !== "gemini-chat") throw new Error("submit requires chatgpt-chat or gemini-chat");
-    const result = await request("POST", `/openlia/tools/${tool}`, { prompt: value(args, "--prompt"), topic: value(args, "--topic"), idempotency_key: value(args, "--idempotency-key"), timeout_seconds: timeoutValue(args) });
+    if (tool !== "chatgpt-chat" && tool !== "gemini-chat" && tool !== "maps-route")
+      throw new Error("submit requires chatgpt-chat, gemini-chat, or maps-route");
+    const body: Record<string, unknown> = {
+      topic: value(args, "--topic"),
+      idempotency_key: value(args, "--idempotency-key"),
+      timeout_seconds: timeoutValue(args),
+    };
+    if (tool === "maps-route") {
+      body.start = value(args, "--start");
+      body.destination = value(args, "--destination");
+      body.mode = value(args, "--mode", "driving");
+    } else {
+      body.prompt = value(args, "--prompt");
+    }
+    const result = await request("POST", `/openlia/tools/${tool}`, body);
     await printResult(result);
     process.exit(result.status >= 200 && result.status < 300 ? 0 : 1);
   } else if (action === "status" || action === "result" || action === "cancel") {

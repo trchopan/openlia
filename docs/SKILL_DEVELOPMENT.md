@@ -40,6 +40,12 @@ npx @playwright/mcp@latest --host 127.0.0.1 --port 8931 --extension \
   --idle-timeout 0 --shared-browser-context
 ```
 
+Scheduled Maps checks must use the shared OpenLia browser-job queue rather than
+calling the MCP tools directly. Submit a `maps-route` job with
+`openlia_job.ts`; queued Maps, ChatGPT, and Gemini work then use one worker and
+close only their own tabs. Direct MCP calls remain for interactive browser
+verification.
+
 Run the live canaries only when an authenticated disposable browser session is
 available:
 

@@ -26,7 +26,8 @@ When an attached service is mapped to the `playwright-browser` role, Hermes'
 native `browser_*` toolset is intentionally disabled and the attached Playwright
 MCP server is registered directly with Hermes. Use the attached Playwright MCP
 tools for Maps, shopping, and generic browser workflows. Use the queued OpenLia
-browser-job client for the supported ChatGPT and Gemini workflows below.
+browser-job client for scheduled Maps route checks and the supported ChatGPT and
+Gemini workflows below. Direct MCP remains appropriate for interactive Maps work.
 
 The current MCP server name is `openlia-playwright`, so its tool names are
 prefixed `mcp__openlia_playwright__`, for example:
@@ -77,6 +78,21 @@ to pilot the native browser session:
 > - Both scripts output clean, standardized YAML transcripts with timestamp prefixes to `workspace/knowledge/<platform>/`.
 
 ### 3. Route & Traffic Intelligence (Google Maps)
+For scheduled or unattended checks, submit the route to the shared browser queue:
+
+```bash
+bun /opt/data/skills/browser-pilot/scripts/openlia_job.ts submit maps-route \
+  --start "Start address" \
+  --destination "Destination address" \
+  --mode driving \
+  --topic "Commute traffic"
+```
+
+Poll the returned job ID with `status` and fetch the YAML with `result`. The
+queued route job runs exclusively with ChatGPT/Gemini jobs, so it must be used
+for scheduled work rather than direct `mcp__openlia_playwright__browser_*` calls.
+
+For interactive Maps work, use the attached Playwright MCP tools directly:
 1. Navigate to Google Maps with start and destination parameters.
 2. Ensure transit/driving mode is correctly selected.
 3. Extract route distance, travel duration, current traffic delay notices (orange/red congestion warnings), and suggested alternate routes.
@@ -84,7 +100,7 @@ to pilot the native browser session:
 
 ### 4. Durable Workspace Recording
 - Save verified facts (e.g., historical price point, commute benchmark, external AI research brief) to `workspace/knowledge/claims/` or relevant domain folder.
-- Close auxiliary tabs and return to a blank/neutral page when finished.
+- Close only auxiliary tabs created by the current interactive task and return to a blank/neutral page when finished. Queued jobs manage their own tab and never close unrelated tabs.
 
 ## Pitfalls
 
