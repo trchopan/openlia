@@ -28,9 +28,9 @@ describe("workspace application", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled(),
+      expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled(),
     );
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
   });
 
   test("keeps the draft visible when saving encounters a revision conflict", async () => {
@@ -43,8 +43,24 @@ describe("workspace application", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Revision conflict",
+      "This file changed after you opened it.",
     );
+    expect(editor).toHaveValue("draft");
+  });
+
+  test("protects a dirty draft before switching documents", async () => {
+    render(<App api={createMockWorkspaceApi()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+    const editor = await screen.findByRole("textbox", {
+      name: "Document editor",
+    });
+    fireEvent.change(editor, { target: { value: "draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "event.md" }));
+
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      "Keep your draft?",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
     expect(editor).toHaveValue("draft");
   });
 
