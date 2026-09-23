@@ -58,6 +58,12 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 			return BootstrapResult{}, err
 		}
 	}
+	if config.WorkspaceUIAuthRequired {
+		info, err := os.Stat(config.WorkspaceUIPasswordHashFile)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o444 {
+			return BootstrapResult{}, fmt.Errorf("workspace-ui password verifier must be a regular mode-0444 file")
+		}
+	}
 	if _, err := os.Lstat(config.SecretFile); errors.Is(err, os.ErrNotExist) {
 		if err := AtomicWriteFile(config.SecretFile, []byte("# Add KEY=VALUE lines through the operator's secret rotation workflow.\n"), 0o600); err != nil {
 			return BootstrapResult{}, err

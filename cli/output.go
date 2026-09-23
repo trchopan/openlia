@@ -28,6 +28,7 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\b(?:sk|ghp|gho|ghu|github_pat)_[A-Za-z0-9_\-]+`),
 	regexp.MustCompile(`(?i)([A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*\s*=\s*)[^\s,;]+`),
 	regexp.MustCompile(`(?i)(capabilit(?:y|ies)["']?\s*[:=]\s*["']?)[^\s,"']+`),
+	regexp.MustCompile(`(?i)(\$argon2(?:id|i|d)\$v=\d+\$)[^\s]+`),
 }
 
 func redact(value string) string {
@@ -96,6 +97,7 @@ Usage:
   openlia attachments rotate <host> --source PATH
   openlia backup create|restore
   openlia workspace git setup|status
+  openlia workspace-ui password
 
 Global flags: --json, --non-interactive, --version, --help
 

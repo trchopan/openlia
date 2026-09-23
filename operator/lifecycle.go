@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -37,8 +38,8 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 	if options.Action != "deploy" && options.Action != "start" && options.Action != "stop" && options.Action != "restart" {
 		return DeployResult{}, fmt.Errorf("unknown deploy action %s", options.Action)
 	}
-	if options.Component != "all" && options.Component != "hermes" && options.Component != "locho" {
-		return DeployResult{}, fmt.Errorf("component must be all, hermes, or locho")
+	if options.Component != "all" && options.Component != "hermes" && options.Component != "locho" && options.Component != "workspace-ui" {
+		return DeployResult{}, fmt.Errorf("component must be all, hermes, locho, or workspace-ui")
 	}
 	if info, err := os.Stat(config.ComposeFile); err != nil || !info.Mode().IsRegular() {
 		return DeployResult{}, fmt.Errorf("base Compose file is missing")
@@ -97,15 +98,30 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 				}
 			}
 		}
+		if options.Component == "all" && config.WorkspaceUIHost != "" {
+			if _, err := compose.Run(ctx, "build", "workspace-ui"); err != nil {
+				_ = RecordChange(config, options.Action, "failed", backup, "workspace UI image build failed", now)
+				return DeployResult{}, fmt.Errorf("workspace UI image build failed")
+			}
+		}
+		if options.Component == "workspace-ui" {
+			if config.WorkspaceUIHost == "" {
+				return DeployResult{}, fmt.Errorf("workspace UI is disabled")
+			}
+			if _, err := compose.Run(ctx, "build", "workspace-ui"); err != nil {
+				_ = RecordChange(config, options.Action, "failed", backup, "workspace UI image build failed", now)
+				return DeployResult{}, fmt.Errorf("workspace UI image build failed")
+			}
+		}
 	}
 	if options.Action == "start" || options.Action == "restart" {
 		options.ForceStart = true
 	}
-	shouldStart := options.ForceStart || (options.Action == "deploy" && previous == stateNeverStarted)
+	shouldStart := options.ForceStart || (options.Action == "deploy" && previous != stateStopped)
 	if shouldStart {
 		var args []string
 		switch {
-		case options.Action == "restart":
+		case options.Action == "restart" && options.Component == "all":
 			args = []string{"restart"}
 		case options.Component == "all":
 			args = []string{"up", "-d"}
@@ -118,6 +134,11 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 				args = append(args, "--build")
 			}
 			args = append(args, "--no-deps", "hermes")
+		case options.Component == "workspace-ui":
+			args = []string{"up", "-d", "--no-deps", "--force-recreate", "workspace-ui"}
+			if options.Action == "deploy" {
+				args = []string{"up", "-d", "--build", "--no-deps", "--force-recreate", "workspace-ui"}
+			}
 		default:
 			services := composeServices(ctx, compose)
 			if len(services) == 0 {
@@ -137,9 +158,11 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 			_ = RecordChange(config, options.Action, "failed", backup, "Compose start failed: "+msg, now)
 			return DeployResult{}, fmt.Errorf("Compose start failed (%s): %w", msg, err)
 		}
-		// Normalize the bind-mounted workspace through the container user, not a
-		// host-side chown that may not exist on Docker Desktop.
-		_, _ = compose.Run(ctx, "exec", "-T", "-u", "root", "hermes", "sh", "-c", "chown -R 10000:10000 /opt/data/workspace && chmod 700 /opt/data/workspace")
+		if options.Component == "all" || options.Component == "hermes" {
+			// Normalize the bind-mounted workspace through the container user, not a
+			// host-side chown that may not exist on Docker Desktop.
+			_, _ = compose.Run(ctx, "exec", "-T", "-u", "root", "hermes", "sh", "-c", "chown -R 10000:10000 /opt/data/workspace && chmod 700 /opt/data/workspace")
+		}
 		if err := WriteState(config, stateRunning); err != nil {
 			return DeployResult{}, err
 		}
@@ -153,7 +176,13 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 		}
 		healthy := false
 		for attempt := 0; attempt < attempts; attempt++ {
-			if health, healthErr := Healthcheck(ctx, config, compose, false, false); healthErr == nil && health.OK {
+			healthyNow := false
+			if options.Component == "workspace-ui" {
+				healthyNow = workspaceUIHealthy(ctx, config, compose)
+			} else if health, healthErr := Healthcheck(ctx, config, compose, false, false); healthErr == nil && health.OK {
+				healthyNow = true
+			}
+			if healthyNow {
 				healthy = true
 				break
 			}
@@ -184,6 +213,22 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 		return DeployResult{}, err
 	}
 	return DeployResult{OK: true, Action: options.Action, State: state, Backup: backup}, nil
+}
+
+func workspaceUIHealthy(ctx context.Context, config Config, compose Compose) bool {
+	if config.WorkspaceUIHost == "" || !compose.ServiceRunning(ctx, "workspace-ui") {
+		return false
+	}
+	result, err := compose.Run(ctx, "port", "workspace-ui", strconv.Itoa(config.WorkspaceUIPort))
+	if err != nil {
+		return false
+	}
+	binding := strings.TrimSpace(string(result.Stdout))
+	if !strings.Contains(binding, fmt.Sprintf("%s:%d", config.WorkspaceUIHost, config.WorkspaceUIPort)) {
+		return false
+	}
+	_, err = compose.Run(ctx, "exec", "-T", "workspace-ui", "bun", "-e", fmt.Sprintf("fetch('http://127.0.0.1:%d/health').then(r => { if (!r.ok) process.exit(1) })", config.WorkspaceUIPort))
+	return err == nil
 }
 
 func composeServices(ctx context.Context, compose Compose) []string {
@@ -291,6 +336,23 @@ func Healthcheck(ctx context.Context, config Config, compose Compose, allowStopp
 						add("listener:"+service, true, "private_only")
 					} else {
 						add("listener:"+service, false, "published")
+					}
+				} else if service == "workspace-ui" {
+					expectedHost, expectedPort := config.WorkspaceUIHost, config.WorkspaceUIPort
+					endpointErr := validateWorkspaceUI(expectedHost, expectedPort, config.WorkspaceUIAuthRequired, config.WorkspaceUIPasswordHashFile)
+					published, portErr := compose.Run(ctx, "port", service, strconv.Itoa(expectedPort))
+					binding := strings.TrimSpace(string(published.Stdout))
+					expectedBinding := fmt.Sprintf("%s:%d", expectedHost, expectedPort)
+					if endpointErr != nil || portErr != nil || binding == "" {
+						add("listener:workspace-ui", false, "missing_configured_port")
+					} else if strings.Contains(binding, expectedBinding) {
+						if _, probeErr := compose.Run(ctx, "exec", "-T", "workspace-ui", "bun", "-e", fmt.Sprintf("fetch('http://127.0.0.1:%d/health').then(r => { if (!r.ok) process.exit(1) })", expectedPort)); probeErr != nil {
+							add("listener:workspace-ui", false, "health_endpoint_unavailable")
+						} else {
+							add("listener:workspace-ui", true, "configured_endpoint")
+						}
+					} else {
+						add("listener:workspace-ui", false, "unexpected_endpoint")
 					}
 				}
 			} else if state == stateStopped && allowStopped {

@@ -36,7 +36,7 @@ name = "<another-host>"
 ```
 
 Supported roles:
-- `playwright-browser`: Remote browser automation via Playwright MCP server. Wires `OPENLIA_BROWSER_MCP_URL` and manages `openlia-tools`.
+- `playwright-browser`: Remote browser automation via Playwright MCP server. Wires `OPENLIA_BROWSER_MCP_URL`, registers the attached SSE MCP server directly with Hermes, manages `openlia-tools`, and disables Hermes' native `agent-browser` toolset to avoid competing browser runtimes.
 - `openai-gateway`: OpenAI-compatible local model/gateway (e.g. Ollama, vLLM, GenAI). Declare its explicit `/v1` URL in the matching `fallback_providers` entry.
 
 All attached services are automatically published into the runtime service registry at `/opt/data/services.json` for Hermes and associated tools.

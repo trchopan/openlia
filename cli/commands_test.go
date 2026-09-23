@@ -134,6 +134,15 @@ func TestAuthRejectsSourceOverride(t *testing.T) {
 	}
 }
 
+func TestWorkspaceUIPasswordRejectsNonInteractiveSetup(t *testing.T) {
+	if got := commandWorkspaceUI(Options{NonInteractive: true}, []string{"password"}); got != ExitUsage {
+		t.Fatalf("non-interactive workspace-ui password exit code = %d, want %d", got, ExitUsage)
+	}
+	if got := commandWorkspaceUI(Options{}, []string{"password", "secret"}); got != ExitUsage {
+		t.Fatalf("workspace-ui password argument exit code = %d, want %d", got, ExitUsage)
+	}
+}
+
 func TestUninstallRequiresExplicitTargetRootAndProject(t *testing.T) {
 	if got := commandUninstall(Options{}, nil); got != ExitUsage {
 		t.Fatalf("uninstall without deployment arguments exit code = %d, want %d", got, ExitUsage)

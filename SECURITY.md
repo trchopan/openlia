@@ -45,6 +45,8 @@ The following are in scope when the security boundary is controlled by
 OpenLia:
 
 - Secret ingestion, redaction, rotation, and credential handling.
+- Workspace UI password hashing, session authentication, throttling, and public
+  listener policy.
 - CLI validation, remote-operation boundaries, and generated Compose files.
 - Backup and restore behavior, including path and archive validation.
 - Container isolation, exposed listeners, and generated service configuration.
@@ -78,6 +80,10 @@ request credit and it is safe to do so.
 Security fixes should preserve the repository's existing safeguards, including
 protected out-of-repository secrets, private-by-default listeners, read-only
 container filesystems, restricted capabilities, and manual approval boundaries.
+The Workspace UI is unauthenticated only on loopback by default. Binding it to
+`0.0.0.0` requires an Argon2id verifier and protects workspace APIs with
+expiring in-memory sessions. Private HTTP remains available for trusted
+networks, but HTTPS is required for confidentiality on untrusted networks.
 See the [security boundaries in the README](README.md#security-boundaries) and
 the [external skill repository guide](docs/EXTERNAL_SKILLS.md) for the exact
 third-party skill boundary. External skill audit results cover tree structure,

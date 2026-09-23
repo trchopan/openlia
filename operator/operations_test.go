@@ -17,6 +17,22 @@ type recordedRunner struct {
 	calls []string
 }
 
+type workspaceUIRunner struct {
+	calls []string
+}
+
+func (r *workspaceUIRunner) Run(_ context.Context, name string, args ...string) (CommandResult, error) {
+	call := strings.Join(append([]string{name}, args...), " ")
+	r.calls = append(r.calls, call)
+	if strings.Contains(call, "ps --services --filter status=running") {
+		return CommandResult{Stdout: []byte("workspace-ui\n")}, nil
+	}
+	if strings.Contains(call, "port workspace-ui 8089") {
+		return CommandResult{Stdout: []byte("127.0.0.1:8089\n")}, nil
+	}
+	return CommandResult{}, nil
+}
+
 func (r *recordedRunner) Run(_ context.Context, name string, args ...string) (CommandResult, error) {
 	r.calls = append(r.calls, strings.Join(append([]string{name}, args...), " "))
 	if name == "docker" && len(args) >= 2 && args[0] == "info" {
@@ -58,6 +74,42 @@ func TestProtectedSkillRefreshRecreatesOnlyRunningHermes(t *testing.T) {
 	}
 	if len(runner.calls) != 1 || !strings.Contains(runner.calls[0], "up -d --no-deps --force-recreate hermes") {
 		t.Fatalf("unexpected protected skill refresh calls: %v", runner.calls)
+	}
+}
+
+func TestDeployWorkspaceUIComponentTargetsOnlyWorkspaceUI(t *testing.T) {
+	repo := t.TempDir()
+	runtime := filepath.Join(t.TempDir(), "runtime")
+	config := testConfig(repo, runtime)
+	config.WorkspaceUIHost = "127.0.0.1"
+	if err := os.MkdirAll(filepath.Dir(config.ComposeFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.ComposeFile, []byte("services: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SecretDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.SecretFile, []byte("# test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.MetaRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteState(config, stateNeverStarted); err != nil {
+		t.Fatal(err)
+	}
+	runner := &workspaceUIRunner{}
+	if _, err := Deploy(context.Background(), config, NewCompose(config, runner), DeployOptions{Action: "start", Component: "workspace-ui", HealthAttempts: 1}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(runner.calls, "\n")
+	if !strings.Contains(joined, "up -d --no-deps --force-recreate workspace-ui") {
+		t.Fatalf("workspace-ui target was not started directly: %s", joined)
+	}
+	if strings.Contains(joined, "hermes") || strings.Contains(joined, "locho") {
+		t.Fatalf("targeted workspace-ui deploy touched another service: %s", joined)
 	}
 }
 
@@ -189,10 +241,109 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, expected := range []string{"locho-laptop:", "openlia-tools:", "build:", "docker/locho.Dockerfile", "docker/tools.Dockerfile", "cap_drop: [ALL]", "no-new-privileges:true", "OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8931\"", "OPENLIA_TOOLS_URL: \"http://openlia-tools:8787\""} {
+	for _, expected := range []string{"locho-laptop:", "openlia-tools:", "build:", "docker/locho.Dockerfile", "docker/tools.Dockerfile", "command: [\"bun\", \"/opt/openlia/tools/server.js\"]", "cap_drop: [ALL]", "no-new-privileges:true", "OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8931\"", "OPENLIA_TOOLS_URL: \"http://openlia-tools:8787\""} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("generated Compose missing %q:\n%s", expected, text)
 		}
+	}
+}
+
+func TestGeneratedAttachmentsContainWorkspaceUIWhenEnabled(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		host      string
+		port      int
+		published string
+	}{
+		{name: "loopback", host: "127.0.0.1", port: 8089, published: "127.0.0.1:8089:8089"},
+		{name: "all interfaces", host: "0.0.0.0", port: 8090, published: "0.0.0.0:8090:8090"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := t.TempDir()
+			runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+			config := testConfig(repo, runtimeRoot)
+			config.WorkspaceUIHost = test.host
+			config.WorkspaceUIPort = test.port
+			config.WorkspaceUIAuthRequired = test.host == "0.0.0.0"
+			config.WorkspaceUIPasswordHashFile = filepath.Join(runtimeRoot, "secrets", "workspace-ui-password.hash")
+			if err := os.MkdirAll(filepath.Join(repo, "docker"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := GenerateAttachments(config); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(config.GeneratedCompose)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(data)
+			for _, expected := range []string{"workspace-ui:", "docker/workspace-ui.Dockerfile", test.published, fmt.Sprintf("OPENLIA_WORKSPACE_UI_PORT: \"%d\"", test.port), "target: /workspace", "user: \"10000:10000\"", "cap_drop: [ALL]"} {
+				if !strings.Contains(text, expected) {
+					t.Fatalf("generated Compose missing %q:\n%s", expected, text)
+				}
+			}
+			if test.host == "0.0.0.0" {
+				for _, expected := range []string{"OPENLIA_WORKSPACE_UI_AUTH_REQUIRED: \"true\"", "target: /run/openlia-secrets/workspace-ui-password.hash", "read_only: true"} {
+					if !strings.Contains(text, expected) {
+						t.Fatalf("generated public Workspace UI Compose missing %q:\n%s", expected, text)
+					}
+				}
+			} else if strings.Contains(text, "OPENLIA_WORKSPACE_UI_AUTH_REQUIRED") {
+				t.Fatal("loopback Workspace UI unexpectedly enabled authentication")
+			}
+		})
+	}
+}
+
+func TestGeneratedAttachmentsDisableHermesBrowserToolsetForPlaywrightRole(t *testing.T) {
+	repo := t.TempDir()
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	config := testConfig(repo, runtimeRoot)
+	config.ServiceRoles = map[string]string{"laptop.playwright": "playwright-browser"}
+	if err := os.MkdirAll(filepath.Join(repo, "docker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	attachment := filepath.Join(config.LochoRoot, "laptop", "attachments.toml")
+	if err := os.MkdirAll(filepath.Dir(attachment), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(attachment, []byte("host_id = \"laptop\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"playwright:tcp:capability\"\nlisten_port = 8931\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.DataRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(config.DataRoot, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("browser:\n  backend: \"off\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := GenerateAttachments(config); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "disabled_toolsets:\n    - browser") || !strings.Contains(string(data), "url: \"http://locho-laptop:8931/sse\"") || !strings.Contains(string(data), "transport: \"sse\"") {
+		t.Fatalf("browser toolset was not disabled:\n%s", data)
+	}
+	config.ServiceRoles["laptop.playwright"] = "unassigned"
+	if err := GenerateAttachments(config); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), managedBrowserPolicyStart) || strings.Contains(string(data), "disabled_toolsets:\n    - browser") {
+		t.Fatalf("managed browser policy was not removed:\n%s", data)
+	}
+}
+
+func TestBrowserPolicyRefusesUserAgentMapping(t *testing.T) {
+	data := []byte("agent:\n  disabled_toolsets: [terminal]\n")
+	if _, _, err := renderBrowserPolicy(data, true, "http://locho-laptop:8931"); err == nil {
+		t.Fatal("browser policy overwrote a user-owned agent mapping")
 	}
 }
 
