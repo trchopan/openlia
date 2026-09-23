@@ -81,22 +81,80 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 		}
 	}
 	wasRunning := false
+	uiWasRunning := false
+	toolsWasRunning := false
 	if compose != nil && compose.ServiceRunning(ctx, "hermes") {
 		if _, err := compose.Run(ctx, "stop", "hermes"); err != nil {
 			return BackupResult{}, fmt.Errorf("cannot stop Hermes for a consistent backup")
 		}
 		wasRunning = true
 	}
+	if compose != nil && config.WorkspaceUIHost != "" && compose.ServiceRunning(ctx, "workspace-ui") {
+		if _, err := compose.Run(ctx, "stop", "workspace-ui"); err != nil {
+			if wasRunning {
+				_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "hermes")
+			}
+			return BackupResult{}, fmt.Errorf("cannot stop workspace UI for a consistent backup")
+		}
+		uiWasRunning = true
+	}
+	if compose != nil && compose.ServiceRunning(ctx, "openlia-tools") {
+		if _, err := compose.Run(ctx, "stop", "openlia-tools"); err != nil {
+			if wasRunning {
+				_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "hermes")
+			}
+			if uiWasRunning {
+				_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "workspace-ui")
+			}
+			return BackupResult{}, fmt.Errorf("cannot stop openlia-tools for a consistent backup")
+		}
+		toolsWasRunning = true
+	}
 	defer func() {
-		if !wasRunning {
+		if !wasRunning && !uiWasRunning && !toolsWasRunning {
 			return
 		}
-		if res, restartErr := compose.Run(ctx, "up", "-d", "--no-deps", "hermes"); restartErr != nil && err == nil {
-			msg := strings.TrimSpace(string(res.Stderr))
-			if msg == "" {
-				msg = strings.TrimSpace(string(res.Stdout))
+		if wasRunning {
+			if res, restartErr := compose.Run(ctx, "up", "-d", "--no-deps", "hermes"); restartErr != nil {
+				msg := strings.TrimSpace(string(res.Stderr))
+				if msg == "" {
+					msg = strings.TrimSpace(string(res.Stdout))
+				}
+				failure := fmt.Errorf("Hermes could not be restarted (%s): %w", msg, restartErr)
+				if err == nil {
+					err = fmt.Errorf("backup completed but %w", failure)
+				} else {
+					err = fmt.Errorf("%v; %w", err, failure)
+				}
 			}
-			err = fmt.Errorf("backup completed but Hermes could not be restarted (%s): %w", msg, restartErr)
+		}
+		if uiWasRunning {
+			if res, restartErr := compose.Run(ctx, "up", "-d", "--no-deps", "workspace-ui"); restartErr != nil {
+				msg := strings.TrimSpace(string(res.Stderr))
+				if msg == "" {
+					msg = strings.TrimSpace(string(res.Stdout))
+				}
+				failure := fmt.Errorf("workspace UI could not be restarted (%s): %w", msg, restartErr)
+				if err == nil {
+					err = fmt.Errorf("backup completed but %w", failure)
+				} else {
+					err = fmt.Errorf("%v; %w", err, failure)
+				}
+			}
+		}
+		if toolsWasRunning {
+			if res, restartErr := compose.Run(ctx, "up", "-d", "--no-deps", "openlia-tools"); restartErr != nil {
+				msg := strings.TrimSpace(string(res.Stderr))
+				if msg == "" {
+					msg = strings.TrimSpace(string(res.Stdout))
+				}
+				failure := fmt.Errorf("openlia-tools could not be restarted (%s): %w", msg, restartErr)
+				if err == nil {
+					err = fmt.Errorf("backup completed but %w", failure)
+				} else {
+					err = fmt.Errorf("%v; %w", err, failure)
+				}
+			}
 		}
 	}()
 	stamp := now.UTC().Format("20060102T150405Z")
@@ -341,7 +399,21 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 	}
 	if compose != nil {
 		if _, statErr := os.Stat(config.ComposeFile); statErr == nil {
-			_, _ = compose.Run(ctx, "stop", "hermes")
+			if compose.ServiceRunning(ctx, "hermes") {
+				if _, stopErr := compose.Run(ctx, "stop", "hermes"); stopErr != nil {
+					return BackupResult{}, fmt.Errorf("cannot stop Hermes before restore")
+				}
+			}
+			if config.WorkspaceUIHost != "" && compose.ServiceRunning(ctx, "workspace-ui") {
+				if _, stopErr := compose.Run(ctx, "stop", "workspace-ui"); stopErr != nil {
+					return BackupResult{}, fmt.Errorf("cannot stop workspace UI before restore")
+				}
+			}
+			if compose.ServiceRunning(ctx, "openlia-tools") {
+				if _, stopErr := compose.Run(ctx, "stop", "openlia-tools"); stopErr != nil {
+					return BackupResult{}, fmt.Errorf("cannot stop openlia-tools before restore")
+				}
+			}
 		}
 	}
 	if err := WriteState(config, stateStopped); err != nil {

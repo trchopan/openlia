@@ -65,6 +65,8 @@ func Run(args []string, assets fs.FS) int {
 		return commandBackup(options, remaining[1:])
 	case "workspace":
 		return commandWorkspace(options, remaining[1:])
+	case "workspace-ui":
+		return commandWorkspaceUI(options, remaining[1:])
 	default:
 		return fail(options, ExitUsage, fmt.Sprintf("unknown command %q", remaining[0]), map[string]any{"hint": "run openlia --help"})
 	}
@@ -237,6 +239,11 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	deployment := newDeployment(config)
 	ctx, cancel := remoteContext()
 	defer cancel()
+	if config.WorkspaceUIHost == "0.0.0.0" {
+		if err := provisionWorkspaceUIPassword(ctx, deployment, config); err != nil {
+			return fail(options, ExitFailure, "workspace-ui password provisioning failed: "+err.Error(), nil)
+		}
+	}
 	if sourcePath != "" {
 		if err := deployment.uploadFile(ctx, sourcePath, deployment.rootPath("runtime", "secrets", "hermes.env"), 0o600); err != nil {
 			return fail(options, ExitFailure, "could not stage secret source: "+err.Error(), nil)
@@ -371,6 +378,11 @@ func commandLifecycle(options Options, action string, args []string) int {
 	ctx, cancel := remoteContext()
 	defer cancel()
 	deployment := newDeployment(config)
+	if config.WorkspaceUIHost == "0.0.0.0" {
+		if err := provisionWorkspaceUIPassword(ctx, deployment, config); err != nil {
+			return fail(options, ExitFailure, "workspace-ui password provisioning failed: "+err.Error(), nil)
+		}
+	}
 	if action == "deploy" {
 		for _, host := range config.Services {
 			if host.Source != "" && host.Name != "" {
@@ -492,6 +504,11 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 	ctx, cancel := remoteContext()
 	defer cancel()
 	deployment := newDeployment(config)
+	if config.WorkspaceUIHost == "0.0.0.0" {
+		if err := provisionWorkspaceUIPassword(ctx, deployment, config); err != nil {
+			return fail(options, ExitFailure, "workspace-ui password provisioning failed: "+err.Error(), nil)
+		}
+	}
 	if component == "openlia" {
 		if config.Mode != "local" && !targetOperatorAssetsAvailable() {
 			return fail(options, ExitPrereq, "remote OpenLia updates require Linux operator artifacts; run `make build` first", nil)
@@ -513,6 +530,15 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 		raw, err := deployment.operation(ctx, "deploy", nil, profileArgs...)
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
+		}
+		if config.WorkspaceUIHost != "" || len(config.Services) > 0 {
+			if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
+				return fail(options, ExitFailure, "optional runtime Compose generation failed: "+err.Error(), nil)
+			}
+			raw, err = deployment.deploy(ctx, "deploy", false, "all")
+			if err != nil {
+				return fail(options, ExitFailure, "optional runtime reconciliation failed: "+err.Error(), nil)
+			}
 		}
 		return renderRemote(options, raw, "openlia update openlia: profile assets synchronized")
 	}

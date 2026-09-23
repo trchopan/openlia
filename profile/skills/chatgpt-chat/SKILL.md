@@ -29,7 +29,7 @@ Use this skill to leverage the ChatGPT web interface (including ChatGPT Search, 
 > **Zero-Tolerance Temporary Chat Policy**:
 > - **NEVER** post queries into a standard, persistent chat session.
 > - The automated script explicitly verifies that Temporary Chat mode is active before typing or submitting any prompt.
-> - If Temporary Chat cannot be confirmed, the script **HALTS IMMEDIATELY**, resets to a blank page, and raises an error.
+> - If Temporary Chat cannot be confirmed, the script **HALTS IMMEDIATELY**, closes only the owned browser tab, and raises an error.
 
 ---
 
@@ -39,7 +39,7 @@ Use this skill to leverage the ChatGPT web interface (including ChatGPT Search, 
 To query ChatGPT, run the bundled script via terminal:
 
 ```bash
-python3 /opt/data/skills/browser-pilot/scripts/openlia_job.py submit chatgpt-chat \
+bun /opt/data/skills/browser-pilot/scripts/openlia_job.ts submit chatgpt-chat \
   --prompt "Explain the key differences between Go channels and Rust channels with code examples." \
   --topic "Go vs Rust Channels"
 ```
@@ -66,15 +66,15 @@ Before deploying skill updates to a live agent, developers must verify skill hea
 
 ### 1. Offline Self-Test (Fast / CI)
 ```bash
-python3 profile/skills/chatgpt-chat/scripts/chatgpt_conversation.py --self-test
+bun profile/skills/browser-pilot/scripts/openlia_job.ts --self-test
 ```
 Validates URL cleaning, tracking parameter stripping, title cleaning, site metadata inference, and YAML schema compliance with zero external dependencies.
 
 ### 2. Live Browser Verification (Local Playwright MCP)
 ```bash
-python3 profile/skills/chatgpt-chat/scripts/chatgpt_conversation.py --verify
+bun profile/skills/browser-pilot/scripts/openlia_job.ts --verify
 ```
-Executes a canary query against the running local Playwright MCP, saves isolated test output to `/tmp/openlia_verify/chatgpt/`, validates schema, and reports pass/fail without contaminating user workspace data.
+Checks the private browser-job service and reports pass/fail without submitting a prompt or contaminating user workspace data. Run a real canary job separately when validating provider UI selectors.
 
 ---
 

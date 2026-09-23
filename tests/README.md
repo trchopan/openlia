@@ -33,6 +33,19 @@ python3 tests/smoke.py --mode local \
   --project openlia_smoke
 ```
 
+The optional Workspace UI proof uses a separate disposable mode. It enables a
+`[workspace-ui]` section on an available loopback port, checks loopback health, edits a
+Markdown file, verifies revision conflicts, exercises restart and backup/restore,
+then disables the UI. Loopback mode does not require a password; an all-interface
+smoke configuration must provision `password_hash` and authenticate before
+accessing workspace APIs:
+
+```sh
+python3 tests/smoke.py --mode workspace-ui \
+  --root /tmp/openlia_workspace_ui_smoke \
+  --project openlia_workspace_ui_smoke
+```
+
 This invokes `openlia init --local`, checks health, stops and starts the stack,
 checks the bundled helper and the installed runtime skill inside Hermes, and
 invokes `openlia uninstall --local`. It uses an empty synthetic secret source
@@ -205,7 +218,8 @@ runtime marker.
 
 ## Other Verification
 
-The broader local checks remain:
+From a clean checkout, run `make build` first to generate the ignored package
+distributions embedded by the Go CLI. The broader local checks then remain:
 
 ```sh
 go test ./...

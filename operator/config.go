@@ -13,39 +13,44 @@ import (
 // Config is the typed view of the OPENLIA_* settings consumed by the
 // operator. Secret values are deliberately not part of Config.
 type Config struct {
-	RepositoryRoot    string
-	RuntimeRoot       string
-	InstallRoot       string
-	ProjectName       string
-	NetworkName       string
-	ComposeFile       string
-	ComposeProjectDir string
-	GeneratedCompose  string
-	DataRoot          string
-	SystemSkillsRoot  string
-	LochoRoot         string
-	SecretDir         string
-	SecretFile        string
-	BackupRoot        string
-	BackupRetention   int
-	MetaRoot          string
-	StateFile         string
-	LocalMode         bool
-	Provider          string
-	Model             string
-	FallbackProviders []FallbackProviderConfig
-	HermesImage       string
-	LochoImage        string
-	EnabledSkills     []string
-	SkillsConfigured  bool
-	SkillSources      []SkillSourceConfig
-	SkillsCacheRoot   string
-	SkillsEnvRoot     string
-	ExternalNetwork   string
-	APIEnabled        bool
-	APIHost           string
-	ServiceRoles      map[string]string
-	ConfiguredHosts   []string
+	RepositoryRoot              string
+	RuntimeRoot                 string
+	InstallRoot                 string
+	ProjectName                 string
+	NetworkName                 string
+	ComposeFile                 string
+	ComposeProjectDir           string
+	GeneratedCompose            string
+	DataRoot                    string
+	SystemSkillsRoot            string
+	LochoRoot                   string
+	SecretDir                   string
+	SecretFile                  string
+	BackupRoot                  string
+	BackupRetention             int
+	MetaRoot                    string
+	StateFile                   string
+	LocalMode                   bool
+	Provider                    string
+	Model                       string
+	FallbackProviders           []FallbackProviderConfig
+	HermesImage                 string
+	LochoImage                  string
+	EnabledSkills               []string
+	SkillsConfigured            bool
+	SkillSources                []SkillSourceConfig
+	SkillsCacheRoot             string
+	SkillsEnvRoot               string
+	ExternalNetwork             string
+	APIEnabled                  bool
+	APIHost                     string
+	WorkspaceUIHost             string
+	WorkspaceUIPort             int
+	WorkspaceUIPublicOrigin     string
+	WorkspaceUIAuthRequired     bool
+	WorkspaceUIPasswordHashFile string
+	ServiceRoles                map[string]string
+	ConfiguredHosts             []string
 }
 
 type FallbackProviderConfig struct {
@@ -137,33 +142,35 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 	}
 
 	config := Config{
-		RepositoryRoot:    repositoryRoot,
-		RuntimeRoot:       runtimeRoot,
-		InstallRoot:       installRoot,
-		ProjectName:       project,
-		NetworkName:       getOr(values, "OPENLIA_NETWORK_NAME", project+"-private"),
-		ComposeFile:       getOr(values, "OPENLIA_COMPOSE_FILE", filepath.Join(repositoryRoot, "docker", "compose.yaml")),
-		ComposeProjectDir: getOr(values, "OPENLIA_COMPOSE_PROJECT_DIR", filepath.Join(repositoryRoot, "docker")),
-		GeneratedCompose:  getOr(values, "OPENLIA_GENERATED_COMPOSE", filepath.Join(repositoryRoot, "docker", "compose.generated.yaml")),
-		DataRoot:          getOr(values, "OPENLIA_DATA_ROOT", filepath.Join(runtimeRoot, "hermes")),
-		SystemSkillsRoot:  getOr(values, "OPENLIA_SYSTEM_SKILLS_ROOT", filepath.Join(runtimeRoot, "system-skills")),
-		LochoRoot:         getOr(values, "OPENLIA_LOCHO_ROOT", filepath.Join(runtimeRoot, "locho")),
-		SecretDir:         getOr(values, "OPENLIA_SECRET_DIR", filepath.Join(runtimeRoot, "secrets")),
-		SecretFile:        getOr(values, "OPENLIA_SECRET_FILE", filepath.Join(runtimeRoot, "secrets", "hermes.env")),
-		BackupRoot:        getOr(values, "OPENLIA_BACKUP_ROOT", filepath.Join(runtimeRoot, "backups")),
-		BackupRetention:   5,
-		MetaRoot:          getOr(values, "OPENLIA_META_ROOT", filepath.Join(runtimeRoot, "meta")),
-		StateFile:         getOr(values, "OPENLIA_STATE_FILE", filepath.Join(runtimeRoot, "meta", "stack-state")),
-		Provider:          getOr(values, "OPENLIA_PROVIDER", "copilot"),
-		Model:             getOr(values, "OPENLIA_MODEL", "gpt-5.6-luna"),
-		FallbackProviders: fallbackProviders,
-		SkillSources:      skillSources,
-		SkillsCacheRoot:   getOr(values, "OPENLIA_SKILLS_CACHE_ROOT", filepath.Join(runtimeRoot, "skill-cache")),
-		SkillsEnvRoot:     getOr(values, "OPENLIA_SKILLS_ENV_ROOT", filepath.Join(runtimeRoot, "skill-envs")),
-		HermesImage:       getOr(values, "OPENLIA_HERMES_IMAGE", "openlia-hermes:v2026.9.14"),
-		LochoImage:        getOr(values, "OPENLIA_LOCHO_IMAGE", "openlia-locho:v1.2.0-beta.1"),
-		ExternalNetwork:   values["OPENLIA_EXTERNAL_NETWORK"],
-		APIHost:           getOr(values, "OPENLIA_API_HOST", "127.0.0.1"),
+		RepositoryRoot:          repositoryRoot,
+		RuntimeRoot:             runtimeRoot,
+		InstallRoot:             installRoot,
+		ProjectName:             project,
+		NetworkName:             getOr(values, "OPENLIA_NETWORK_NAME", project+"-private"),
+		ComposeFile:             getOr(values, "OPENLIA_COMPOSE_FILE", filepath.Join(repositoryRoot, "docker", "compose.yaml")),
+		ComposeProjectDir:       getOr(values, "OPENLIA_COMPOSE_PROJECT_DIR", filepath.Join(repositoryRoot, "docker")),
+		GeneratedCompose:        getOr(values, "OPENLIA_GENERATED_COMPOSE", filepath.Join(repositoryRoot, "docker", "compose.generated.yaml")),
+		DataRoot:                getOr(values, "OPENLIA_DATA_ROOT", filepath.Join(runtimeRoot, "hermes")),
+		SystemSkillsRoot:        getOr(values, "OPENLIA_SYSTEM_SKILLS_ROOT", filepath.Join(runtimeRoot, "system-skills")),
+		LochoRoot:               getOr(values, "OPENLIA_LOCHO_ROOT", filepath.Join(runtimeRoot, "locho")),
+		SecretDir:               getOr(values, "OPENLIA_SECRET_DIR", filepath.Join(runtimeRoot, "secrets")),
+		SecretFile:              getOr(values, "OPENLIA_SECRET_FILE", filepath.Join(runtimeRoot, "secrets", "hermes.env")),
+		BackupRoot:              getOr(values, "OPENLIA_BACKUP_ROOT", filepath.Join(runtimeRoot, "backups")),
+		BackupRetention:         5,
+		MetaRoot:                getOr(values, "OPENLIA_META_ROOT", filepath.Join(runtimeRoot, "meta")),
+		StateFile:               getOr(values, "OPENLIA_STATE_FILE", filepath.Join(runtimeRoot, "meta", "stack-state")),
+		Provider:                getOr(values, "OPENLIA_PROVIDER", "copilot"),
+		Model:                   getOr(values, "OPENLIA_MODEL", "gpt-5.6-luna"),
+		FallbackProviders:       fallbackProviders,
+		SkillSources:            skillSources,
+		SkillsCacheRoot:         getOr(values, "OPENLIA_SKILLS_CACHE_ROOT", filepath.Join(runtimeRoot, "skill-cache")),
+		SkillsEnvRoot:           getOr(values, "OPENLIA_SKILLS_ENV_ROOT", filepath.Join(runtimeRoot, "skill-envs")),
+		HermesImage:             getOr(values, "OPENLIA_HERMES_IMAGE", "openlia-hermes:v2026.9.14"),
+		LochoImage:              getOr(values, "OPENLIA_LOCHO_IMAGE", "openlia-locho:v1.2.0-beta.1"),
+		ExternalNetwork:         values["OPENLIA_EXTERNAL_NETWORK"],
+		APIHost:                 getOr(values, "OPENLIA_API_HOST", "127.0.0.1"),
+		WorkspaceUIPort:         8089,
+		WorkspaceUIPublicOrigin: values["OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN"],
 	}
 
 	if rawRetention := values["OPENLIA_BACKUP_RETENTION"]; rawRetention != "" {
@@ -181,6 +188,23 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		return Config{}, err
 	}
 	if config.APIEnabled, err = boolValue(values, "OPENLIA_API_ENABLED", false); err != nil {
+		return Config{}, err
+	}
+	config.WorkspaceUIHost = values["OPENLIA_WORKSPACE_UI_HOST"]
+	if rawPort := values["OPENLIA_WORKSPACE_UI_PORT"]; rawPort != "" {
+		config.WorkspaceUIPort, err = strconv.Atoi(rawPort)
+		if err != nil {
+			return Config{}, fmt.Errorf("OPENLIA_WORKSPACE_UI_PORT must be an integer")
+		}
+	}
+	if config.WorkspaceUIAuthRequired, err = boolValue(values, "OPENLIA_WORKSPACE_UI_AUTH_REQUIRED", false); err != nil {
+		return Config{}, err
+	}
+	config.WorkspaceUIPasswordHashFile = getOr(values, "OPENLIA_WORKSPACE_UI_PASSWORD_HASH_FILE", filepath.Join(runtimeRoot, "secrets", "workspace-ui-password.hash"))
+	if err := validateWorkspaceUIPublicOrigin(config.WorkspaceUIPublicOrigin); err != nil {
+		return Config{}, err
+	}
+	if err := validateWorkspaceUI(config.WorkspaceUIHost, config.WorkspaceUIPort, config.WorkspaceUIAuthRequired, config.WorkspaceUIPasswordHashFile); err != nil {
 		return Config{}, err
 	}
 	if raw := values["OPENLIA_ENABLED_SKILLS"]; raw != "" {
@@ -207,6 +231,38 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		}
 	}
 	return config, nil
+}
+
+func validateWorkspaceUI(host string, port int, authRequired bool, passwordHashFile string) error {
+	if host != "" && host != "127.0.0.1" && host != "0.0.0.0" {
+		return fmt.Errorf("workspace-ui.host must be 127.0.0.1 or 0.0.0.0")
+	}
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("workspace-ui.port must be between 1 and 65535")
+	}
+	if authRequired && host != "0.0.0.0" {
+		return fmt.Errorf("workspace-ui authentication is only required for host 0.0.0.0")
+	}
+	if host == "0.0.0.0" && !authRequired {
+		return fmt.Errorf("workspace-ui authentication is required when host is 0.0.0.0")
+	}
+	if authRequired {
+		if err := ValidateAbsolutePath(passwordHashFile, "workspace-ui-password-hash-file"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateWorkspaceUIPublicOrigin(value string) error {
+	if value == "" {
+		return nil
+	}
+	origin, err := url.Parse(value)
+	if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Host == "" || origin.User != nil || origin.Opaque != "" || origin.RawQuery != "" || origin.Fragment != "" || origin.Path != "" && origin.Path != "/" {
+		return fmt.Errorf("workspace-ui.public_origin must be an absolute http(s) origin")
+	}
+	return nil
 }
 
 func getOr(values map[string]string, key, fallback string) string {
@@ -247,6 +303,12 @@ func (c Config) ValidatePaths() error {
 	}
 	if c.APIHost != "127.0.0.1" {
 		return fmt.Errorf("API host must remain 127.0.0.1")
+	}
+	if err := validateWorkspaceUIPublicOrigin(c.WorkspaceUIPublicOrigin); err != nil {
+		return err
+	}
+	if err := validateWorkspaceUI(c.WorkspaceUIHost, c.WorkspaceUIPort, c.WorkspaceUIAuthRequired, c.WorkspaceUIPasswordHashFile); err != nil {
+		return err
 	}
 	if err := validateFallbackProviders(c.FallbackProviders); err != nil {
 		return err

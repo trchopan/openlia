@@ -1,3 +1,1 @@
 -r profile/skills/claim-review/requirements.txt
--r profile/skills/gemini-chat/requirements.txt
--r profile/skills/chatgpt-chat/requirements.txt

@@ -29,7 +29,7 @@ Use this skill to conduct deep research, code review, large-context analysis (up
 > **Zero-Tolerance Temporary Chat Policy**:
 > - **NEVER** post queries into a standard, persistent chat session.
 > - The automated script explicitly verifies that Temporary Chat mode is active before typing or submitting any prompt.
-> - If Temporary Chat cannot be confirmed, the script **HALTS IMMEDIATELY**, resets to a blank page, and raises an error.
+> - If Temporary Chat cannot be confirmed, the script **HALTS IMMEDIATELY**, closes only the owned browser tab, and raises an error.
 
 ---
 
@@ -39,7 +39,7 @@ Use this skill to conduct deep research, code review, large-context analysis (up
 To query Gemini, run the bundled script via terminal:
 
 ```bash
-python3 /opt/data/skills/browser-pilot/scripts/openlia_job.py submit gemini-chat \
+bun /opt/data/skills/browser-pilot/scripts/openlia_job.ts submit gemini-chat \
   --prompt "Research WebAssembly garbage collection status in 2026. Use Google Search grounding." \
   --topic "Wasm GC 2026 Status"
 ```
@@ -66,15 +66,15 @@ Before deploying skill updates to a live agent, developers must verify skill hea
 
 ### 1. Offline Self-Test (Fast / CI)
 ```bash
-python3 profile/skills/gemini-chat/scripts/gemini_conversation.py --self-test
+bun profile/skills/browser-pilot/scripts/openlia_job.ts --self-test
 ```
 Validates citation sanitization, redirect unwrapping, filename generation, and YAML schema compliance with zero external dependencies.
 
 ### 2. Live Browser Verification (Local Playwright MCP)
 ```bash
-python3 profile/skills/gemini-chat/scripts/gemini_conversation.py --verify
+bun profile/skills/browser-pilot/scripts/openlia_job.ts --verify
 ```
-Executes a canary query against the running local Playwright MCP, saves isolated test output to `/tmp/openlia_verify/gemini/`, validates schema, and reports pass/fail without contaminating user workspace data.
+Checks the private browser-job service and reports pass/fail without submitting a prompt or contaminating user workspace data. Run a real canary job separately when validating provider UI selectors.
 
 ---
 

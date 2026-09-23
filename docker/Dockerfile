@@ -59,14 +59,10 @@ RUN apt-get update \
     rm -rf /tmp/bun /tmp/uv "${bun_archive}" "${uv_archive}"
 
 COPY profile/skills/claim-review/requirements.txt /tmp/claim-req.txt
-COPY profile/skills/gemini-chat/requirements.txt /tmp/gemini-req.txt
-COPY profile/skills/chatgpt-chat/requirements.txt /tmp/chatgpt-req.txt
 RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache \
     --requirement /tmp/claim-req.txt \
-    --requirement /tmp/gemini-req.txt \
-    --requirement /tmp/chatgpt-req.txt \
 	&& uv pip install --python /opt/hermes/.venv/bin/python --no-cache pip-audit==2.9.0 \
-    && rm -f /tmp/*-req.txt
+    && rm -f /tmp/claim-req.txt
 
 COPY --chmod=0755 docker/secret-source.sh /usr/local/bin/openlia-secret-source
 COPY --chmod=0755 docker/git-askpass.sh /usr/local/bin/openlia-git-askpass
