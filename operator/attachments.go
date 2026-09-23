@@ -131,6 +131,8 @@ func generateAttachmentsWithCompose(ctx context.Context, config Config, compose 
 	}
 	generatedBackup := ""
 	wasPresent := false
+	previousConfig, configErr := os.ReadFile(filepath.Join(config.DataRoot, "config.yaml"))
+	configPresent := configErr == nil
 	if info, err := os.Stat(config.GeneratedCompose); err == nil && info.Mode().IsRegular() {
 		wasPresent = true
 		if _, err := CreateBackup(config, "attachments-generate", time.Now().UTC(), compose); err != nil {
@@ -147,6 +149,12 @@ func generateAttachmentsWithCompose(ctx context.Context, config Config, compose 
 		} else if !wasPresent {
 			_ = os.Remove(config.GeneratedCompose)
 		}
+		configPath := filepath.Join(config.DataRoot, "config.yaml")
+		if configPresent {
+			_ = AtomicWriteFile(configPath, previousConfig, 0o600)
+		} else {
+			_ = os.Remove(configPath)
+		}
 	}
 	if err := generateAttachmentsFile(config); err != nil {
 		restore()
@@ -158,20 +166,44 @@ func generateAttachmentsWithCompose(ctx context.Context, config Config, compose 
 		_ = RecordChange(config, "attachments-generate", "failed", generatedBackup, "generated Compose validation failed", time.Now().UTC())
 		return fmt.Errorf("generated Compose validation failed")
 	}
+	currentConfig, currentConfigErr := os.ReadFile(filepath.Join(config.DataRoot, "config.yaml"))
+	policyChanged := configPresent && currentConfigErr == nil && string(previousConfig) != string(currentConfig)
+	if policyChanged {
+		state, stateErr := ReadState(config)
+		if stateErr != nil {
+			restore()
+			return stateErr
+		}
+		if state == stateRunning {
+			if _, restartErr := compose.Run(ctx, "up", "-d", "--no-deps", "--force-recreate", "hermes"); restartErr != nil {
+				restore()
+				if _, recoveryErr := compose.Run(ctx, "up", "-d", "--no-deps", "--force-recreate", "hermes"); recoveryErr != nil {
+					return fmt.Errorf("Hermes browser policy reconciliation failed: %w; rollback restart failed: %v", restartErr, recoveryErr)
+				}
+				return fmt.Errorf("Hermes browser policy reconciliation failed: %w", restartErr)
+			}
+		}
+	}
 	return RecordChange(config, "attachments-generate", "ok", "", "Compose sidecars regenerated", time.Now().UTC())
 }
 
 func generateAttachmentsFile(config Config) error {
+	if err := validateWorkspaceUI(config.WorkspaceUIHost, config.WorkspaceUIPort, config.WorkspaceUIAuthRequired, config.WorkspaceUIPasswordHashFile); err != nil {
+		return err
+	}
+	workspaceUIHost, workspaceUIPort := config.WorkspaceUIHost, config.WorkspaceUIPort
 	hosts, err := ListAttachments(config)
 	if err != nil {
 		return err
 	}
 	var allServices []LochoService
 	browserURL := ""
+	hasPlaywrightBrowserRole := false
 	for _, host := range hosts.Hosts {
 		for _, svc := range host.Services {
 			allServices = append(allServices, svc)
 			if svc.Role == "playwright-browser" {
+				hasPlaywrightBrowserRole = true
 				if browserURL != "" && browserURL != svc.Endpoint {
 					return fmt.Errorf("multiple Playwright attachment endpoints are configured")
 				}
@@ -200,7 +232,8 @@ func generateAttachmentsFile(config Config) error {
 
 	var builder strings.Builder
 	hasHermesEnv := config.APIEnabled || config.ExternalNetwork != "" || browserURL != "" || len(allServices) > 0
-	if len(hosts.Hosts) == 0 && !hasHermesEnv {
+	hasGeneratedServices := hasHermesEnv || config.WorkspaceUIHost != "" || len(hosts.Hosts) > 0
+	if !hasGeneratedServices {
 		builder.WriteString("services: {}\n")
 	} else {
 		builder.WriteString("services:\n")
@@ -228,15 +261,38 @@ func generateAttachmentsFile(config Config) error {
 			}
 		}
 	}
+	if config.WorkspaceUIHost != "" {
+		workspace, _ := json.Marshal(filepath.Join(config.DataRoot, "workspace"))
+		passwordHashFile, _ := json.Marshal(config.WorkspaceUIPasswordHashFile)
+		builder.WriteString("  workspace-ui:\n    image: \"${OPENLIA_WORKSPACE_UI_IMAGE:-openlia-workspace-ui:v0.1.0}\"\n")
+		builder.WriteString("    build:\n      context: ..\n      dockerfile: docker/workspace-ui.Dockerfile\n")
+		builder.WriteString(fmt.Sprintf("    command: [\"bun\", \"/opt/openlia/workspace-ui/server.js\"]\n    restart: unless-stopped\n    user: \"10000:10000\"\n    read_only: true\n    tmpfs:\n      - /tmp:rw,noexec,nosuid,size=32m\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    environment:\n      OPENLIA_WORKSPACE_ROOT: /workspace\n      OPENLIA_WORKSPACE_UI_BIND: 0.0.0.0\n      OPENLIA_WORKSPACE_UI_PORT: \"%d\"\n", workspaceUIPort))
+		quotedPublicOrigin, _ := json.Marshal(config.WorkspaceUIPublicOrigin)
+		builder.WriteString("      OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN: ")
+		builder.Write(quotedPublicOrigin)
+		builder.WriteString("\n")
+		if config.WorkspaceUIAuthRequired {
+			builder.WriteString("      OPENLIA_WORKSPACE_UI_AUTH_REQUIRED: \"true\"\n      OPENLIA_WORKSPACE_UI_PASSWORD_HASH_FILE: /run/openlia-secrets/workspace-ui-password.hash\n")
+		}
+		builder.WriteString("    volumes:\n      - type: bind\n        source: ")
+		builder.Write(workspace)
+		builder.WriteString("\n        target: /workspace")
+		if config.WorkspaceUIAuthRequired {
+			builder.WriteString("\n      - type: bind\n        source: ")
+			builder.Write(passwordHashFile)
+			builder.WriteString("\n        target: /run/openlia-secrets/workspace-ui-password.hash\n        read_only: true")
+		}
+		builder.WriteString(fmt.Sprintf("\n    ports:\n      - %q\n    networks:\n      - openlia-private\n    healthcheck:\n      test: [\"CMD\", \"bun\", \"-e\", \"fetch('http://127.0.0.1:%d/health').then(r => { if (!r.ok) process.exit(1) })\"]\n      interval: 10s\n      timeout: 3s\n      retries: 5\n    deploy:\n      resources:\n        limits:\n          cpus: \"0.5\"\n          memory: 256M\n    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n", fmt.Sprintf("%s:%d:%d", workspaceUIHost, workspaceUIPort, workspaceUIPort), workspaceUIPort))
+	}
 	if browserURL != "" {
 		dataRoot, _ := json.Marshal(config.DataRoot)
 		fmt.Fprintf(&builder, "  openlia-tools:\n    image: \"${OPENLIA_TOOLS_IMAGE:-openlia-tools:v0.1.0}\"\n")
 		builder.WriteString("    build:\n      context: ..\n      dockerfile: docker/tools.Dockerfile\n")
-		builder.WriteString("    command: [\"python3\", \"/opt/openlia/tools/openlia_tools.py\"]\n    restart: unless-stopped\n    read_only: true\n    tmpfs:\n      - /tmp\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n")
+		builder.WriteString("    command: [\"bun\", \"/opt/openlia/tools/server.js\"]\n    restart: unless-stopped\n    read_only: true\n    tmpfs:\n      - /tmp\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n")
 		builder.WriteString("    environment:\n      HERMES_HOME: /opt/data\n      OPENLIA_BROWSER_MCP_URL: ")
 		quotedBrowserURL, _ := json.Marshal(browserURL)
 		builder.Write(quotedBrowserURL)
-		builder.WriteString("\n      OPENLIA_TOOLS_DATA_ROOT: /opt/data\n      PYTHONUNBUFFERED: \"1\"\n    volumes:\n      - type: bind\n        source: ")
+		builder.WriteString("\n      OPENLIA_TOOLS_DATA_ROOT: /opt/data\n    volumes:\n      - type: bind\n        source: ")
 		builder.Write(dataRoot)
 		builder.WriteString("\n        target: /opt/data\n    networks:\n      - openlia-private\n")
 		builder.WriteString("    deploy:\n      resources:\n        limits:\n          cpus: \"1.0\"\n          memory: 1G\n")
@@ -257,6 +313,9 @@ func generateAttachmentsFile(config Config) error {
 		fmt.Fprintf(&builder, "networks:\n  openlia-external:\n    name: %q\n    external: true\n", config.ExternalNetwork)
 	}
 	if err := AtomicWriteFile(config.GeneratedCompose, []byte(builder.String()), 0o600); err != nil {
+		return err
+	}
+	if err := ReconcileBrowserPolicy(config, hasPlaywrightBrowserRole, browserURL); err != nil {
 		return err
 	}
 	return nil

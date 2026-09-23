@@ -9,15 +9,19 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import stat
 import subprocess
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+workspace_ui_port = 8089
 SECRET_PATTERNS = (
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+"),
     re.compile(r"\b(?:sk|ghp|gho|ghu|github_pat)_[A-Za-z0-9_-]+"),
@@ -194,6 +198,32 @@ def local_skill_check(root: str, project: str, skill: str) -> list[str]:
     return command
 
 
+def workspace_ui_request(method: str, path: str, body: dict[str, Any] | None = None) -> tuple[int, dict[str, Any] | str]:
+    data = None if body is None else json.dumps(body).encode()
+    request = urllib.request.Request(f"http://127.0.0.1:{workspace_ui_port}" + path, data=data, headers={"Content-Type": "application/json"} if data is not None else {}, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            raw = response.read()
+            if "application/json" in response.headers.get_content_type():
+                return response.status, json.loads(raw)
+            return response.status, raw.decode(errors="replace")
+    except urllib.error.HTTPError as error:
+        raw = error.read()
+        try:
+            return error.code, json.loads(raw)
+        except json.JSONDecodeError:
+            return error.code, raw.decode(errors="replace")
+
+
+def workspace_ui_case(case_id: str, method: str, path: str, body: dict[str, Any] | None = None, expected_status: int = 200) -> dict[str, Any]:
+    try:
+        status, value = workspace_ui_request(method, path, body)
+        passed = status == expected_status
+        return live_result(case_id, "PASS" if passed else "FAIL", None if passed else f"expected HTTP {expected_status}, got {status}", [json.dumps(value, ensure_ascii=True)[:2000]])
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return live_result(case_id, "FAIL", redact(str(exc)))
+
+
 def run_live(args: argparse.Namespace) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     cleanup_eligible = False
@@ -336,6 +366,7 @@ def run_live(args: argparse.Namespace) -> list[dict[str, Any]]:
 
 
 def run_local_smoke(args: argparse.Namespace) -> list[dict[str, Any]]:
+    global workspace_ui_port
     results: list[dict[str, Any]] = []
     temporary_root: str | None = None
     root = args.root
@@ -348,7 +379,13 @@ def run_local_smoke(args: argparse.Namespace) -> list[dict[str, Any]]:
     cleanup_eligible = False
     config_directory = tempfile.TemporaryDirectory(prefix="openlia-local-config-")
     config = Path(config_directory.name) / "config.toml"
-    config.write_text("[openlia]\nschema = 1\n[secrets]\n", encoding="utf-8")
+    workspace_ui = args.mode == "workspace-ui" or args.workspace_ui
+    if workspace_ui:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            workspace_ui_port = int(probe.getsockname()[1])
+    workspace_ui_config = f"[workspace-ui]\nhost = \"127.0.0.1\"\nport = {workspace_ui_port}\n" if workspace_ui else ""
+    config.write_text(f"[openlia]\nschema = 1\n\n{workspace_ui_config}[secrets]\n", encoding="utf-8")
     local_env = {**os.environ, "OPENLIA_CONFIG": str(config)}
     try:
         root_check = run_case("LOCAL-ROOT", ["test", "!", "-e", root], timeout=30)
@@ -367,21 +404,43 @@ def run_local_smoke(args: argparse.Namespace) -> list[dict[str, Any]]:
         )
         results.append(init)
         if init["status"] == "PASS":
-            for case_id, command, timeout in (
-                ("LOCAL-DOCTOR", ["go", "run", ".", "doctor", "--json"], 300),
-                ("LOCAL-STOP", ["go", "run", ".", "stop", "--json"], 120),
-                ("LOCAL-START", ["go", "run", ".", "start", "--json"], 300),
-                ("LOCAL-SKILL-BUNDLED", ["go", "run", ".", "skills", "test", "personal-finance"], 120),
-            ):
-                results.append(run_case(case_id, command, timeout=timeout, env=local_env))
-            results.append(
-                run_case(
-                    "LOCAL-SKILL-RUNTIME",
-                    local_skill_check(root, project, "personal-finance"),
-                    timeout=120,
-                    env=local_env,
-                )
-            )
+            results.append(run_case("LOCAL-DOCTOR", ["go", "run", ".", "doctor", "--json"], timeout=300, env=local_env))
+            if workspace_ui:
+                proof_path = Path(root) / "runtime" / "hermes" / "workspace" / "inbox" / "workspace-ui-proof.md"
+                proof_path.parent.mkdir(parents=True, exist_ok=True)
+                proof_path.write_text("# Workspace UI proof\nInitial content.\n", encoding="utf-8")
+                results.append(workspace_ui_case("LOCAL-UI-HEALTH", "GET", "/health"))
+                status, tree = workspace_ui_request("GET", "/api/workspace/tree")
+                found = status == 200 and isinstance(tree, dict) and any(item.get("path") == "inbox/workspace-ui-proof.md" for item in tree.get("entries", []))
+                results.append(live_result("LOCAL-UI-TREE", "PASS" if found else "FAIL", None if found else "workspace proof file was not listed"))
+                status, document = workspace_ui_request("GET", "/api/workspace/file?path=inbox%2Fworkspace-ui-proof.md")
+                if status != 200 or not isinstance(document, dict):
+                    results.append(live_result("LOCAL-UI-READ", "FAIL", "workspace proof file could not be read"))
+                else:
+                    old_revision = str(document["revision"])
+                    results.append(workspace_ui_case("LOCAL-UI-WRITE", "PUT", "/api/workspace/file", {"path": "inbox/workspace-ui-proof.md", "content": "# Workspace UI proof\nEdited through the UI.\n", "expected_revision": old_revision}))
+                    proof_path.write_text("# Workspace UI proof\nEdited outside the UI.\n", encoding="utf-8")
+                    results.append(workspace_ui_case("LOCAL-UI-CONFLICT", "PUT", "/api/workspace/file", {"path": "inbox/workspace-ui-proof.md", "content": "stale editor draft\n", "expected_revision": old_revision}, expected_status=409))
+                results.append(run_case("LOCAL-UI-STOP", ["go", "run", ".", "stop", "--json"], timeout=120, env=local_env))
+                results.append(run_case("LOCAL-UI-START", ["go", "run", ".", "start", "--json"], timeout=300, env=local_env))
+                results.append(workspace_ui_case("LOCAL-UI-PERSIST-RESTART", "GET", "/api/workspace/file?path=inbox%2Fworkspace-ui-proof.md"))
+                results.append(run_case("LOCAL-UI-BACKUP", ["go", "run", ".", "backup", "create", "--json"], timeout=300, env=local_env))
+                proof_path.write_text("post-backup mutation\n", encoding="utf-8")
+                results.append(run_case("LOCAL-UI-RESTORE", ["go", "run", ".", "--non-interactive", "backup", "restore", "--json"], timeout=300, env=local_env))
+                results.append(run_case("LOCAL-UI-RESTORE-START", ["go", "run", ".", "start", "--json"], timeout=300, env=local_env))
+                status, restored = workspace_ui_request("GET", "/api/workspace/file?path=inbox%2Fworkspace-ui-proof.md")
+                restored_ok = status == 200 and isinstance(restored, dict) and "Edited outside the UI." in str(restored.get("content"))
+                results.append(live_result("LOCAL-UI-RESTORED-CONTENT", "PASS" if restored_ok else "FAIL", None if restored_ok else "backup restore did not restore the archived workspace content"))
+                config.write_text(config.read_text(encoding="utf-8").replace(f'[workspace-ui]\nhost = "127.0.0.1"\nport = {workspace_ui_port}\n', ""), encoding="utf-8")
+                results.append(run_case("LOCAL-UI-DISABLE", ["go", "run", ".", "deploy", "--json"], timeout=300, env=local_env))
+            else:
+                for case_id, command, timeout in (
+                    ("LOCAL-STOP", ["go", "run", ".", "stop", "--json"], 120),
+                    ("LOCAL-START", ["go", "run", ".", "start", "--json"], 300),
+                    ("LOCAL-SKILL-BUNDLED", ["go", "run", ".", "skills", "test", "personal-finance"], 120),
+                ):
+                    results.append(run_case(case_id, command, timeout=timeout, env=local_env))
+                results.append(run_case("LOCAL-SKILL-RUNTIME", local_skill_check(root, project, "personal-finance"), timeout=120, env=local_env))
     finally:
         if args.cleanup and cleanup_eligible:
             results.append(
@@ -442,7 +501,7 @@ def run(mode: str, args: argparse.Namespace) -> list[dict[str, Any]]:
             results.extend(run_live(args))
         except (OSError, ValueError) as exc:
             results.append(live_result("LIVE-PREFLIGHT", "FAIL", redact(str(exc))))
-    if mode == "local":
+    if mode in {"local", "workspace-ui"}:
         try:
             results.extend(run_local_smoke(args))
         except (OSError, ValueError) as exc:
@@ -462,7 +521,7 @@ def run(mode: str, args: argparse.Namespace) -> list[dict[str, Any]]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("cli", "static", "api", "locho", "recovery", "human", "local", "live"), default="cli")
+    parser.add_argument("--mode", choices=("cli", "static", "api", "locho", "recovery", "human", "local", "workspace-ui", "live"), default="cli")
     parser.add_argument("--local", action="store_true", help="run live mode against the local machine")
     parser.add_argument("--target", help="SSH destination for live mode")
     parser.add_argument("--project", help="Compose project name for live mode")
@@ -471,6 +530,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--attachments-file", type=Path, help="Mode-0600 Locho attachment source for live mode")
     parser.add_argument("--locho-host", help="Locho host name matching the attachment source")
     parser.add_argument("--cleanup", action="store_true", help="Stop and remove the live installation root after the run")
+    parser.add_argument("--workspace-ui", action="store_true", help="enable and exercise the optional workspace UI in local mode")
     parser.add_argument("--report", type=Path, help="Write the redacted report outside the checkout")
     args = parser.parse_args(argv)
     if args.mode == "live":
@@ -488,12 +548,12 @@ def main(argv: list[str] | None = None) -> int:
         missing = [name for name, value in required_live_arguments.items() if value is None]
         if missing:
             parser.error("live mode requires " + ", ".join(missing))
-    elif args.mode == "local":
+    elif args.mode in {"local", "workspace-ui"}:
         if args.local or args.target or args.env_file or args.attachments_file or args.locho_host:
             parser.error("local mode does not accept live target or credential arguments")
         if args.cleanup is False:
             args.cleanup = True
-    elif args.cleanup or args.local or any(
+    elif args.cleanup or args.local or args.workspace_ui or any(
         value is not None for value in (args.target, args.project, args.root, args.env_file, args.attachments_file, args.locho_host)
     ):
         parser.error("live deployment arguments and --cleanup require --mode live")

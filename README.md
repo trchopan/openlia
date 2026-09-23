@@ -58,9 +58,10 @@ to Hermes over an internal Docker network, not the public VM interface.
 OpenLia itself is the operator control plane, not a long-running Compose
 service. The `openlia` CLI runs on the operator machine and either invokes local
 operations directly or uses SSH for a remote target. The default Compose stack
-contains only the Hermes and Locho runtime services. A future `openlia-tools`
-Compose profile may provide a pinned, one-shot diagnostic image, but it must not
-be started by normal stack startup or manage updates independently.
+contains only the Hermes and Locho runtime services. When a browser attachment
+is configured, the private `openlia-tools` Bun service is generated as a
+single-worker browser-job queue. The optional Workspace UI is disabled unless a
+`[workspace-ui]` section is present in `config.toml`.
 
 The target repository layout is:
 
@@ -390,9 +391,33 @@ access to the configured image registries and release downloads. The pinned
 images and bundled binaries support `amd64` and `arm64`. Local Docker roots must
 be on a filesystem shared with Docker Desktop on macOS.
 
+## Source Builds and Releases
+
+The supported installation route is a published OpenLia release: use its
+release binaries and container images. The JavaScript, server, and Workspace UI
+files under `packages/*/dist/` are generated release inputs and are intentionally
+not committed to the source repository.
+
+To build a release from a checkout, install the pinned Bun toolchain and run:
+
+```sh
+make build
+```
+
+This generates the ignored package distributions, embeds them in the host CLI,
+and builds the Linux operator binaries. The release CLI then carries the
+generated runtime and UI files to the deployment target. Docker image builds
+must run after this generation step because the runtime Dockerfiles consume the
+generated files rather than compiling package source.
+
+Clean-checkout builds and CI must use this release build path. A direct
+`go build .`, `go test ./...`, or `go install` is not a supported installation
+path until the package distributions have been generated.
+
 ## Quick Start
 
-Build the host CLI and the Linux target operators with Go 1.26 or newer:
+Build the Bun artifacts, host CLI, and Linux target operators with Bun and Go
+1.26 or newer:
 
 ```sh
 make build
@@ -405,6 +430,10 @@ config before initializing the deployment:
 [openlia]
 provider = "copilot"
 model = "copilot-model"
+
+[workspace-ui]
+host = "127.0.0.1"
+port = 8089
 
 [[fallback_providers]]
 provider = "custom"
@@ -420,15 +449,47 @@ model = "official-openai-model"
 The `fallback_providers` table order is the failover order. Use the actual
 Locho Compose hostname, service port, and model IDs for your deployment.
 
+Add a `[workspace-ui]` section with `host = "127.0.0.1"` to keep the Workspace
+Editor private, or use `host = "0.0.0.0"` to publish it on all interfaces. A
+public binding requires an Argon2id `password_hash`; create or rotate it with:
+
+```sh
+./openlia workspace-ui password
+```
+
+The command prompts without echo and never accepts a password as an argument.
+The hash is stored in the mode-`0600` operator config and is mounted into only
+the Workspace UI container. Omit the section to disable the UI. For a remote
+target, use an SSH tunnel with the loopback setting:
+
+```sh
+ssh -L 8089:127.0.0.1:8089 user@host
+```
+
+The first editor milestone supports workspace browsing, Markdown/text editing,
+preview, local diffs, downloads, Git status, and revision-checked atomic saves.
+It does not expose runtime secrets, the Docker socket, or Hermes sessions.
+
+All-interface mode uses password sessions with `HttpOnly` and `SameSite=Strict`
+cookies. Private HTTP is supported for a trusted LAN or VPN, but it does not
+encrypt passwords, sessions, or workspace contents; use HTTPS through a reverse
+proxy when the network is not fully trusted. `/health` remains public for
+container health checks, while workspace APIs require authentication.
+
+When a service is mapped to the `playwright-browser` role, OpenLia registers its
+SSE MCP endpoint directly with Hermes and disables Hermes' native `agent-browser`
+toolset. This prevents two browser runtimes from competing for the same session.
+
 Then initialize:
 
 ```sh
 ./openlia init --local --root "$HOME/.openlia"
 ```
 
-`make build` writes the uncommitted Linux amd64 and arm64 operator artifacts
-under `dist/`; the host CLI includes them in release archives when they are
-present. `go build -o openlia .` remains the host-only build for development.
+`make build` writes the ignored Linux amd64 and arm64 operator artifacts under
+`dist/`; the host CLI includes them in release archives when they are present.
+It also generates the ignored package distributions required by the embedded
+release payload.
 
 On macOS, Docker Desktop provides the Linux container engine used by the local
 deployment. On Linux, a local Docker Engine with Compose v2 is supported.
@@ -636,6 +697,9 @@ between bundled and external development.
   require exact interactive confirmation where documented; audits do not prove
   that third-party instructions or code are safe.
 - The default Compose stack has no public ports and no Docker socket mount.
+- Workspace UI all-interface bindings require an Argon2id password and protect
+  workspace APIs with expiring in-memory sessions; direct HTTP should only be
+  used on a trusted private network.
 - Locho listeners use the private Compose network and are never published.
 - Workspace initialization is copy-once; later deployments preserve user files.
 - Backups exclude secret files, OAuth state, and Locho capabilities.
@@ -648,11 +712,15 @@ between bundled and external development.
 
 ## Local Verification
 
+Run `make build` first from a clean checkout so the generated package
+distributions exist for the Go embedding step. Then run the checks below:
+
 ```sh
 go test ./...
 go vet ./...
 python3 tests/smoke.py --mode cli
 python3 tests/smoke.py --mode local --root /tmp/openlia_smoke
+python3 tests/smoke.py --mode workspace-ui --root /tmp/openlia_workspace_ui_smoke
 make smoke-local-live \
   OPENLIA_SMOKE_ENV_FILE="$HOME/.config/openlia/dev/openlia_dev.env" \
   OPENLIA_SMOKE_ATTACHMENTS_FILE="$HOME/.config/openlia/dev/locho-attachments.toml" \

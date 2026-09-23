@@ -32,6 +32,10 @@ docker/compose.generated.yaml
 # Go build and test artifacts
 /openlia
 /dist/
+
+# Generated Bun runtime and frontend artifacts
+/packages/*/dist/
+node_modules/
 *.test
 coverage.out
 __pycache__/

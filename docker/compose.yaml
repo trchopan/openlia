@@ -20,6 +20,7 @@ services:
     tmpfs:
       - /run:rw,exec,nosuid,size=64m
       - /tmp:rw,noexec,nosuid,size=512m
+      - /opt/openlia/npm-cache:rw,exec,nosuid,size=256m,mode=1777
     security_opt:
       - no-new-privileges:true
     volumes:
@@ -42,6 +43,7 @@ services:
     # enabled; this read-only runtime directory is its only credential input.
     environment:
       HERMES_HOME: /opt/data
+      NPM_CONFIG_CACHE: /opt/openlia/npm-cache
       OPENLIA_PROVIDER: "${OPENLIA_PROVIDER:-copilot}"
       OPENLIA_MODEL: "${OPENLIA_MODEL:-gpt-5.6-luna}"
       HERMES_TIMEZONE: "${HERMES_TIMEZONE:-Asia/Ho_Chi_Minh}"

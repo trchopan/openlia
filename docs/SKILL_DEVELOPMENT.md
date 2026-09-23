@@ -44,9 +44,9 @@ Run the live canaries only when an authenticated disposable browser session is
 available:
 
 ```sh
-python3 profile/skills/gemini-chat/scripts/gemini_conversation.py --verify
-python3 profile/skills/chatgpt-chat/scripts/chatgpt_conversation.py --verify
-python3 profile/skills/browser-pilot/scripts/check_browser_pilot.py --verify
+bun profile/skills/browser-pilot/scripts/openlia_job.ts --self-test
+bun run typecheck
+bun run test
 make skills-verify
 ```
 
@@ -59,9 +59,9 @@ verified.
 For custom local browser queries, write output to a temporary path:
 
 ```sh
-python3 profile/skills/chatgpt-chat/scripts/chatgpt_conversation.py \
+bun profile/skills/browser-pilot/scripts/openlia_job.ts submit chatgpt-chat \
   --prompt "Compare Python dataclasses and Pydantic." \
-  --topic "Python data models" --output /tmp/test_chatgpt.yaml
+  --topic "Python data models"
 ```
 
 Browser-backed helpers can also be checked with `make skills-verify` when the
@@ -71,11 +71,12 @@ not use personal workspace data as test fixtures.
 
 ### Bundled Dependencies
 
-`make venv` installs the repository's development requirements for local tests.
-The derived Hermes image installs only the bundled requirement files explicitly
-listed in `docker/Dockerfile`. Adding an arbitrary `requirements.txt` below
-`profile/skills/` does not cause Docker or deployment to discover and install
-it automatically.
+`make venv` installs the remaining Python development requirements for local
+tests. The browser-job service, MCP clients, serializers, and job client are
+Bun/TypeScript artifacts. The derived Hermes image installs only the claim
+validation requirement explicitly listed in `docker/Dockerfile`; adding an
+arbitrary `requirements.txt` below `profile/skills/` does not cause Docker or
+deployment to discover and install it automatically.
 
 When a bundled skill needs a runtime dependency, update its pinned requirement
 file, the explicit Docker build inputs, development requirements when needed,

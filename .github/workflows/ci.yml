@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install locked JavaScript dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Check JavaScript source
+        run: bun run check
+
+      - name: Test JavaScript packages
+        run: bun run test
+
+      - name: Build and verify generated release inputs
+        run: bun run verify-dist
+
+      - name: Reject tracked generated distributions
+        run: test -z "$(git ls-files -- 'packages/*/dist/**')"
+
+      - name: Test and vet Go source
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Build release binaries
+        run: make build
+
+      - name: Build Workspace UI image
+        run: docker build --file docker/workspace-ui.Dockerfile --tag openlia-workspace-ui:ci .
+
+      - name: Build tools image
+        run: docker build --file docker/tools.Dockerfile --tag openlia-tools:ci .

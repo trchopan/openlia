@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -14,12 +15,13 @@ import (
 )
 
 const (
-	configSchema      = 1
-	defaultVersion    = "0.1.0"
-	defaultRemoteRoot = "/srv/openlia"
-	defaultLocalRoot  = ".openlia"
-	defaultProject    = "openlia"
-	defaultTimezone   = "Asia/Ho_Chi_Minh"
+	configSchema           = 1
+	defaultVersion         = "0.1.0"
+	defaultRemoteRoot      = "/srv/openlia"
+	defaultLocalRoot       = ".openlia"
+	defaultProject         = "openlia"
+	defaultTimezone        = "Asia/Ho_Chi_Minh"
+	defaultWorkspaceUIPort = 8089
 )
 
 var defaultSkills = []string{
@@ -55,30 +57,34 @@ func ValidateServiceRole(role string) error {
 }
 
 type Config struct {
-	Schema            int
-	Version           string
-	Mode              string
-	Target            string
-	InstallRoot       string
-	Project           string
-	Model             string
-	FallbackProviders []FallbackProviderConfig
-	Timezone          string
-	Provider          string
-	ExternalNetwork   string
-	HermesImage       string
-	HermesTag         string
-	HermesDigest      string
-	LochoImage        string
-	LochoVersion      string
-	APIEnabled        bool
-	APIHost           string
-	SecretSource      string
-	ReleaseSource     string
-	EnabledSkills     []string
-	WorkspaceGit      WorkspaceGitConfig
-	SkillSources      []SkillSourceConfig
-	Services          []ServiceHostConfig
+	Schema                  int
+	Version                 string
+	Mode                    string
+	Target                  string
+	InstallRoot             string
+	Project                 string
+	Model                   string
+	FallbackProviders       []FallbackProviderConfig
+	Timezone                string
+	Provider                string
+	ExternalNetwork         string
+	HermesImage             string
+	HermesTag               string
+	HermesDigest            string
+	LochoImage              string
+	LochoVersion            string
+	APIEnabled              bool
+	APIHost                 string
+	WorkspaceUIHost         string
+	WorkspaceUIPort         int
+	WorkspaceUIPublicOrigin string
+	WorkspaceUIPasswordHash string
+	SecretSource            string
+	ReleaseSource           string
+	EnabledSkills           []string
+	WorkspaceGit            WorkspaceGitConfig
+	SkillSources            []SkillSourceConfig
+	Services                []ServiceHostConfig
 }
 
 type SkillSourceConfig struct {
@@ -112,21 +118,23 @@ type WorkspaceGitConfig struct {
 
 func defaultConfig() Config {
 	return Config{
-		Schema:        configSchema,
-		Version:       defaultVersion,
-		Mode:          "ssh",
-		InstallRoot:   defaultRemoteRoot,
-		Project:       defaultProject,
-		Model:         "gpt-5.6-luna",
-		Timezone:      defaultTimezone,
-		Provider:      "copilot",
-		HermesImage:   "openlia-hermes:v2026.9.14",
-		HermesTag:     "v2026.9.14",
-		HermesDigest:  "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294",
-		LochoImage:    "openlia-locho:v1.2.0-beta.1",
-		LochoVersion:  "1.2.0-beta.1",
-		APIHost:       "127.0.0.1",
-		EnabledSkills: append([]string(nil), defaultSkills...),
+		Schema:          configSchema,
+		Version:         defaultVersion,
+		Mode:            "ssh",
+		InstallRoot:     defaultRemoteRoot,
+		Project:         defaultProject,
+		Model:           "gpt-5.6-luna",
+		Timezone:        defaultTimezone,
+		Provider:        "copilot",
+		HermesImage:     "openlia-hermes:v2026.9.14",
+		HermesTag:       "v2026.9.14",
+		HermesDigest:    "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294",
+		LochoImage:      "openlia-locho:v1.2.0-beta.1",
+		LochoVersion:    "1.2.0-beta.1",
+		APIHost:         "127.0.0.1",
+		WorkspaceUIHost: "",
+		WorkspaceUIPort: defaultWorkspaceUIPort,
+		EnabledSkills:   append([]string(nil), defaultSkills...),
 		WorkspaceGit: WorkspaceGitConfig{
 			Provider:    "github",
 			Branch:      "main",
@@ -177,7 +185,27 @@ func loadConfig() (Config, error) {
 	return config, nil
 }
 
+func loadConfigUnchecked() (Config, error) {
+	path := configPath()
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return defaultConfig(), os.ErrNotExist
+	}
+	if err != nil {
+		return Config{}, fmt.Errorf("read operator config: %w", err)
+	}
+	return parseConfigUnchecked(string(data))
+}
+
 func parseConfig(data string) (Config, error) {
+	config, err := parseConfigUnchecked(data)
+	if err != nil {
+		return Config{}, err
+	}
+	return config, validateConfig(config)
+}
+
+func parseConfigUnchecked(data string) (Config, error) {
 	config := defaultConfig()
 	section := ""
 	var err error
@@ -300,6 +328,14 @@ func parseConfig(data string) (Config, error) {
 				config.Provider, err = parseString(value)
 			case "openlia.external_network":
 				config.ExternalNetwork, err = parseString(value)
+			case "workspace-ui.host":
+				config.WorkspaceUIHost, err = parseString(value)
+			case "workspace-ui.port":
+				config.WorkspaceUIPort, err = parseInt(value)
+			case "workspace-ui.public_origin":
+				config.WorkspaceUIPublicOrigin, err = parseString(value)
+			case "workspace-ui.password_hash":
+				config.WorkspaceUIPasswordHash, err = parseString(value)
 			case "release.source":
 				config.ReleaseSource, err = parseString(value)
 			case "components.hermes_image":
@@ -345,7 +381,7 @@ func parseConfig(data string) (Config, error) {
 	if err := scanner.Err(); err != nil {
 		return Config{}, err
 	}
-	return config, validateConfig(config)
+	return config, nil
 }
 
 func parseString(value string) (string, error) {
@@ -436,6 +472,9 @@ func validateConfig(config Config) error {
 	if config.APIHost != "127.0.0.1" {
 		return errors.New("API host must remain 127.0.0.1; use SSH or a private network for access")
 	}
+	if err := validateWorkspaceUI(config.WorkspaceUIHost, config.WorkspaceUIPort, config.WorkspaceUIPublicOrigin, config.WorkspaceUIPasswordHash); err != nil {
+		return err
+	}
 	if config.SecretSource != "" && !filepath.IsAbs(config.SecretSource) {
 		return errors.New("secret source must be an absolute path")
 	}
@@ -508,6 +547,38 @@ func validateConfig(config Config) error {
 				return fmt.Errorf("service host %q service %q: %w", host.Name, svc, err)
 			}
 		}
+	}
+	return nil
+}
+
+func validateWorkspaceUI(host string, port int, publicOrigin, passwordHash string) error {
+	if host != "" && (net.ParseIP(host) == nil || host != "127.0.0.1" && host != "0.0.0.0") {
+		return errors.New("workspace-ui.host must be 127.0.0.1 or 0.0.0.0")
+	}
+	if port < 1 || port > 65535 {
+		return errors.New("workspace-ui.port must be between 1 and 65535")
+	}
+	if err := validateWorkspaceUIPublicOrigin(publicOrigin); err != nil {
+		return err
+	}
+	if passwordHash != "" {
+		if err := validateWorkspaceUIPasswordHash(passwordHash); err != nil {
+			return err
+		}
+	}
+	if host == "0.0.0.0" && passwordHash == "" {
+		return errors.New("workspace-ui.password_hash is required when workspace-ui.host is 0.0.0.0")
+	}
+	return nil
+}
+
+func validateWorkspaceUIPublicOrigin(value string) error {
+	if value == "" {
+		return nil
+	}
+	origin, err := url.Parse(value)
+	if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Host == "" || origin.User != nil || origin.Opaque != "" || origin.RawQuery != "" || origin.Fragment != "" || origin.Path != "" && origin.Path != "/" {
+		return errors.New("workspace-ui.public_origin must be an absolute http(s) origin")
 	}
 	return nil
 }
@@ -743,6 +814,16 @@ func saveConfig(config Config) error {
 func renderConfig(config Config) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "[openlia]\nschema = %d\nversion = %q\nmode = %q\ntarget = %q\nroot = %q\nproject = %q\nmodel = %q\ntimezone = %q\nprovider = %q\nexternal_network = %q\n\n", config.Schema, config.Version, config.Mode, config.Target, config.InstallRoot, config.Project, config.Model, config.Timezone, config.Provider, config.ExternalNetwork)
+	if config.WorkspaceUIHost != "" {
+		fmt.Fprintf(&builder, "[workspace-ui]\nhost = %q\nport = %d\n", config.WorkspaceUIHost, config.WorkspaceUIPort)
+		if config.WorkspaceUIPublicOrigin != "" {
+			fmt.Fprintf(&builder, "public_origin = %q\n", config.WorkspaceUIPublicOrigin)
+		}
+		if config.WorkspaceUIPasswordHash != "" {
+			fmt.Fprintf(&builder, "password_hash = %q\n", config.WorkspaceUIPasswordHash)
+		}
+		builder.WriteString("\n")
+	}
 	for _, fallback := range config.FallbackProviders {
 		builder.WriteString("[[fallback_providers]]\n")
 		fmt.Fprintf(&builder, "provider = %q\nmodel = %q\n", fallback.Provider, fallback.Model)

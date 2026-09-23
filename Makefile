@@ -3,7 +3,7 @@ GO ?= go
 VENV ?= .venv
 PYTHON ?= $(shell if [ -f "$(VENV)/bin/python3" ]; then echo "$(VENV)/bin/python3"; else echo "python3"; fi)
 
-.PHONY: help build build-host build-cli build-operator build-operator-linux-amd64 build-operator-linux-arm64 test lint compose-config venv skills-test skills-verify clean-logs smoke smoke-local smoke-local-live
+.PHONY: help build build-host build-cli build-operator build-operator-linux-amd64 build-operator-linux-arm64 test lint compose-config venv bun-install bun-check bun-build skills-test skills-verify clean-logs smoke smoke-local smoke-local-live
 
 help:
 	@printf '%s\n' \
@@ -27,9 +27,9 @@ help:
 		'smoke-local-live   Deploy a credential-backed local stack; cleanup is opt-in'
 
 build:
-	$(MAKE) build-host build-operator
+	$(MAKE) bun-install bun-build build-host build-operator
 
-build-host build-cli:
+build-host build-cli: bun-install bun-build
 	$(GO) build -o openlia .
 
 build-operator: build-operator-linux-amd64 build-operator-linux-arm64
@@ -53,12 +53,26 @@ venv:
 	@echo "Virtual environment ready in $(VENV)."
 
 test:
+	$(MAKE) bun-install bun-check bun-build
 	go test ./...
 	go vet ./...
 	$(PYTHON) -m py_compile tests/smoke.py
 	for script in profile/skills/*/scripts/*.py; do $(PYTHON) "$$script" --self-test; done
 
+bun-install:
+	bun install --frozen-lockfile --ignore-scripts
+
+bun-check:
+	bun run check
+	bun run typecheck
+	bun run test
+
+bun-build:
+	bun run build
+
 lint:
+	bun run format:check
+	bun run lint
 	gofmt -d main.go cli operator cmd
 	bash -n docker/*.sh profile/cron/scripts/*.sh
 	shellcheck docker/*.sh profile/cron/scripts/*.sh

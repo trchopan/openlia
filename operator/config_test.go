@@ -27,6 +27,8 @@ func testConfig(repo, runtime string) Config {
 		SkillsCacheRoot:   filepath.Join(runtime, "skill-cache"),
 		SkillsEnvRoot:     filepath.Join(runtime, "skill-envs"),
 		APIHost:           "127.0.0.1",
+		WorkspaceUIHost:   "",
+		WorkspaceUIPort:   8089,
 	}
 }
 
@@ -65,19 +67,41 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	repo := t.TempDir()
 	runtime := filepath.Join(t.TempDir(), "runtime")
 	config, err := LoadConfigFromEnv(map[string]string{
-		"OPENLIA_REPO_ROOT":          repo,
-		"OPENLIA_RUNTIME_ROOT":       runtime,
-		"OPENLIA_PROJECT_NAME":       "example",
-		"OPENLIA_PROVIDER":           "copilot",
-		"OPENLIA_FALLBACK_PROVIDERS": `[{"provider":"custom","model":"gateway-model","base_url":"https://gateway.example.test/v1","key_env":"OPENAI_GATEWAY_API_KEY"},{"provider":"openai-api","model":"official-model"}]`,
-		"OPENLIA_LOCAL_MODE":         "true",
-		"OPENLIA_ENABLED_SKILLS":     "daily-briefing,workspace-git",
-		"OPENLIA_SKILLS_CONFIGURED":  "true",
+		"OPENLIA_REPO_ROOT":                  repo,
+		"OPENLIA_RUNTIME_ROOT":               runtime,
+		"OPENLIA_PROJECT_NAME":               "example",
+		"OPENLIA_PROVIDER":                   "copilot",
+		"OPENLIA_FALLBACK_PROVIDERS":         `[{"provider":"custom","model":"gateway-model","base_url":"https://gateway.example.test/v1","key_env":"OPENAI_GATEWAY_API_KEY"},{"provider":"openai-api","model":"official-model"}]`,
+		"OPENLIA_LOCAL_MODE":                 "true",
+		"OPENLIA_ENABLED_SKILLS":             "daily-briefing,workspace-git",
+		"OPENLIA_SKILLS_CONFIGURED":          "true",
+		"OPENLIA_WORKSPACE_UI_HOST":          "0.0.0.0",
+		"OPENLIA_WORKSPACE_UI_PORT":          "8090",
+		"OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN": "https://workspace.example.test",
+		"OPENLIA_WORKSPACE_UI_AUTH_REQUIRED": "true",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !config.LocalMode || !config.SkillsConfigured || len(config.EnabledSkills) != 2 || config.NetworkName != "example-private" || config.Provider != "copilot" || len(config.FallbackProviders) != 2 || config.FallbackProviders[0].BaseURL != "https://gateway.example.test/v1" || config.FallbackProviders[1].Model != "official-model" {
+	if !config.LocalMode || !config.SkillsConfigured || config.WorkspaceUIHost != "0.0.0.0" || config.WorkspaceUIPort != 8090 || config.WorkspaceUIPublicOrigin != "https://workspace.example.test" || len(config.EnabledSkills) != 2 || config.NetworkName != "example-private" || config.Provider != "copilot" || len(config.FallbackProviders) != 2 || config.FallbackProviders[0].BaseURL != "https://gateway.example.test/v1" || config.FallbackProviders[1].Model != "official-model" {
 		t.Fatalf("unexpected typed config: %+v", config)
+	}
+}
+
+func TestWorkspaceUIHostValidation(t *testing.T) {
+	for _, host := range []string{"localhost", "192.168.1.10", "127.0.0.2"} {
+		config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+		config.WorkspaceUIHost = host
+		if err := config.ValidatePaths(); err == nil {
+			t.Fatalf("workspace UI host %q was accepted", host)
+		}
+	}
+	for _, port := range []int{0, 65536} {
+		config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+		config.WorkspaceUIHost = "127.0.0.1"
+		config.WorkspaceUIPort = port
+		if err := config.ValidatePaths(); err == nil {
+			t.Fatalf("workspace UI port %d was accepted", port)
+		}
 	}
 }
