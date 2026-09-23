@@ -18,3 +18,411 @@ input,
 textarea {
   font: inherit;
 }
+
+.workspace-app {
+  min-height: 100dvh;
+  background: oklch(var(--b3));
+  color: oklch(var(--bc));
+}
+
+.workspace-header {
+  display: flex;
+  min-height: 4.5rem;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid
+    color-mix(in oklab, oklch(var(--bc)) 10%, transparent);
+  padding: 0.75rem 1rem;
+}
+
+@media (min-width: 640px) {
+  .workspace-header {
+    padding-inline: 1.75rem;
+  }
+}
+
+.workspace-eyebrow {
+  color: oklch(var(--p));
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  line-height: 1.2;
+}
+
+.workspace-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.25rem;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+
+.workspace-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: oklch(var(--bc) / 0.5);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+}
+
+.workspace-layout {
+  display: grid;
+  min-height: calc(100dvh - 4.5rem);
+  min-width: 0;
+  gap: 0;
+}
+
+.workspace-navigator,
+.workspace-inspector {
+  min-width: 0;
+  min-height: 0;
+  background: oklch(var(--b1));
+}
+
+.workspace-navigator {
+  flex-direction: column;
+  border-right: 1px solid color-mix(in oklab, oklch(var(--bc)) 10%, transparent);
+}
+
+.workspace-inspector {
+  height: 100%;
+  overflow: auto;
+  border-left: 1px solid color-mix(in oklab, oklch(var(--bc)) 10%, transparent);
+  padding: 1.25rem;
+}
+
+.workspace-document {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: oklch(var(--b1));
+}
+
+.workspace-document-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid
+    color-mix(in oklab, oklch(var(--bc)) 10%, transparent);
+  background: color-mix(in oklab, oklch(var(--b1)) 94%, transparent);
+  padding: 0.75rem 1rem;
+  backdrop-filter: blur(12px);
+}
+
+.workspace-document-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.workspace-tree-row {
+  display: flex;
+  min-height: 2.5rem;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+  padding-block: 0.5rem;
+  text-align: left;
+  font-size: 0.85rem;
+  line-height: 1.25;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.workspace-tree-row:hover {
+  background: oklch(var(--bc) / 0.07);
+}
+
+.workspace-tree-directory {
+  color: oklch(var(--bc) / 0.62);
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.workspace-tree-chevron {
+  width: 1rem;
+  color: oklch(var(--bc) / 0.45);
+  text-align: center;
+}
+
+.workspace-tree-file {
+  justify-content: space-between;
+  color: oklch(var(--bc) / 0.82);
+}
+
+.workspace-tree-file-selected {
+  background: color-mix(in oklab, oklch(var(--p)) 18%, transparent);
+  box-shadow: inset 3px 0 0 oklch(var(--p));
+  color: oklch(var(--pc));
+}
+
+.workspace-split-pane {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.workspace-editor-pane,
+.workspace-preview-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workspace-editor-pane {
+  border-right: 1px solid color-mix(in oklab, oklch(var(--bc)) 10%, transparent);
+}
+
+.workspace-pane-label {
+  flex: none;
+  border-bottom: 1px solid color-mix(in oklab, oklch(var(--bc)) 8%, transparent);
+  padding: 0.65rem 1rem;
+  color: oklch(var(--bc) / 0.5);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workspace-editor {
+  min-height: 24rem;
+  min-width: 0;
+  flex: 1;
+  resize: none;
+  border: 0;
+  background: transparent;
+  padding: 1.25rem;
+  color: oklch(var(--bc));
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  outline: none;
+}
+
+.workspace-editor:focus {
+  box-shadow: inset 0 0 0 1px oklch(var(--p));
+}
+
+.workspace-preview-pane {
+  overflow: auto;
+}
+
+.workspace-empty-document {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  place-items: center;
+  padding: 2rem;
+  text-align: center;
+}
+
+.workspace-inline-status {
+  border-bottom: 1px solid
+    color-mix(in oklab, oklch(var(--bc)) 10%, transparent);
+  padding: 0.65rem 1rem;
+  color: oklch(var(--bc) / 0.65);
+  font-size: 0.8rem;
+}
+
+.workspace-diff {
+  max-height: 20rem;
+  overflow: auto;
+  border-radius: 0.65rem;
+  background: oklch(var(--b2));
+  padding: 0.8rem;
+  color: oklch(var(--bc) / 0.8);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.workspace-markdown {
+  min-width: 0;
+  overflow: auto;
+  padding: 1.25rem clamp(1rem, 3vw, 2rem);
+  color: oklch(var(--bc) / 0.9);
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.workspace-markdown h1,
+.workspace-markdown h2,
+.workspace-markdown h3,
+.workspace-markdown h4,
+.workspace-markdown h5,
+.workspace-markdown h6 {
+  margin: 1.5rem 0 0.6rem;
+  color: oklch(var(--bc));
+  font-weight: 750;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+}
+
+.workspace-markdown h1 {
+  margin-top: 0;
+  font-size: clamp(1.6rem, 3vw, 2.3rem);
+}
+
+.workspace-markdown h2 {
+  font-size: 1.35rem;
+}
+
+.workspace-markdown h3,
+.workspace-markdown h4,
+.workspace-markdown h5,
+.workspace-markdown h6 {
+  font-size: 1.05rem;
+}
+
+.workspace-markdown p,
+.workspace-markdown ul,
+.workspace-markdown ol,
+.workspace-markdown blockquote,
+.workspace-markdown table,
+.workspace-markdown pre {
+  margin: 0.8rem 0;
+}
+
+.workspace-markdown ul,
+.workspace-markdown ol {
+  padding-left: 1.5rem;
+}
+
+.workspace-markdown ul {
+  list-style: disc;
+}
+
+.workspace-markdown ol {
+  list-style: decimal;
+}
+
+.workspace-markdown li + li {
+  margin-top: 0.25rem;
+}
+
+.workspace-markdown blockquote {
+  border-left: 3px solid oklch(var(--p));
+  color: oklch(var(--bc) / 0.62);
+  padding-left: 1rem;
+}
+
+.workspace-markdown a {
+  color: oklch(var(--p));
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.workspace-markdown code {
+  border-radius: 0.3rem;
+  background: oklch(var(--b2));
+  padding: 0.12rem 0.3rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+
+.workspace-markdown pre {
+  overflow: auto;
+  border-radius: 0.65rem;
+  background: oklch(var(--b2));
+  padding: 1rem;
+}
+
+.workspace-markdown pre code {
+  background: transparent;
+  padding: 0;
+  white-space: pre;
+}
+
+.workspace-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.workspace-markdown th,
+.workspace-markdown td {
+  border: 1px solid oklch(var(--bc) / 0.15);
+  padding: 0.45rem 0.65rem;
+  text-align: left;
+}
+
+.workspace-markdown th {
+  background: oklch(var(--b2));
+  color: oklch(var(--bc));
+}
+
+.workspace-markdown input[type="checkbox"] {
+  margin-right: 0.5rem;
+  accent-color: oklch(var(--p));
+}
+
+@media (max-width: 767px) {
+  .workspace-header {
+    min-height: 4rem;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .workspace-header .workspace-eyebrow,
+  .workspace-header .workspace-git-status,
+  .workspace-header .workspace-details-toggle {
+    display: none;
+  }
+
+  .workspace-header .workspace-title {
+    font-size: 1.1rem;
+  }
+
+  .workspace-layout {
+    min-height: calc(100dvh - 4rem);
+  }
+
+  .workspace-document-toolbar {
+    padding: 0.65rem 0.75rem;
+  }
+
+  .workspace-document-toolbar .join {
+    order: 3;
+    width: 100%;
+  }
+
+  .workspace-document-toolbar .join .btn {
+    flex: 1;
+  }
+
+  .workspace-split-pane {
+    display: block;
+  }
+
+  .workspace-editor-pane {
+    border-right: 0;
+  }
+
+  .workspace-editor {
+    min-height: 55dvh;
+  }
+
+  .workspace-preview-pane {
+    min-height: 55dvh;
+  }
+
+  .workspace-empty-document {
+    min-height: calc(100dvh - 10rem);
+  }
+}
