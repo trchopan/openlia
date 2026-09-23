@@ -46,7 +46,9 @@ func validateWorkspaceUIPasswordHash(value string) error {
 	}
 	salt, saltErr := base64.RawStdEncoding.DecodeString(parts[4])
 	derivedKey, keyErr := base64.RawStdEncoding.DecodeString(parts[5])
-	if saltErr != nil || len(salt) < workspaceUIPasswordSaltBytes || keyErr != nil || len(derivedKey) != workspaceUIPasswordKeyBytes {
+	invalidSalt := saltErr != nil || len(salt) < workspaceUIPasswordSaltBytes
+	invalidDigest := keyErr != nil || len(derivedKey) != workspaceUIPasswordKeyBytes
+	if invalidSalt || invalidDigest {
 		return fmt.Errorf("workspace-ui.password_hash has invalid Argon2id data")
 	}
 	return nil
