@@ -31,22 +31,22 @@ func validateWorkspaceUIPasswordHash(value string) error {
 	}
 	params := make(map[string]uint32, 3)
 	for _, item := range strings.Split(parts[3], ",") {
-		key, raw, ok := strings.Cut(item, "=")
-		if !ok || (key != "m" && key != "t" && key != "p") || raw == "" {
+		parameter, raw, ok := strings.Cut(item, "=")
+		if !ok || (parameter != "m" && parameter != "t" && parameter != "p") || raw == "" {
 			return fmt.Errorf("workspace-ui.password_hash has invalid Argon2id parameters")
 		}
 		parsed, err := strconv.ParseUint(raw, 10, 32)
 		if err != nil || parsed == 0 {
 			return fmt.Errorf("workspace-ui.password_hash has invalid Argon2id parameters")
 		}
-		params[key] = uint32(parsed)
+		params[parameter] = uint32(parsed)
 	}
 	if len(params) != 3 || params["m"] < 32*1024 || params["m"] > 128*1024 || params["t"] < 2 || params["t"] > 5 || params["p"] < 1 || params["p"] > 4 {
 		return fmt.Errorf("workspace-ui.password_hash Argon2id parameters are outside the supported limits")
 	}
 	salt, saltErr := base64.RawStdEncoding.DecodeString(parts[4])
-	key, keyErr := base64.RawStdEncoding.DecodeString(parts[5])
-	if saltErr != nil || len(salt) < workspaceUIPasswordSaltBytes || keyErr != nil || len(key) != workspaceUIPasswordKeyBytes {
+	derivedKey, keyErr := base64.RawStdEncoding.DecodeString(parts[5])
+	if saltErr != nil || len(salt) < workspaceUIPasswordSaltBytes || keyErr != nil || len(derivedKey) != workspaceUIPasswordKeyBytes {
 		return fmt.Errorf("workspace-ui.password_hash has invalid Argon2id data")
 	}
 	return nil
@@ -60,8 +60,8 @@ func hashWorkspaceUIPassword(value string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("generate workspace-ui password salt: %w", err)
 	}
-	key := argon2.IDKey([]byte(value), salt, workspaceUIPasswordTimeCost, workspaceUIPasswordMemoryKiB, workspaceUIPasswordParallel, workspaceUIPasswordKeyBytes)
-	hash := fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", workspaceUIPasswordMemoryKiB, workspaceUIPasswordTimeCost, workspaceUIPasswordParallel, base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key))
+	derivedKey := argon2.IDKey([]byte(value), salt, workspaceUIPasswordTimeCost, workspaceUIPasswordMemoryKiB, workspaceUIPasswordParallel, workspaceUIPasswordKeyBytes)
+	hash := fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", workspaceUIPasswordMemoryKiB, workspaceUIPasswordTimeCost, workspaceUIPasswordParallel, base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(derivedKey))
 	return hash, validateWorkspaceUIPasswordHash(hash)
 }
 
