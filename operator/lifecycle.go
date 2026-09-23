@@ -38,8 +38,8 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 	if options.Action != "deploy" && options.Action != "start" && options.Action != "stop" && options.Action != "restart" {
 		return DeployResult{}, fmt.Errorf("unknown deploy action %s", options.Action)
 	}
-	if options.Component != "all" && options.Component != "hermes" && options.Component != "locho" && options.Component != "workspace-ui" {
-		return DeployResult{}, fmt.Errorf("component must be all, hermes, locho, or workspace-ui")
+	if options.Component != "all" && options.Component != "hermes" && options.Component != "locho" && options.Component != "workspace-ui" && options.Component != "open-webui" {
+		return DeployResult{}, fmt.Errorf("component must be all, hermes, locho, workspace-ui, or open-webui")
 	}
 	if info, err := os.Stat(config.ComposeFile); err != nil || !info.Mode().IsRegular() {
 		return DeployResult{}, fmt.Errorf("base Compose file is missing")
@@ -155,6 +155,8 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 			if options.Action == "deploy" {
 				args = []string{"up", "-d", "--build", "--no-deps", "--force-recreate", "workspace-ui"}
 			}
+		case options.Component == "open-webui":
+			args = []string{"up", "-d", "--no-deps", "--force-recreate", "open-webui"}
 		default:
 			services := composeServices(ctx, compose)
 			if len(services) == 0 {
@@ -195,6 +197,8 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 			healthyNow := false
 			if options.Component == "workspace-ui" {
 				healthyNow = workspaceUIHealthy(ctx, config, compose)
+			} else if options.Component == "open-webui" {
+				healthyNow = openWebUIHealthy(ctx, config, compose)
 			} else if health, healthErr := Healthcheck(ctx, config, compose, false, false); healthErr == nil && health.OK {
 				healthyNow = true
 			}
@@ -244,6 +248,22 @@ func workspaceUIHealthy(ctx context.Context, config Config, compose Compose) boo
 		return false
 	}
 	_, err = compose.Run(ctx, "exec", "-T", "workspace-ui", "bun", "-e", fmt.Sprintf("fetch('http://127.0.0.1:%d/health').then(r => { if (!r.ok) process.exit(1) })", config.WorkspaceUIPort))
+	return err == nil
+}
+
+func openWebUIHealthy(ctx context.Context, config Config, compose Compose) bool {
+	if config.OpenWebUIHost == "" || !compose.ServiceRunning(ctx, "open-webui") {
+		return false
+	}
+	result, err := compose.Run(ctx, "port", "open-webui", "8080")
+	if err != nil {
+		return false
+	}
+	binding := strings.TrimSpace(string(result.Stdout))
+	if !strings.Contains(binding, fmt.Sprintf("%s:%d", config.OpenWebUIHost, config.OpenWebUIPort)) {
+		return false
+	}
+	_, err = compose.Run(ctx, "exec", "-T", "open-webui", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)")
 	return err == nil
 }
 
@@ -369,6 +389,23 @@ func Healthcheck(ctx context.Context, config Config, compose Compose, allowStopp
 						}
 					} else {
 						add("listener:workspace-ui", false, "unexpected_endpoint")
+					}
+				} else if service == "open-webui" {
+					expectedHost, expectedPort := config.OpenWebUIHost, config.OpenWebUIPort
+					endpointErr := validateOpenWebUI(expectedHost, expectedPort)
+					published, portErr := compose.Run(ctx, "port", service, "8080")
+					binding := strings.TrimSpace(string(published.Stdout))
+					expectedBinding := fmt.Sprintf("%s:%d", expectedHost, expectedPort)
+					if endpointErr != nil || portErr != nil || binding == "" {
+						add("listener:open-webui", false, "missing_configured_port")
+					} else if strings.Contains(binding, expectedBinding) {
+						if _, probeErr := compose.Run(ctx, "exec", "-T", "open-webui", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"); probeErr != nil {
+							add("listener:open-webui", false, "health_endpoint_unavailable")
+						} else {
+							add("listener:open-webui", true, "configured_endpoint")
+						}
+					} else {
+						add("listener:open-webui", false, "unexpected_endpoint")
 					}
 				}
 			} else if state == stateStopped && allowStopped {

@@ -136,6 +136,9 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	externalNetwork := set.String("external-network", "", "Existing Docker network for internal services")
 	apiEnabled := set.Bool("api", false, "enable the private API listener")
 	apiHost := set.String("api-host", "", "API bind address when --api is enabled")
+	openWebUI := set.Bool("open-webui", false, "enable Open WebUI chat interface")
+	openWebUIHost := set.String("open-webui-host", "", "Open WebUI host bind address")
+	openWebUIPort := set.Int("open-webui-port", 8090, "Open WebUI host port")
 	workspaceGitRemote := set.String("workspace-git-remote", "", "HTTPS GitHub repository for workspace backup")
 	workspaceGitBranch := set.String("workspace-git-branch", "", "workspace Git branch")
 	workspaceGitSchedule := set.String("workspace-git-schedule", "", "workspace Git automatic pull schedule")
@@ -198,6 +201,19 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	}
 	if *apiHost != "" {
 		config.APIHost = *apiHost
+	}
+	if hasArgument(args, "--open-webui") {
+		if *openWebUI {
+			config.OpenWebUIHost = "127.0.0.1"
+		} else {
+			config.OpenWebUIHost = ""
+		}
+	}
+	if *openWebUIHost != "" {
+		config.OpenWebUIHost = *openWebUIHost
+	}
+	if hasArgument(args, "--open-webui-port") {
+		config.OpenWebUIPort = *openWebUIPort
 	}
 	if *workspaceGitRemote != "" {
 		config.WorkspaceGit.Enabled = true
@@ -494,8 +510,8 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 			"current":   map[string]string{"openlia": defaultVersion, "hermes": "v2026.9.14", "locho": "1.2.0-beta.1"},
 		}, "No release index configured. No component was changed.")
 	}
-	if component != "openlia" && component != "hermes" && component != "locho" {
-		return fail(options, ExitUsage, "component must be openlia, hermes, or locho", nil)
+	if component != "openlia" && component != "hermes" && component != "locho" && component != "open-webui" {
+		return fail(options, ExitUsage, "component must be openlia, hermes, locho, or open-webui", nil)
 	}
 	config, code := configOrError(options)
 	if code != ExitOK {
@@ -546,6 +562,14 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 	// The command does not silently change a tag or digest; operators update the
 	// desired pin in their operator config before invoking this boundary.
 	if component == "locho" {
+		if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
+			return fail(options, ExitFailure, "attachment Compose generation failed: "+err.Error(), nil)
+		}
+	}
+	if component == "open-webui" {
+		if config.OpenWebUIHost == "" {
+			return fail(options, ExitUsage, "open-webui is not configured in config.toml", nil)
+		}
 		if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
 			return fail(options, ExitFailure, "attachment Compose generation failed: "+err.Error(), nil)
 		}

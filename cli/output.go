@@ -81,13 +81,14 @@ Usage:
   openlia init [--local|--target user@host] [--root /path] [--project NAME]
                [--timezone Asia/Ho_Chi_Minh] [--model MODEL] [--provider PROVIDER]
                [--external-network NAME] [--api] [--api-host 127.0.0.1]
+               [--open-webui] [--open-webui-port 8090]
                [--workspace-git-remote https://github.com/OWNER/REPO.git]
   openlia status [--json]
   openlia doctor [--json]
   openlia deploy | start | stop | restart
   openlia uninstall [--local|--target user@host] --project NAME --root /path
   openlia logs [--follow]
-  openlia update [openlia|hermes|locho]
+  openlia update [openlia|hermes|locho|open-webui]
   openlia skill-sources add|list|remove|check|fetch
   openlia skills list|show|audit|install|update|uninstall|test|reset|fork-refresh
   openlia skills status|fork|migrate|enable|disable

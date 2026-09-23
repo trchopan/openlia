@@ -22,6 +22,8 @@ const (
 	defaultProject         = "openlia"
 	defaultTimezone        = "Asia/Ho_Chi_Minh"
 	defaultWorkspaceUIPort = 8089
+	defaultOpenWebUIPort   = 8090
+	defaultOpenWebUIImage  = "ghcr.io/open-webui/open-webui:main"
 )
 
 var defaultSkills = []string{
@@ -79,6 +81,10 @@ type Config struct {
 	WorkspaceUIPort         int
 	WorkspaceUIPublicOrigin string
 	WorkspaceUIPasswordHash string
+	OpenWebUIHost           string
+	OpenWebUIPort           int
+	OpenWebUIImage          string
+	OpenWebUIAuth           bool
 	SecretSource            string
 	ReleaseSource           string
 	EnabledSkills           []string
@@ -134,6 +140,10 @@ func defaultConfig() Config {
 		APIHost:         "127.0.0.1",
 		WorkspaceUIHost: "",
 		WorkspaceUIPort: defaultWorkspaceUIPort,
+		OpenWebUIHost:   "",
+		OpenWebUIPort:   defaultOpenWebUIPort,
+		OpenWebUIImage:  defaultOpenWebUIImage,
+		OpenWebUIAuth:   true,
 		EnabledSkills:   append([]string(nil), defaultSkills...),
 		WorkspaceGit: WorkspaceGitConfig{
 			Provider:    "github",
@@ -336,6 +346,16 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.WorkspaceUIPublicOrigin, err = parseString(value)
 			case "workspace-ui.password_hash":
 				config.WorkspaceUIPasswordHash, err = parseString(value)
+			case "open-webui.host":
+				config.OpenWebUIHost, err = parseString(value)
+			case "open-webui.port":
+				config.OpenWebUIPort, err = parseInt(value)
+			case "open-webui.image":
+				config.OpenWebUIImage, err = parseString(value)
+			case "open-webui.auth":
+				config.OpenWebUIAuth, err = parseBool(value)
+			case "components.open_webui_image":
+				config.OpenWebUIImage, err = parseString(value)
 			case "release.source":
 				config.ReleaseSource, err = parseString(value)
 			case "components.hermes_image":
@@ -463,6 +483,9 @@ func validateConfig(config Config) error {
 	if !safeImageRef(config.HermesImage) || !safeImageRef(config.LochoImage) {
 		return errors.New("component image references contain unsupported characters")
 	}
+	if config.OpenWebUIImage != "" && !safeImageRef(config.OpenWebUIImage) {
+		return errors.New("component image references contain unsupported characters")
+	}
 	if config.HermesTag == "" || !validDigest(config.HermesDigest) {
 		return errors.New("Hermes tag and digest are required")
 	}
@@ -474,6 +497,11 @@ func validateConfig(config Config) error {
 	}
 	if err := validateWorkspaceUI(config.WorkspaceUIHost, config.WorkspaceUIPort, config.WorkspaceUIPublicOrigin, config.WorkspaceUIPasswordHash); err != nil {
 		return err
+	}
+	if config.OpenWebUIHost != "" {
+		if err := validateOpenWebUI(config.OpenWebUIHost, config.OpenWebUIPort); err != nil {
+			return err
+		}
 	}
 	if config.SecretSource != "" && !filepath.IsAbs(config.SecretSource) {
 		return errors.New("secret source must be an absolute path")
@@ -568,6 +596,19 @@ func validateWorkspaceUI(host string, port int, publicOrigin, passwordHash strin
 	}
 	if host == "0.0.0.0" && passwordHash == "" {
 		return errors.New("workspace-ui.password_hash is required when workspace-ui.host is 0.0.0.0")
+	}
+	return nil
+}
+
+func validateOpenWebUI(host string, port int) error {
+	if host == "" {
+		return nil
+	}
+	if net.ParseIP(host) == nil || host != "127.0.0.1" && host != "0.0.0.0" {
+		return errors.New("open-webui.host must be 127.0.0.1 or 0.0.0.0")
+	}
+	if port < 1 || port > 65535 {
+		return errors.New("open-webui.port must be between 1 and 65535")
 	}
 	return nil
 }
@@ -821,6 +862,16 @@ func renderConfig(config Config) string {
 		}
 		if config.WorkspaceUIPasswordHash != "" {
 			fmt.Fprintf(&builder, "password_hash = %q\n", config.WorkspaceUIPasswordHash)
+		}
+		builder.WriteString("\n")
+	}
+	if config.OpenWebUIHost != "" {
+		fmt.Fprintf(&builder, "[open-webui]\nhost = %q\nport = %d\n", config.OpenWebUIHost, config.OpenWebUIPort)
+		if config.OpenWebUIImage != "" && config.OpenWebUIImage != defaultOpenWebUIImage {
+			fmt.Fprintf(&builder, "image = %q\n", config.OpenWebUIImage)
+		}
+		if !config.OpenWebUIAuth {
+			builder.WriteString("auth = false\n")
 		}
 		builder.WriteString("\n")
 	}

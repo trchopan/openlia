@@ -49,6 +49,11 @@ type Config struct {
 	WorkspaceUIPublicOrigin     string
 	WorkspaceUIAuthRequired     bool
 	WorkspaceUIPasswordHashFile string
+	OpenWebUIHost               string
+	OpenWebUIPort               int
+	OpenWebUIImage              string
+	OpenWebUIAuth               bool
+	OpenWebUIDataRoot           string
 	ServiceRoles                map[string]string
 	ConfiguredHosts             []string
 }
@@ -207,6 +212,26 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 	if err := validateWorkspaceUI(config.WorkspaceUIHost, config.WorkspaceUIPort, config.WorkspaceUIAuthRequired, config.WorkspaceUIPasswordHashFile); err != nil {
 		return Config{}, err
 	}
+	openWebUIPort := 8090
+	if rawPort := values["OPENLIA_OPEN_WEBUI_PORT"]; rawPort != "" {
+		parsed, err := strconv.Atoi(rawPort)
+		if err != nil || parsed < 1 || parsed > 65535 {
+			return Config{}, fmt.Errorf("OPENLIA_OPEN_WEBUI_PORT must be between 1 and 65535")
+		}
+		openWebUIPort = parsed
+	}
+	openWebUIAuth, err := boolValue(values, "OPENLIA_OPEN_WEBUI_AUTH", true)
+	if err != nil {
+		return Config{}, err
+	}
+	config.OpenWebUIHost = values["OPENLIA_OPEN_WEBUI_HOST"]
+	config.OpenWebUIPort = openWebUIPort
+	config.OpenWebUIImage = getOr(values, "OPENLIA_OPEN_WEBUI_IMAGE", "ghcr.io/open-webui/open-webui:main")
+	config.OpenWebUIAuth = openWebUIAuth
+	config.OpenWebUIDataRoot = getOr(values, "OPENLIA_OPEN_WEBUI_DATA_ROOT", filepath.Join(runtimeRoot, "open-webui"))
+	if err := validateOpenWebUI(config.OpenWebUIHost, config.OpenWebUIPort); err != nil {
+		return Config{}, err
+	}
 	if raw := values["OPENLIA_ENABLED_SKILLS"]; raw != "" {
 		for _, skill := range strings.Split(raw, ",") {
 			if skill == "" {
@@ -250,6 +275,19 @@ func validateWorkspaceUI(host string, port int, authRequired bool, passwordHashF
 		if err := ValidateAbsolutePath(passwordHashFile, "workspace-ui-password-hash-file"); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateOpenWebUI(host string, port int) error {
+	if host == "" {
+		return nil
+	}
+	if host != "127.0.0.1" && host != "0.0.0.0" {
+		return fmt.Errorf("open-webui.host must be 127.0.0.1 or 0.0.0.0")
+	}
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("open-webui.port must be between 1 and 65535")
 	}
 	return nil
 }
@@ -310,6 +348,9 @@ func (c Config) ValidatePaths() error {
 	if err := validateWorkspaceUI(c.WorkspaceUIHost, c.WorkspaceUIPort, c.WorkspaceUIAuthRequired, c.WorkspaceUIPasswordHashFile); err != nil {
 		return err
 	}
+	if err := validateOpenWebUI(c.OpenWebUIHost, c.OpenWebUIPort); err != nil {
+		return err
+	}
 	if err := validateFallbackProviders(c.FallbackProviders); err != nil {
 		return err
 	}
@@ -357,6 +398,12 @@ func (c Config) ValidatePaths() error {
 		{"secret-dir", c.SecretDir},
 		{"skills-cache-root", c.SkillsCacheRoot},
 		{"skills-env-root", c.SkillsEnvRoot},
+	}
+	if c.OpenWebUIHost != "" {
+		paths = append(paths, struct {
+			label string
+			path  string
+		}{"open-webui-data-root", c.OpenWebUIDataRoot})
 	}
 	if err := validateSkillSources(c.SkillSources); err != nil {
 		return err
