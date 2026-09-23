@@ -34,7 +34,7 @@ python3 tests/smoke.py --mode local \
 ```
 
 The optional Workspace UI proof uses a separate disposable mode. It enables a
-`[workspace-ui]` section for `127.0.0.1:8089`, checks loopback health, edits a
+`[workspace-ui]` section on an available loopback port, checks loopback health, edits a
 Markdown file, verifies revision conflicts, exercises restart and backup/restore,
 then disables the UI. Loopback mode does not require a password; an all-interface
 smoke configuration must provision `password_hash` and authenticate before

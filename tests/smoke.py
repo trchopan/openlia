@@ -9,6 +9,7 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import stat
 import subprocess
 import tempfile
@@ -20,6 +21,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+workspace_ui_port = 8089
 SECRET_PATTERNS = (
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+"),
     re.compile(r"\b(?:sk|ghp|gho|ghu|github_pat)_[A-Za-z0-9_-]+"),
@@ -198,7 +200,7 @@ def local_skill_check(root: str, project: str, skill: str) -> list[str]:
 
 def workspace_ui_request(method: str, path: str, body: dict[str, Any] | None = None) -> tuple[int, dict[str, Any] | str]:
     data = None if body is None else json.dumps(body).encode()
-    request = urllib.request.Request("http://127.0.0.1:8089" + path, data=data, headers={"Content-Type": "application/json"} if data is not None else {}, method=method)
+    request = urllib.request.Request(f"http://127.0.0.1:{workspace_ui_port}" + path, data=data, headers={"Content-Type": "application/json"} if data is not None else {}, method=method)
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
             raw = response.read()
@@ -364,6 +366,7 @@ def run_live(args: argparse.Namespace) -> list[dict[str, Any]]:
 
 
 def run_local_smoke(args: argparse.Namespace) -> list[dict[str, Any]]:
+    global workspace_ui_port
     results: list[dict[str, Any]] = []
     temporary_root: str | None = None
     root = args.root
@@ -377,7 +380,11 @@ def run_local_smoke(args: argparse.Namespace) -> list[dict[str, Any]]:
     config_directory = tempfile.TemporaryDirectory(prefix="openlia-local-config-")
     config = Path(config_directory.name) / "config.toml"
     workspace_ui = args.mode == "workspace-ui" or args.workspace_ui
-    workspace_ui_config = "[workspace-ui]\nhost = \"127.0.0.1\"\nport = 8089\n" if workspace_ui else ""
+    if workspace_ui:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            workspace_ui_port = int(probe.getsockname()[1])
+    workspace_ui_config = f"[workspace-ui]\nhost = \"127.0.0.1\"\nport = {workspace_ui_port}\n" if workspace_ui else ""
     config.write_text(f"[openlia]\nschema = 1\n\n{workspace_ui_config}[secrets]\n", encoding="utf-8")
     local_env = {**os.environ, "OPENLIA_CONFIG": str(config)}
     try:
@@ -424,7 +431,7 @@ def run_local_smoke(args: argparse.Namespace) -> list[dict[str, Any]]:
                 status, restored = workspace_ui_request("GET", "/api/workspace/file?path=inbox%2Fworkspace-ui-proof.md")
                 restored_ok = status == 200 and isinstance(restored, dict) and "Edited outside the UI." in str(restored.get("content"))
                 results.append(live_result("LOCAL-UI-RESTORED-CONTENT", "PASS" if restored_ok else "FAIL", None if restored_ok else "backup restore did not restore the archived workspace content"))
-                config.write_text(config.read_text(encoding="utf-8").replace('[workspace-ui]\nhost = "127.0.0.1"\nport = 8089\n', ""), encoding="utf-8")
+                config.write_text(config.read_text(encoding="utf-8").replace(f'[workspace-ui]\nhost = "127.0.0.1"\nport = {workspace_ui_port}\n', ""), encoding="utf-8")
                 results.append(run_case("LOCAL-UI-DISABLE", ["go", "run", ".", "deploy", "--json"], timeout=300, env=local_env))
             else:
                 for case_id, command, timeout in (

@@ -119,6 +119,22 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 	}
 	shouldStart := options.ForceStart || (options.Action == "deploy" && previous != stateStopped)
 	if shouldStart {
+		normalizeWorkspace := func() error {
+			_, err := compose.Run(ctx, "exec", "-T", "-u", "root", "hermes", "sh", "-c", "chown -R 10000:10000 /opt/data/workspace && chmod 700 /opt/data/workspace")
+			return err
+		}
+		workspaceUIStartedAfterHermes := false
+		if options.Component == "all" && config.WorkspaceUIHost != "" && options.Action != "restart" {
+			if _, err := compose.Run(ctx, "up", "-d", "--no-deps", "hermes"); err != nil {
+				_ = RecordChange(config, options.Action, "failed", backup, "Hermes could not be started before Workspace UI", now)
+				return DeployResult{}, fmt.Errorf("Hermes could not be started before Workspace UI: %w", err)
+			}
+			if err := normalizeWorkspace(); err != nil {
+				_ = RecordChange(config, options.Action, "failed", backup, "workspace permissions could not be normalized", now)
+				return DeployResult{}, fmt.Errorf("workspace permissions could not be normalized: %w", err)
+			}
+			workspaceUIStartedAfterHermes = true
+		}
 		var args []string
 		switch {
 		case options.Action == "restart" && options.Component == "all":
@@ -158,7 +174,7 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 			_ = RecordChange(config, options.Action, "failed", backup, "Compose start failed: "+msg, now)
 			return DeployResult{}, fmt.Errorf("Compose start failed (%s): %w", msg, err)
 		}
-		if options.Component == "all" || options.Component == "hermes" {
+		if (options.Component == "all" || options.Component == "hermes") && !workspaceUIStartedAfterHermes {
 			// Normalize the bind-mounted workspace through the container user, not a
 			// host-side chown that may not exist on Docker Desktop.
 			_, _ = compose.Run(ctx, "exec", "-T", "-u", "root", "hermes", "sh", "-c", "chown -R 10000:10000 /opt/data/workspace && chmod 700 /opt/data/workspace")
