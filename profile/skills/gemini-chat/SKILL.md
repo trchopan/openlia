@@ -49,7 +49,7 @@ the completed YAML with `result JOB_ID`; do not hold one terminal invocation ope
 for the full remote-browser conversation.
 
 #### What the Script Handles Automatically:
-1. **MCP Connection**: Connects to the local/remote Playwright MCP server (`localhost:8931` or `OPENLIA_BROWSER_MCP_URL`).
+1. **MCP Connection**: Connects to the host-local browser-tools MCP proxy through the configured browser attachment.
 2. **Ephemeral Navigation**: Navigates to `https://gemini.google.com/app`.
 3. **Gatekeeper Verification**: Toggles the Temporary Chat button in the sidebar and verifies the ephemeral banner (*"Chats in this window won't appear in Recent Chats"*). Fails closed if unverified.
 4. **Prompt Submission**: Inputs text into `div.ql-editor[contenteditable="true"]` and clicks the send button.

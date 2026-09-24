@@ -50,6 +50,3 @@ jobs:
 
       - name: Build Workspace UI image
         run: docker build --file docker/workspace-ui.Dockerfile --tag openlia-workspace-ui:ci .
-
-      - name: Build tools image
-        run: docker build --file docker/tools.Dockerfile --tag openlia-tools:ci .

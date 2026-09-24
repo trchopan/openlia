@@ -30,7 +30,6 @@ type AttachmentHost struct {
 	ServiceCount int            `json:"service_count"`
 	Services     []LochoService `json:"services"`
 	Capabilities string         `json:"capabilities"`
-	BrowserPort  int            `json:"-"`
 }
 
 type ServiceRegistry struct {
@@ -80,7 +79,7 @@ func ListAttachments(config Config) (AttachmentListResult, error) {
 		if info, statErr := os.Stat(path); statErr != nil || !info.Mode().IsRegular() {
 			continue
 		}
-		services, browserPort, err := serviceInventory(entry.Name(), path, config.ServiceRoles)
+		services, err := serviceInventory(entry.Name(), path, config.ServiceRoles)
 		if err != nil {
 			return AttachmentListResult{}, err
 		}
@@ -90,7 +89,6 @@ func ListAttachments(config Config) (AttachmentListResult, error) {
 			ServiceCount: len(services),
 			Services:     services,
 			Capabilities: "redacted",
-			BrowserPort:  browserPort,
 		})
 	}
 	sort.Slice(result.Hosts, func(i, j int) bool { return result.Hosts[i].Host < result.Hosts[j].Host })
@@ -204,20 +202,17 @@ func generateAttachmentsFile(config Config) error {
 	}
 	var allServices []LochoService
 	browserURL := ""
-	hasPlaywrightBrowserRole := false
+	hasBrowserToolsRole := false
 	for _, host := range hosts.Hosts {
 		for _, svc := range host.Services {
 			allServices = append(allServices, svc)
-			if svc.Role == "playwright-browser" {
-				hasPlaywrightBrowserRole = true
+			if svc.Role == "browser-tools" {
+				hasBrowserToolsRole = true
 				if browserURL != "" && browserURL != svc.Endpoint {
-					return fmt.Errorf("multiple Playwright attachment endpoints are configured")
+					return fmt.Errorf("multiple browser-tools attachment endpoints are configured")
 				}
 				browserURL = svc.Endpoint
 			}
-		}
-		if browserURL == "" && host.BrowserPort > 0 {
-			browserURL = fmt.Sprintf("http://locho-%s:%d", host.Host, host.BrowserPort)
 		}
 	}
 
@@ -254,7 +249,7 @@ func generateAttachmentsFile(config Config) error {
 			}
 			if browserURL != "" {
 				fmt.Fprintf(&builder, "      OPENLIA_BROWSER_MCP_URL: %q\n", browserURL)
-				builder.WriteString("      OPENLIA_TOOLS_URL: \"http://openlia-tools:8787\"\n")
+				fmt.Fprintf(&builder, "      OPENLIA_BROWSER_JOBS_URL: %q\n", browserURL)
 			}
 			for _, svc := range allServices {
 				if svc.Role != "unassigned" {
@@ -323,20 +318,6 @@ func generateAttachmentsFile(config Config) error {
 		builder.WriteString("    deploy:\n      resources:\n        limits:\n          cpus: \"1.0\"\n          memory: 1G\n")
 		builder.WriteString("    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n")
 	}
-	if browserURL != "" {
-		dataRoot, _ := json.Marshal(config.DataRoot)
-		fmt.Fprintf(&builder, "  openlia-tools:\n    image: \"${OPENLIA_TOOLS_IMAGE:-openlia-tools:v0.1.0}\"\n")
-		builder.WriteString("    build:\n      context: ..\n      dockerfile: docker/tools.Dockerfile\n")
-		builder.WriteString("    command: [\"bun\", \"/opt/openlia/tools/server.js\"]\n    restart: unless-stopped\n    read_only: true\n    tmpfs:\n      - /tmp\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n")
-		builder.WriteString("    environment:\n      HERMES_HOME: /opt/data\n      OPENLIA_BROWSER_MCP_URL: ")
-		quotedBrowserURL, _ := json.Marshal(browserURL)
-		builder.Write(quotedBrowserURL)
-		builder.WriteString("\n      OPENLIA_TOOLS_DATA_ROOT: /opt/data\n    volumes:\n      - type: bind\n        source: ")
-		builder.Write(dataRoot)
-		builder.WriteString("\n        target: /opt/data\n    networks:\n      - openlia-private\n")
-		builder.WriteString("    deploy:\n      resources:\n        limits:\n          cpus: \"1.0\"\n          memory: 1G\n")
-		builder.WriteString("    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n")
-	}
 	for _, host := range hosts.Hosts {
 		configPath := filepath.Join(config.LochoRoot, host.Host, "attachments.toml")
 		quoted, _ := json.Marshal(configPath)
@@ -354,7 +335,7 @@ func generateAttachmentsFile(config Config) error {
 	if err := AtomicWriteFile(config.GeneratedCompose, []byte(builder.String()), 0o600); err != nil {
 		return err
 	}
-	if err := ReconcileBrowserPolicy(config, hasPlaywrightBrowserRole, browserURL); err != nil {
+	if err := ReconcileBrowserPolicy(config, hasBrowserToolsRole, browserURL); err != nil {
 		return err
 	}
 	return nil
@@ -539,13 +520,12 @@ func backupFile(config Config, source, label string, mode os.FileMode, now time.
 	return destination, nil
 }
 
-func serviceInventory(host, path string, roles map[string]string) ([]LochoService, int, error) {
+func serviceInventory(host, path string, roles map[string]string) ([]LochoService, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	var services []LochoService
-	browserPort := 0
 	inService := false
 	capability := ""
 	listenPort := 0
@@ -577,7 +557,7 @@ func serviceInventory(host, path string, roles map[string]string) ([]LochoServic
 			role = assigned
 		}
 		endpoint := fmt.Sprintf("http://locho-%s:%d", host, listenPort)
-		if proto == "tcp" && role != "playwright-browser" {
+		if proto == "tcp" && role != "browser-tools" {
 			endpoint = fmt.Sprintf("locho-%s:%d", host, listenPort)
 		}
 		services = append(services, LochoService{
@@ -588,11 +568,6 @@ func serviceInventory(host, path string, roles map[string]string) ([]LochoServic
 			Endpoint: endpoint,
 			Role:     role,
 		})
-		if role == "playwright-browser" && browserPort == 0 && listenPort > 0 {
-			browserPort = listenPort
-		} else if browserPort == 0 && (strings.HasPrefix(capability, "playwright:") || name == "playwright") && listenPort > 0 {
-			browserPort = listenPort
-		}
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
@@ -622,7 +597,7 @@ func serviceInventory(host, path string, roles map[string]string) ([]LochoServic
 		}
 	}
 	flush()
-	return services, browserPort, nil
+	return services, nil
 }
 
 func sanitizeEnvKey(name string) string {

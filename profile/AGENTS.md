@@ -57,7 +57,7 @@ rather than editing its generated state files directly.
 
 ## Attached Playwright MCP
 
-When a `playwright-browser` attachment is configured, Hermes' native browser
+When a `browser-tools` attachment is configured, Hermes' native browser
 toolset is disabled and the attached MCP tools are the only generic browser
 surface. Use the registered `mcp__openlia_playwright__browser_*` tools for Maps,
 shopping, and ordinary web navigation. Do not invent terminal scripts such as

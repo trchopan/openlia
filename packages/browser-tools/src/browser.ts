@@ -24,6 +24,14 @@ export type BrowserJobMeta = {
   url: string;
   started_at?: string;
 };
+export type BrowserRouteMeta = {
+  start: string;
+  destination: string;
+  mode: string;
+  url: string;
+  snapshot: string;
+  observed_at?: string;
+};
 export type ToolResult = {
   content?: Array<{ type?: string; text?: string }>;
   [key: string]: unknown;
@@ -55,7 +63,12 @@ function parseEvaluate(raw: string): unknown {
   }
   try {
     const parsed: unknown = JSON.parse(cleaned);
-    return typeof parsed === "string" ? JSON.parse(parsed) : parsed;
+    if (typeof parsed !== "string") return parsed;
+    try {
+      return JSON.parse(parsed);
+    } catch {
+      return parsed;
+    }
   } catch {
     const firstObject = Math.min(
       ...[cleaned.indexOf("{"), cleaned.indexOf("[")].filter(
@@ -73,7 +86,12 @@ function parseEvaluate(raw: string): unknown {
     const parsed: unknown = JSON.parse(
       cleaned.slice(firstObject, lastObject + 1),
     );
-    return typeof parsed === "string" ? JSON.parse(parsed) : parsed;
+    if (typeof parsed !== "string") return parsed;
+    try {
+      return JSON.parse(parsed);
+    } catch {
+      return parsed;
+    }
   }
 }
 
@@ -93,8 +111,6 @@ export class McpClient {
   private pending = new Map<number, Pending>();
   private endpointResolve: ((value: string) => void) | undefined;
   private endpointReject: ((error: Error) => void) | undefined;
-  openliaTabOwned = false;
-
   constructor(baseUrl = "http://localhost:8931") {
     this.baseUrl = baseUrl.replace(/\/+$/, "") || "http://localhost:8931";
     this.host = hostHeader(this.baseUrl);
@@ -122,7 +138,7 @@ export class McpClient {
       {
         protocolVersion: "2024-11-05",
         capabilities: {},
-        clientInfo: { name: "openlia-tools", version: "0.1.0" },
+        clientInfo: { name: "openlia-browser-tools", version: "0.1.0" },
       },
       15_000,
     );
@@ -298,7 +314,7 @@ export class McpClient {
 
   close(): void {
     this.controller.abort();
-    void this.reader?.cancel();
+    void this.reader?.cancel().catch(() => undefined);
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(new Error("MCP session closed"));
@@ -307,41 +323,118 @@ export class McpClient {
   }
 }
 
-async function closeCurrentTab(client: McpClient): Promise<void> {
+type TabEntry = { index: number; current: boolean; label: string };
+type OwnedTab = { index: number; created: boolean };
+
+function tabEntries(text: string): TabEntry[] {
+  return [...text.matchAll(/^\s*-\s*(\d+):([^\n]*)$/gm)].map((match) => ({
+    index: Number(match[1]),
+    current: /\(current\)/i.test(match[2] ?? ""),
+    label: match[2] ?? "",
+  }));
+}
+
+export function currentTabIndex(text: string): number | null {
+  const entry = tabEntries(text).find((tab) => tab.current);
+  return entry?.index ?? null;
+}
+
+async function listTabs(client: McpClient): Promise<TabEntry[]> {
+  return tabEntries(
+    client.getToolText(
+      await client.callTool("browser_tabs", { action: "list" }, 15_000),
+    ),
+  );
+}
+
+async function selectTab(client: McpClient, index: number): Promise<void> {
+  await client.callTool("browser_tabs", { action: "select", index }, 10_000);
+}
+
+async function openOwnedTab(client: McpClient, url: string): Promise<OwnedTab> {
+  const before = await listTabs(client);
+  if (!before.length) throw new Error("browser MCP returned no tabs");
+  const current = before.find((tab) => tab.current);
+  if (current && /chrome-extension:\/\/.*welcome/i.test(current.label)) {
+    await callOwnedTool(
+      client,
+      current.index,
+      "browser_navigate",
+      { url },
+      60_000,
+    );
+    return { index: current.index, created: false };
+  }
   try {
-    await client.callTool("browser_tabs", { action: "close" }, 10_000);
+    await client.callTool("browser_tabs", { action: "new" }, 15_000);
+    const after = await listTabs(client);
+    const created = after.find((tab) => tab.current);
+    if (!created) throw new Error("browser MCP did not identify the new tab");
+    await callOwnedTool(
+      client,
+      created.index,
+      "browser_navigate",
+      { url },
+      60_000,
+    );
+    return { index: created.index, created: true };
+  } catch (error) {
+    if (!current) throw error;
+    await callOwnedTool(
+      client,
+      current.index,
+      "browser_navigate",
+      { url },
+      60_000,
+    );
+    return { index: current.index, created: false };
+  }
+}
+
+async function closeOwnedTab(
+  client: McpClient,
+  tab: OwnedTab | undefined,
+  expectedLabel = "",
+): Promise<void> {
+  if (!tab) return;
+  try {
+    if (!tab.created) {
+      await callOwnedTool(
+        client,
+        tab.index,
+        "browser_navigate",
+        {
+          url: "about:blank",
+        },
+        30_000,
+      );
+      return;
+    }
+    if (expectedLabel) {
+      const entry = (await listTabs(client)).find(
+        (entry) => entry.index === tab.index,
+      );
+      if (!entry?.label.toLowerCase().includes(expectedLabel)) return;
+    }
+    await client.callTool(
+      "browser_tabs",
+      { action: "close", index: tab.index },
+      10_000,
+    );
   } catch {
     /* cleanup is best effort */
   }
 }
 
-function currentOwnedWelcomeTab(text: string): boolean {
-  return text
-    .split("\n")
-    .some(
-      (line) =>
-        /\(current\)/i.test(line) &&
-        /chrome-extension:\/\//i.test(line) &&
-        /welcome/i.test(line),
-    );
-}
-
-async function enforceTabCap(client: McpClient, maxTabs = 2): Promise<void> {
-  try {
-    const text = client.getToolText(
-      await client.callTool("browser_tabs", { action: "list" }, 10_000),
-    );
-    const indexes = [...text.matchAll(/^\s*-\s*(\d+):/gm)]
-      .map((match) => Number(match[1]))
-      .filter(Number.isInteger)
-      .sort((a, b) => b - a);
-    for (const index of indexes.slice(maxTabs))
-      await client
-        .callTool("browser_tabs", { action: "close", index }, 5_000)
-        .catch(() => undefined);
-  } catch {
-    /* tab cleanup must not bypass the privacy gate */
-  }
+async function callOwnedTool(
+  client: McpClient,
+  tabIndex: number,
+  name: string,
+  argumentsValue: Record<string, unknown>,
+  timeout = 90_000,
+): Promise<ToolResult> {
+  await selectTab(client, tabIndex);
+  return client.callTool(name, argumentsValue, timeout);
 }
 
 function activeChatGpt(text: string): boolean {
@@ -363,6 +456,22 @@ function activeGemini(text: string): boolean {
   );
 }
 
+function expectedChatHost(platform: "chatgpt" | "gemini"): string {
+  return platform === "chatgpt" ? "chatgpt.com" : "gemini.google.com";
+}
+
+async function assertChatPage(
+  client: McpClient,
+  tabIndex: number,
+  platform: "chatgpt" | "gemini",
+): Promise<void> {
+  const url = String(
+    await evaluate(client, tabIndex, "() => window.location.href"),
+  );
+  if (!url.toLowerCase().includes(expectedChatHost(platform)))
+    throw new Error(`${platform} owned tab changed before prompt submission`);
+}
+
 function completionScript(
   platform: "chatgpt" | "gemini",
   prompt?: string,
@@ -372,16 +481,23 @@ function completionScript(
   return `() => { const normalize=v=>(v||"").replace(/\\s+/g," ").trim(), expected=normalize(${JSON.stringify(prompt ?? "")}), users=[...document.querySelectorAll("user-query,.user-query-container,div[data-test-id='user-query']")].filter((e,i,a)=>!a.some((o,j)=>i!==j&&o.contains(e))), models=[...document.querySelectorAll("model-response,div[data-test-id='model-response'],message-content")].filter(e=>!e.closest("user-query,.user-query-container,div[data-test-id='user-query']")).filter(e=>normalize(e.innerText)!==expected), last=models.at(-1), stop=document.querySelector("button[aria-label*='Stop'],[aria-label*='Stop response']"); return JSON.stringify({user_count:users.length,model_count:models.length,last_model_text:last?.innerText?.trim()||"",stop_visible:!!stop}); }`;
 }
 
-async function evaluate(client: McpClient, script: string): Promise<unknown> {
+async function evaluate(
+  client: McpClient,
+  tabIndex: number,
+  script: string,
+): Promise<unknown> {
   return parseEvaluate(
     client.getToolText(
-      await client.callTool("browser_evaluate", { function: script }),
+      await callOwnedTool(client, tabIndex, "browser_evaluate", {
+        function: script,
+      }),
     ),
   );
 }
 
 async function waitForCompletion(
   client: McpClient,
+  tabIndex: number,
   platform: "chatgpt" | "gemini",
   initial: number,
   prompt: string,
@@ -393,6 +509,7 @@ async function waitForCompletion(
   while (Date.now() - started < timeoutSeconds * 1000) {
     const state = (await evaluate(
       client,
+      tabIndex,
       completionScript(platform, prompt),
     )) as Record<string, unknown>;
     const count = Number(
@@ -445,6 +562,40 @@ export function cleanUrl(value: string): string {
   } catch {
     return "";
   }
+}
+
+export function mapsRouteUrl(
+  start: string,
+  destination: string,
+  mode: string,
+): string {
+  const params = new URLSearchParams({
+    api: "1",
+    origin: start,
+    destination,
+    travelmode: mode,
+  });
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+export function buildRouteYaml(
+  meta: BrowserRouteMeta,
+  now = new Date().toISOString(),
+): string {
+  return `${yaml({
+    schema: 1,
+    type: "google_maps_route",
+    request: {
+      start: meta.start,
+      destination: meta.destination,
+      mode: meta.mode,
+    },
+    session: {
+      observed_at: meta.observed_at ?? now,
+      url: meta.url,
+    },
+    snapshot: meta.snapshot,
+  })}\n`;
 }
 
 function siteMetadata(urlValue: string, title: string): [string, string] {
@@ -627,66 +778,60 @@ export async function executeBrowserChat(
   dataRoot: string,
 ): Promise<string> {
   let client: McpClient | undefined;
-  let owned = false;
+  let ownedTab: OwnedTab | undefined;
   let lastError: unknown;
   try {
     for (let attempt = 0; attempt < 3; attempt++) {
       const candidate = new McpClient(mcpUrl || "http://localhost:8931");
+      let candidateTab: OwnedTab | undefined;
       try {
         await candidate.connect();
-        const tabs = candidate.getToolText(
-          await candidate.callTool("browser_tabs", { action: "list" }, 15_000),
-        );
-        if (!currentOwnedWelcomeTab(tabs))
-          throw new Error(
-            "no current OpenLia-owned extension Welcome tab is available; no prompt was sent",
-          );
-        candidate.openliaTabOwned = true;
-        owned = true;
-        await candidate.callTool(
-          "browser_navigate",
-          {
-            url:
-              platform === "chatgpt"
-                ? "https://chatgpt.com/?temporary-chat=true"
-                : "https://gemini.google.com/app",
-          },
-          30_000,
+        candidateTab = await openOwnedTab(
+          candidate,
+          platform === "chatgpt"
+            ? "https://chatgpt.com/?temporary-chat=true"
+            : "https://gemini.google.com/app",
         );
         client = candidate;
+        ownedTab = candidateTab;
         break;
       } catch (error) {
         lastError = error;
-        if (candidate.openliaTabOwned) await closeCurrentTab(candidate);
+        await closeOwnedTab(
+          candidate,
+          candidateTab,
+          platform === "chatgpt" ? "chatgpt.com" : "gemini.google.com",
+        );
         candidate.close();
-        owned = false;
+        ownedTab = undefined;
         if (attempt === 2) throw error;
         await sleep(1000);
       }
     }
     if (!client) throw lastError ?? new Error("browser MCP preflight failed");
-    await enforceTabCap(client);
+    if (!ownedTab) throw new Error("browser MCP did not return an owned tab");
+    const tabIndex = ownedTab.index;
     await sleep(1000);
     let snapshot = client.getToolText(
-      await client.callTool("browser_snapshot", {}),
+      await callOwnedTool(client, tabIndex, "browser_snapshot", {}),
     );
     const active =
       platform === "chatgpt" ? activeChatGpt(snapshot) : activeGemini(snapshot);
     if (!active) {
-      await client.callTool("browser_click", {
+      await callOwnedTool(client, tabIndex, "browser_click", {
         target:
           platform === "chatgpt"
             ? 'button[data-testid="model-selector-dropdown"],button[aria-label*="Model"]'
             : 'button[aria-label="Temporary chat"]',
       });
       if (platform === "chatgpt")
-        await client.callTool("browser_click", {
+        await callOwnedTool(client, tabIndex, "browser_click", {
           target: 'button[role="switch"],div:has-text("Temporary chat")',
         });
       for (let attempt = 0; attempt < 6; attempt++) {
         await sleep(platform === "gemini" ? 1000 : 1500);
         snapshot = client.getToolText(
-          await client.callTool("browser_snapshot", {}),
+          await callOwnedTool(client, tabIndex, "browser_snapshot", {}),
         );
         if (
           platform === "chatgpt"
@@ -700,14 +845,27 @@ export async function executeBrowserChat(
           );
       }
     }
+    await assertChatPage(client, tabIndex, platform);
+    const verifiedSnapshot = client.getToolText(
+      await callOwnedTool(client, tabIndex, "browser_snapshot", {}),
+    );
+    if (
+      !(platform === "chatgpt"
+        ? activeChatGpt(verifiedSnapshot)
+        : activeGemini(verifiedSnapshot))
+    )
+      throw new Error(
+        `Zero-Tolerance Gatekeeper: ${platform} Temporary Chat changed before prompt submission. Aborting query.`,
+      );
     const initial = (await evaluate(
       client,
+      tabIndex,
       completionScript(platform, prompt),
     )) as Record<string, unknown>;
     const count = Number(
       initial[platform === "chatgpt" ? "assistant_count" : "model_count"] ?? 0,
     );
-    await client.callTool("browser_type", {
+    await callOwnedTool(client, tabIndex, "browser_type", {
       target:
         platform === "chatgpt"
           ? '#prompt-textarea,div[contenteditable="true"]'
@@ -719,8 +877,10 @@ export async function executeBrowserChat(
       platform === "chatgpt"
         ? 'button[data-testid="send-button"],button[aria-label*="Send"]'
         : 'button[aria-label="Send message"]';
-    await client.callTool("browser_click", { target: send });
-    await waitForCompletion(client, platform, count, prompt, timeout);
+    await callOwnedTool(client, tabIndex, "browser_click", {
+      target: send,
+    });
+    await waitForCompletion(client, tabIndex, platform, count, prompt, timeout);
     const extraction =
       platform === "chatgpt"
         ? CHATGPT_EXTRACTION
@@ -730,7 +890,9 @@ export async function executeBrowserChat(
           );
     const turns = parseEvaluate(
       client.getToolText(
-        await client.callTool("browser_evaluate", { function: extraction }),
+        await callOwnedTool(client, tabIndex, "browser_evaluate", {
+          function: extraction,
+        }),
       ),
     ) as BrowserMessage[];
     if (
@@ -744,7 +906,7 @@ export async function executeBrowserChat(
       );
     if (platform === "gemini") {
       const currentUrl = String(
-        await evaluate(client, "() => window.location.href"),
+        await evaluate(client, tabIndex, "() => window.location.href"),
       );
       if (/\/app\/[A-Za-z0-9_-]{10,}/.test(currentUrl))
         throw new Error(
@@ -779,8 +941,56 @@ export async function executeBrowserChat(
     return destination;
   } finally {
     if (client) {
-      if (owned) await closeCurrentTab(client);
+      await closeOwnedTab(
+        client,
+        ownedTab,
+        platform === "chatgpt" ? "chatgpt.com" : "gemini.google.com",
+      );
       client.close();
     }
+  }
+}
+
+export async function executeBrowserRoute(
+  start: string,
+  destination: string,
+  mode: string,
+  outputPath: string,
+  mcpUrl: string,
+  timeout: number,
+): Promise<string> {
+  const client = new McpClient(mcpUrl || "http://localhost:8931");
+  let ownedTab: OwnedTab | undefined;
+  try {
+    await client.connect();
+    ownedTab = await openOwnedTab(
+      client,
+      mapsRouteUrl(start, destination, mode),
+    );
+    await sleep(Math.min(5_000, Math.max(1_000, timeout * 100)));
+    if (!ownedTab) throw new Error("browser MCP did not return an owned tab");
+    const tabIndex = ownedTab.index;
+    const snapshot = client.getToolText(
+      await callOwnedTool(client, tabIndex, "browser_snapshot", {}),
+    );
+    if (!snapshot.trim())
+      throw new Error("Google Maps returned an empty route snapshot");
+    const currentUrl = String(
+      await evaluate(client, tabIndex, "() => window.location.href"),
+    );
+    atomicWrite(
+      outputPath,
+      buildRouteYaml({
+        start,
+        destination,
+        mode,
+        url: currentUrl || mapsRouteUrl(start, destination, mode),
+        snapshot,
+      }),
+    );
+    return outputPath;
+  } finally {
+    await closeOwnedTab(client, ownedTab, "google.com/maps");
+    client.close();
   }
 }

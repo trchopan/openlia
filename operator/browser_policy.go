@@ -32,7 +32,7 @@ func managedBrowserPolicy(endpoint string) []string {
 }
 
 // ReconcileBrowserPolicy removes Hermes' native browser toolset when OpenLia
-// owns an explicit Playwright attachment. The policy is deliberately separate
+// owns an explicit browser-tools attachment. The policy is deliberately separate
 // from browser endpoint discovery so an unassigned legacy endpoint cannot
 // silently change the model's tool surface.
 func ReconcileBrowserPolicy(config Config, playwrightRole bool, browserEndpoint string) error {
@@ -56,7 +56,7 @@ func ReconcileBrowserPolicy(config Config, playwrightRole bool, browserEndpoint 
 
 func renderBrowserPolicy(data []byte, playwrightRole bool, browserEndpoint string) ([]byte, bool, error) {
 	if playwrightRole && browserEndpoint == "" {
-		return nil, false, fmt.Errorf("Playwright browser policy requires a browser MCP endpoint")
+		return nil, false, fmt.Errorf("browser-tools policy requires a browser MCP endpoint")
 	}
 	lines := strings.Split(string(data), "\n")
 	start, end := -1, -1

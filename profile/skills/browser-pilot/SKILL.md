@@ -22,7 +22,7 @@ Use when a task requires driving a live, headed browser session with existing us
 
 ## Tool Selection
 
-When an attached service is mapped to the `playwright-browser` role, Hermes'
+When an attached service is mapped to the `browser-tools` role, Hermes'
 native `browser_*` toolset is intentionally disabled and the attached Playwright
 MCP server is registered directly with Hermes. Use the attached Playwright MCP
 tools for Maps, shopping, and generic browser workflows. Use the queued OpenLia
@@ -35,7 +35,7 @@ prefixed `mcp__openlia_playwright__`, for example:
 `mcp__openlia_playwright__browser_click`. Do not invent terminal scripts such as
 `maps_client.py`, and do not call the disabled native `browser_*` names.
 
-When no `playwright-browser` role is configured, use the browser automation tools
+When no `browser-tools` role is configured, use the browser automation tools
 to pilot the native browser session:
 - `browser_navigate`: Navigate to a URL
 - `browser_snapshot`: Read the current page text or accessibility tree

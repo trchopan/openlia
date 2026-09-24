@@ -82,7 +82,6 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 	}
 	wasRunning := false
 	uiWasRunning := false
-	toolsWasRunning := false
 	if compose != nil && compose.ServiceRunning(ctx, "hermes") {
 		if _, err := compose.Run(ctx, "stop", "hermes"); err != nil {
 			return BackupResult{}, fmt.Errorf("cannot stop Hermes for a consistent backup")
@@ -98,18 +97,6 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 		}
 		uiWasRunning = true
 	}
-	if compose != nil && compose.ServiceRunning(ctx, "openlia-tools") {
-		if _, err := compose.Run(ctx, "stop", "openlia-tools"); err != nil {
-			if wasRunning {
-				_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "hermes")
-			}
-			if uiWasRunning {
-				_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "workspace-ui")
-			}
-			return BackupResult{}, fmt.Errorf("cannot stop openlia-tools for a consistent backup")
-		}
-		toolsWasRunning = true
-	}
 	openWebUIWasRunning := false
 	if compose != nil && config.OpenWebUIHost != "" && compose.ServiceRunning(ctx, "open-webui") {
 		if _, err := compose.Run(ctx, "stop", "open-webui"); err != nil {
@@ -119,15 +106,12 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 			if uiWasRunning {
 				_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "workspace-ui")
 			}
-			if toolsWasRunning {
-				_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "openlia-tools")
-			}
 			return BackupResult{}, fmt.Errorf("cannot stop open-webui for a consistent backup")
 		}
 		openWebUIWasRunning = true
 	}
 	defer func() {
-		if !wasRunning && !uiWasRunning && !toolsWasRunning && !openWebUIWasRunning {
+		if !wasRunning && !uiWasRunning && !openWebUIWasRunning {
 			return
 		}
 		if wasRunning {
@@ -151,20 +135,6 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 					msg = strings.TrimSpace(string(res.Stdout))
 				}
 				failure := fmt.Errorf("workspace UI could not be restarted (%s): %w", msg, restartErr)
-				if err == nil {
-					err = fmt.Errorf("backup completed but %w", failure)
-				} else {
-					err = fmt.Errorf("%v; %w", err, failure)
-				}
-			}
-		}
-		if toolsWasRunning {
-			if res, restartErr := compose.Run(ctx, "up", "-d", "--no-deps", "openlia-tools"); restartErr != nil {
-				msg := strings.TrimSpace(string(res.Stderr))
-				if msg == "" {
-					msg = strings.TrimSpace(string(res.Stdout))
-				}
-				failure := fmt.Errorf("openlia-tools could not be restarted (%s): %w", msg, restartErr)
 				if err == nil {
 					err = fmt.Errorf("backup completed but %w", failure)
 				} else {
@@ -441,11 +411,6 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 			if config.WorkspaceUIHost != "" && compose.ServiceRunning(ctx, "workspace-ui") {
 				if _, stopErr := compose.Run(ctx, "stop", "workspace-ui"); stopErr != nil {
 					return BackupResult{}, fmt.Errorf("cannot stop workspace UI before restore")
-				}
-			}
-			if compose.ServiceRunning(ctx, "openlia-tools") {
-				if _, stopErr := compose.Run(ctx, "stop", "openlia-tools"); stopErr != nil {
-					return BackupResult{}, fmt.Errorf("cannot stop openlia-tools before restore")
 				}
 			}
 		}

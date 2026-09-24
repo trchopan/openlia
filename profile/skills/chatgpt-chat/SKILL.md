@@ -49,7 +49,7 @@ the completed YAML with `result JOB_ID`; do not hold one terminal invocation ope
 for the full remote-browser conversation.
 
 #### What the Script Handles Automatically:
-1. **MCP Connection**: Connects to the local/remote Playwright MCP server (`localhost:8931` or `OPENLIA_BROWSER_MCP_URL`).
+1. **MCP Connection**: Connects to the host-local browser-tools MCP proxy through the configured browser attachment.
 2. **Temporary Navigation**: Navigates to `https://chatgpt.com/?temporary-chat=true`.
 3. **Gatekeeper Verification**: Verifies the "Temporary Chat" badge or "Chat history is turned off" text in the accessibility tree before typing. Fails closed if unverified.
 4. **Prompt Submission**: Inputs text into `#prompt-textarea` and clicks the send button (or presses Enter).
