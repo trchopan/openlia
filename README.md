@@ -72,12 +72,32 @@ Browser tools are configured independently from the Hermes deployment target:
 mode = "ssh"
 target = "user@browser-host"
 ssh_port = 22
-root = "/home/user/services/browser-tools"
-extension_token_file = "/home/user/services/playwright-server-token.txt"
+root = "<path_to_browser_tools_root>"
+extension_token_file = "<path_to_extension_token_file>"
 ```
 
 Manage the selected browser host with `openlia browser-tools configure`,
 `install`, `start`, `stop`, `restart`, `status`, `logs`, and `uninstall`.
+
+For a browser on the same machine:
+
+```toml
+[browser-tools]
+mode = "local"
+target = ""
+root = "<path_to_browser_tools_root>"
+extension_token_file = "<path_to_extension_token_file>"
+```
+
+The token file must be owned by the browser user and protected with mode `0600`.
+Raw Playwright MCP uses port `8931` on loopback; `browser-tools` uses port
+`8932` and is the only endpoint that should be attached to OpenLia through
+Locho.
+
+Local mode changes where OpenLia manages the browser-tools process; it does not
+bypass Locho. Configure a Locho browser-tools attachment for both local and
+remote browser hosts. See [`packages/browser-tools/README.md`](packages/browser-tools/README.md)
+for the short connection guide.
 
 The target repository layout is:
 

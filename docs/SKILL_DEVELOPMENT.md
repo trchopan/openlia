@@ -32,13 +32,30 @@ go run . skills test SKILL_NAME
 
 ### Browser Skill Verification
 
-Browser-backed bundled skills require a local Playwright MCP server with the
-browser extension and shared browser context enabled:
+Browser-backed bundled skills use the host-local `browser-tools` service. It
+supervises Playwright MCP and exposes the only browser endpoint that OpenLia
+should attach through Locho. Configure it with a browser-tools root and a
+protected extension-token file before running live canaries.
 
 ```sh
-npx @playwright/mcp@latest --host 127.0.0.1 --port 8931 --extension \
-  --idle-timeout 0 --shared-browser-context
+openlia browser-tools configure \
+  --local \
+  --root "<path_to_browser_tools_root>" \
+  --extension-token-file "<path_to_extension_token_file>"
+openlia browser-tools install
+openlia browser-tools start
+openlia browser-tools doctor
 ```
+
+For a separate browser host, replace `--local` with `--target
+user@browser-host --ssh-port 22`. Raw Playwright MCP remains on
+loopback port `8931`; browser-tools is exposed on port `8932`.
+
+Hermes reaches browser-tools through a Locho attachment in both local and
+remote deployments. Do not attach the raw Playwright MCP port directly.
+
+Direct `npx @playwright/mcp` startup is reserved for disposable development
+only and must use the pinned version documented by the browser-tools release.
 
 Run the live canaries only when an authenticated disposable browser session is
 available:
