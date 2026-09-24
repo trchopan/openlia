@@ -54,6 +54,15 @@ const allowedOrigins = new Set(
 );
 const routeModes = new Set(["driving", "transit", "walking", "bicycling"]);
 const tools = new Set(["chatgpt-chat", "gemini-chat", "maps-route"]);
+const outputLanguagePattern = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/;
+const configuredOutputLanguage = process.env.OPENLIA_OUTPUT_LANGUAGE ?? "en";
+
+function validOutputLanguage(value: string): boolean {
+  return outputLanguagePattern.test(value);
+}
+
+if (!validOutputLanguage(configuredOutputLanguage))
+  throw new Error("OPENLIA_OUTPUT_LANGUAGE must be a BCP 47 language tag");
 
 type JsonObject = Record<string, unknown>;
 type JobStatus =
@@ -69,6 +78,7 @@ type JobRow = {
   client_id: string;
   tool: string;
   prompt: string;
+  language: string;
   topic: string;
   input_json: string;
   output_path: string;
@@ -119,6 +129,7 @@ function publicJob(row: JobRow | null): JsonObject {
     job_id: row.id,
     client_id: row.client_id,
     tool: row.tool,
+    language: row.language,
     status: row.status,
     phase: row.phase,
     created_at: row.created_at,
@@ -202,6 +213,7 @@ class Store {
       client_id TEXT NOT NULL,
       tool TEXT NOT NULL,
       prompt TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT 'en',
       topic TEXT NOT NULL,
       input_json TEXT NOT NULL,
       output_path TEXT NOT NULL,
@@ -214,6 +226,17 @@ class Store {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`);
+    const columns = this.db.prepare("PRAGMA table_info(jobs)").all() as Array<{
+      name: string;
+    }>;
+    if (!columns.some((column) => column.name === "language")) {
+      this.db.exec(
+        "ALTER TABLE jobs ADD COLUMN language TEXT NOT NULL DEFAULT 'en'",
+      );
+      this.db
+        .prepare("UPDATE jobs SET language=? WHERE status='queued'")
+        .run(configuredOutputLanguage);
+    }
     this.db
       .prepare(
         "UPDATE jobs SET status='failed_uncertain',phase='daemon_restart',error=?,updated_at=? WHERE status IN ('running','blocked_browser_offline')",
@@ -252,13 +275,14 @@ class Store {
   create(row: Omit<JobRow, "status" | "phase" | "error" | "updated_at">): void {
     this.db
       .prepare(`INSERT INTO jobs
-      (id,client_id,tool,prompt,topic,input_json,output_path,fingerprint,idempotency_key,timeout_seconds,status,phase,error,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,'queued','queued','',?,?)`)
+      (id,client_id,tool,prompt,language,topic,input_json,output_path,fingerprint,idempotency_key,timeout_seconds,status,phase,error,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,'queued','queued','',?,?)`)
       .run(
         row.id,
         row.client_id,
         row.tool,
         row.prompt,
+        row.language,
         row.topic,
         row.input_json,
         row.output_path,
@@ -357,6 +381,7 @@ class JobService {
     if (!tools.has(tool))
       return [{ ok: false, error: "unknown browser tool" }, 400];
     let prompt = "";
+    let language = configuredOutputLanguage;
     let topic = typeof input.topic === "string" ? input.topic : "";
     let inputJson = "{}";
     if (tool === "maps-route") {
@@ -391,8 +416,19 @@ class JobService {
     } else {
       if (typeof input.prompt !== "string" || !input.prompt.trim())
         return [{ ok: false, error: "prompt is required" }, 400];
+      if (input.language !== undefined && typeof input.language !== "string")
+        return [
+          { ok: false, error: "language must be a BCP 47 language tag" },
+          400,
+        ];
+      if (typeof input.language === "string") language = input.language.trim();
+      if (!validOutputLanguage(language))
+        return [
+          { ok: false, error: "language must be a BCP 47 language tag" },
+          400,
+        ];
       prompt = input.prompt;
-      inputJson = JSON.stringify({ prompt });
+      inputJson = JSON.stringify({ prompt, language });
     }
     const timeoutValue = input.timeout_seconds ?? 300;
     const timeout = Math.max(30, Math.min(600, Number(timeoutValue)));
@@ -413,6 +449,7 @@ class JobService {
       client_id: clientId,
       tool,
       prompt,
+      language,
       topic,
       input_json: inputJson,
       output_path: resolve(directory, filename),
@@ -452,6 +489,7 @@ class JobService {
         await executeBrowserChat(
           platform,
           row.prompt,
+          row.language,
           row.topic,
           row.output_path,
           mcpUrl,

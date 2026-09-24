@@ -10,6 +10,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import {
+  addOutputLanguageInstruction,
   buildConversationYaml,
   buildRouteYaml,
   cleanUrl,
@@ -20,6 +21,12 @@ import {
 } from "./browser";
 
 describe("browser compatibility helpers", () => {
+  test("adds the configured output language to delegated prompts", () => {
+    expect(addOutputLanguageInstruction("Summarize this", "vi")).toContain(
+      "BCP 47 language tag `vi`",
+    );
+  });
+
   test("normalizes the MCP host header independently of the relay hostname", () => {
     expect(new McpClient("http://locho-browser:9000").host).toBe(
       "localhost:9000",

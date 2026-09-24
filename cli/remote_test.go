@@ -17,6 +17,19 @@ func TestOperationCommandIncludesTimezone(t *testing.T) {
 	}
 }
 
+func TestOperationCommandIncludesOutputLanguage(t *testing.T) {
+	config := defaultConfig()
+	config.Target = "operator@example.test"
+	config.OutputLanguage = "vi"
+	command := (Remote{Config: config}).operationCommand("ops/deploy.sh")
+	if !strings.Contains(command, "OPENLIA_OUTPUT_LANGUAGE='vi'") {
+		t.Fatalf("operation command does not include configured output language: %s", command)
+	}
+	if !strings.Contains(strings.Join(operationEnvironment(config, "/tmp/release"), "\n"), "OPENLIA_OUTPUT_LANGUAGE=vi") {
+		t.Fatal("local environment does not transport output language")
+	}
+}
+
 func TestOperationCommandPrefersTargetOperatorWithLegacyFallback(t *testing.T) {
 	config := defaultConfig()
 	config.Target = "operator@example.test"

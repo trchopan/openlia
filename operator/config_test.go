@@ -27,6 +27,7 @@ func testConfig(repo, runtime string) Config {
 		SkillsCacheRoot:   filepath.Join(runtime, "skill-cache"),
 		SkillsEnvRoot:     filepath.Join(runtime, "skill-envs"),
 		APIHost:           "127.0.0.1",
+		OutputLanguage:    "en",
 		WorkspaceUIHost:   "",
 		WorkspaceUIPort:   8089,
 		OpenWebUIHost:     "",
@@ -74,6 +75,7 @@ func TestLoadConfigFromEnv(t *testing.T) {
 		"OPENLIA_RUNTIME_ROOT":               runtime,
 		"OPENLIA_PROJECT_NAME":               "example",
 		"OPENLIA_PROVIDER":                   "copilot",
+		"OPENLIA_OUTPUT_LANGUAGE":            "vi",
 		"OPENLIA_FALLBACK_PROVIDERS":         `[{"provider":"custom","model":"gateway-model","base_url":"https://gateway.example.test/v1","key_env":"OPENAI_GATEWAY_API_KEY"},{"provider":"openai-api","model":"official-model"}]`,
 		"OPENLIA_LOCAL_MODE":                 "true",
 		"OPENLIA_ENABLED_SKILLS":             "daily-briefing,workspace-git",
@@ -90,8 +92,19 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !config.LocalMode || !config.SkillsConfigured || config.WorkspaceUIHost != "0.0.0.0" || config.WorkspaceUIPort != 8090 || config.WorkspaceUIPublicOrigin != "https://workspace.example.test" || config.OpenWebUIHost != "127.0.0.1" || config.OpenWebUIPort != 8090 || config.OpenWebUIImage != "ghcr.io/open-webui/open-webui:main" || config.OpenWebUIAuth != false || len(config.EnabledSkills) != 2 || config.NetworkName != "example-private" || config.Provider != "copilot" || len(config.FallbackProviders) != 2 || config.FallbackProviders[0].BaseURL != "https://gateway.example.test/v1" || config.FallbackProviders[1].Model != "official-model" {
+	if !config.LocalMode || !config.SkillsConfigured || config.OutputLanguage != "vi" || config.WorkspaceUIHost != "0.0.0.0" || config.WorkspaceUIPort != 8090 || config.WorkspaceUIPublicOrigin != "https://workspace.example.test" || config.OpenWebUIHost != "127.0.0.1" || config.OpenWebUIPort != 8090 || config.OpenWebUIImage != "ghcr.io/open-webui/open-webui:main" || config.OpenWebUIAuth != false || len(config.EnabledSkills) != 2 || config.NetworkName != "example-private" || config.Provider != "copilot" || len(config.FallbackProviders) != 2 || config.FallbackProviders[0].BaseURL != "https://gateway.example.test/v1" || config.FallbackProviders[1].Model != "official-model" {
 		t.Fatalf("unexpected typed config: %+v", config)
+	}
+}
+
+func TestLoadConfigFromEnvRejectsInvalidOutputLanguage(t *testing.T) {
+	_, err := LoadConfigFromEnv(map[string]string{
+		"OPENLIA_REPO_ROOT":       t.TempDir(),
+		"OPENLIA_RUNTIME_ROOT":    filepath.Join(t.TempDir(), "runtime"),
+		"OPENLIA_OUTPUT_LANGUAGE": "en_US",
+	})
+	if err == nil || !strings.Contains(err.Error(), "OPENLIA_OUTPUT_LANGUAGE") {
+		t.Fatalf("invalid output language error = %v", err)
 	}
 }
 

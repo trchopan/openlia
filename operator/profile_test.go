@@ -100,3 +100,64 @@ func TestProfileSyncRendersFallbackProviders(t *testing.T) {
 		t.Fatalf("fallback providers were not rendered:\n%s", data)
 	}
 }
+
+func TestProfileSyncUpdatesManagedOutputLanguage(t *testing.T) {
+	repo := t.TempDir()
+	runtime := filepath.Join(t.TempDir(), "runtime")
+	for path, contents := range map[string]string{
+		filepath.Join(repo, "profile", "SOUL.md"):       "# Soul\n\nProfile guidance.\n\n" + outputLanguageBlockStart + "\nUse `en` as the default language.\n" + outputLanguageBlockEnd + "\n",
+		filepath.Join(repo, "profile", "AGENTS.md"):     "agents\n",
+		filepath.Join(repo, "profile", "config.yaml"):   "config\n",
+		filepath.Join(repo, "release", "manifest.json"): `{"openlia":"test"}`,
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	config := testConfig(repo, runtime)
+	if err := os.MkdirAll(filepath.Join(repo, "profile", "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config.OutputLanguage = "en"
+	if _, err := NewProfileOperator(config).Sync(); err != nil {
+		t.Fatal(err)
+	}
+	soulPath := filepath.Join(config.DataRoot, "SOUL.md")
+	data, err := os.ReadFile(soulPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "Use `en` as the default language") {
+		t.Fatalf("default output language was not rendered:\n%s", data)
+	}
+
+	config.OutputLanguage = "vi"
+	if _, err := NewProfileOperator(config).Sync(); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(soulPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "Use `vi` as the default language") || strings.Contains(string(data), "Use `en` as the default language") {
+		t.Fatalf("updated output language was not rendered:\n%s", data)
+	}
+
+	if err := os.WriteFile(soulPath, append([]byte("custom guidance\n"), data...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config.OutputLanguage = "en"
+	if _, err := NewProfileOperator(config).Sync(); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(soulPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "custom guidance") || !strings.Contains(string(data), "Use `en` as the default language") {
+		t.Fatalf("custom guidance or updated language was lost:\n%s", data)
+	}
+}

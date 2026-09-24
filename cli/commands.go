@@ -413,6 +413,11 @@ func commandLifecycle(options Options, action string, args []string) int {
 			return fail(options, ExitFailure, "attachment Compose generation failed: "+err.Error(), nil)
 		}
 	}
+	if action == "restart" {
+		if _, err := deployment.operation(ctx, "profile", nil, "sync", "--json"); err != nil {
+			return fail(options, ExitFailure, "profile synchronization failed: "+err.Error(), map[string]any{"action": action})
+		}
+	}
 	start := action == "start" || action == "restart"
 	raw, err := deployment.deploy(ctx, action, start, "all")
 	if err != nil {

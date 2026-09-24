@@ -466,6 +466,7 @@ config before initializing the deployment:
 [openlia]
 provider = "copilot"
 model = "copilot-model"
+output_language = "en"
 
 [workspace-ui]
 host = "127.0.0.1"
@@ -658,6 +659,22 @@ through its documented `HERMES_TIMEZONE` setting, with `TZ` also set for
 system-level libraries. OpenLia's operational timestamps remain in UTC. When
 managing multiple targets, use a separate `OPENLIA_CONFIG` file for each target
 so each agent can have its own timezone.
+
+Set the agent's default response language in the operator `config.toml` with a
+BCP 47 language tag:
+
+```toml
+[openlia]
+output_language = "vi"
+```
+
+The default is `en`. Run `openlia restart` after changing this value; OpenLia
+updates the managed Hermes language instruction before restarting while
+preserving the stored conversation history. An explicit language request in a
+user message takes precedence for that response. ChatGPT and Gemini jobs use
+the same configured language, unless the current request supplies an explicit
+`--language <BCP47-tag>` override. CLI, Workspace UI, and raw tool output are
+not localized by this setting.
 
 ## Operations
 

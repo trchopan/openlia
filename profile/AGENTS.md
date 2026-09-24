@@ -52,6 +52,7 @@ rather than editing its generated state files directly.
   - **MANDATORY**: You MUST execute through the dedicated automated scripts. NEVER attempt manual, low-level browser tool loops (`browser_type`, `browser_click`).
   - **For ChatGPT**: Submit `bun /opt/data/skills/browser-pilot/scripts/openlia_job.ts submit chatgpt-chat --prompt "<prompt>" --topic "<topic>"`, then poll the returned job ID with `status` and fetch it with `result`.
   - **For Gemini**: Submit `bun /opt/data/skills/browser-pilot/scripts/openlia_job.ts submit gemini-chat --prompt "<prompt>" --topic "<topic>"`, then poll the returned job ID with `status` and fetch it with `result`.
+  - **Output language**: The browser-job client uses the configured `OPENLIA_OUTPUT_LANGUAGE` by default. If the current user request explicitly asks for another language, add `--language <BCP47-tag>` to the submission command. Do not add an override when no explicit request was made.
   - **Zero-Tolerance Temporary Chat**: Both scripts automatically enforce the zero-retention Temporary Chat gatekeeper before submitting prompts, and halt immediately if unverified.
   - **Authentic Markdown & Export**: Both scripts automatically intercept authentic Markdown, sanitize citations, and save standardized YAML files with timestamp prefixes to `workspace/knowledge/<platform>/YYYYMMDD_HHMMSS_<slug>.yaml`.
 

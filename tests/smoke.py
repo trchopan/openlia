@@ -243,6 +243,7 @@ def run_live(args: argparse.Namespace) -> list[dict[str, Any]]:
         config.write_text(
             "[openlia]\n"
             "schema = 1\n"
+            "output_language = \"en\"\n"
             "[secrets]\n"
             f"source = {quote_toml_string(str(staged_env))}\n",
             encoding="utf-8",

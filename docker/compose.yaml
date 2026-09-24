@@ -46,6 +46,7 @@ services:
       NPM_CONFIG_CACHE: /opt/openlia/npm-cache
       OPENLIA_PROVIDER: "${OPENLIA_PROVIDER:-copilot}"
       OPENLIA_MODEL: "${OPENLIA_MODEL:-gpt-5.6-luna}"
+      OPENLIA_OUTPUT_LANGUAGE: "${OPENLIA_OUTPUT_LANGUAGE:-en}"
       HERMES_TIMEZONE: "${HERMES_TIMEZONE:-Asia/Ho_Chi_Minh}"
       TZ: "${HERMES_TIMEZONE:-Asia/Ho_Chi_Minh}"
       OPENLIA_SECRET_FILE_IN_CONTAINER: /run/openlia-secrets/hermes.env

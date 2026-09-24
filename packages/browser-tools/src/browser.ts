@@ -756,15 +756,24 @@ function atomicWrite(path: string, contents: string): void {
   }
 }
 
+export function addOutputLanguageInstruction(
+  prompt: string,
+  language: string,
+): string {
+  return `${prompt}\n\n[OpenLia output-language instruction: respond in the BCP 47 language tag \`${language}\` unless the request explicitly asks for another language.]`;
+}
+
 export async function executeBrowserChat(
   platform: "chatgpt" | "gemini",
   prompt: string,
+  language: string,
   topic: string,
   outputPath: string,
   mcpUrl: string,
   timeout: number,
   dataRoot: string,
 ): Promise<string> {
+  const requestPrompt = addOutputLanguageInstruction(prompt, language);
   let client: McpClient | undefined;
   let ownedTab: OwnedTab | undefined;
   let lastError: unknown;
@@ -848,7 +857,7 @@ export async function executeBrowserChat(
     const initial = (await evaluate(
       client,
       tabIndex,
-      completionScript(platform, prompt),
+      completionScript(platform, requestPrompt),
     )) as Record<string, unknown>;
     const count = Number(
       initial[platform === "chatgpt" ? "assistant_count" : "model_count"] ?? 0,
@@ -858,7 +867,7 @@ export async function executeBrowserChat(
         platform === "chatgpt"
           ? '#prompt-textarea,div[contenteditable="true"]'
           : 'div.ql-editor[contenteditable="true"]',
-      text: prompt,
+      text: requestPrompt,
     });
     await sleep(500);
     const send =
@@ -868,13 +877,20 @@ export async function executeBrowserChat(
     await callOwnedTool(client, tabIndex, "browser_click", {
       target: send,
     });
-    await waitForCompletion(client, tabIndex, platform, count, prompt, timeout);
+    await waitForCompletion(
+      client,
+      tabIndex,
+      platform,
+      count,
+      requestPrompt,
+      timeout,
+    );
     const extraction =
       platform === "chatgpt"
         ? CHATGPT_EXTRACTION
         : GEMINI_EXTRACTION.replace(
             "__OPENLIA_PROMPT__",
-            JSON.stringify(prompt),
+            JSON.stringify(requestPrompt),
           );
     const turns = parseEvaluate(
       client.getToolText(

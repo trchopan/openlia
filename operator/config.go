@@ -33,6 +33,7 @@ type Config struct {
 	LocalMode                   bool
 	Provider                    string
 	Model                       string
+	OutputLanguage              string
 	FallbackProviders           []FallbackProviderConfig
 	HermesImage                 string
 	LochoImage                  string
@@ -166,6 +167,7 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		StateFile:               getOr(values, "OPENLIA_STATE_FILE", filepath.Join(runtimeRoot, "meta", "stack-state")),
 		Provider:                getOr(values, "OPENLIA_PROVIDER", "copilot"),
 		Model:                   getOr(values, "OPENLIA_MODEL", "gpt-5.6-luna"),
+		OutputLanguage:          getOr(values, "OPENLIA_OUTPUT_LANGUAGE", "en"),
 		FallbackProviders:       fallbackProviders,
 		SkillSources:            skillSources,
 		SkillsCacheRoot:         getOr(values, "OPENLIA_SKILLS_CACHE_ROOT", filepath.Join(runtimeRoot, "skill-cache")),
@@ -176,6 +178,9 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		APIHost:                 getOr(values, "OPENLIA_API_HOST", "127.0.0.1"),
 		WorkspaceUIPort:         8089,
 		WorkspaceUIPublicOrigin: values["OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN"],
+	}
+	if err := validateOutputLanguage(config.OutputLanguage); err != nil {
+		return Config{}, fmt.Errorf("OPENLIA_OUTPUT_LANGUAGE: %w", err)
 	}
 
 	if rawRetention := values["OPENLIA_BACKUP_RETENTION"]; rawRetention != "" {
@@ -258,6 +263,29 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 	return config, nil
 }
 
+func validateOutputLanguage(value string) error {
+	parts := strings.Split(value, "-")
+	if len(parts) == 0 || len(parts[0]) < 2 || len(parts[0]) > 8 {
+		return fmt.Errorf("must be a BCP 47 language tag")
+	}
+	for _, character := range parts[0] {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') {
+			return fmt.Errorf("must be a BCP 47 language tag")
+		}
+	}
+	for _, part := range parts[1:] {
+		if len(part) < 1 || len(part) > 8 {
+			return fmt.Errorf("must be a BCP 47 language tag")
+		}
+		for _, character := range part {
+			if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') && (character < '0' || character > '9') {
+				return fmt.Errorf("must be a BCP 47 language tag")
+			}
+		}
+	}
+	return nil
+}
+
 func validateWorkspaceUI(host string, port int, authRequired bool, passwordHashFile string) error {
 	if host != "" && host != "127.0.0.1" && host != "0.0.0.0" {
 		return fmt.Errorf("workspace-ui.host must be 127.0.0.1 or 0.0.0.0")
@@ -325,6 +353,9 @@ func boolValue(values map[string]string, key string, fallback bool) (bool, error
 // ValidatePaths applies the path and component constraints used by the shell
 // operations before they touch the filesystem.
 func (c Config) ValidatePaths() error {
+	if err := validateOutputLanguage(c.OutputLanguage); err != nil {
+		return fmt.Errorf("output language: %w", err)
+	}
 	if err := ValidateAbsolutePath(c.RuntimeRoot, "runtime-root"); err != nil {
 		return err
 	}

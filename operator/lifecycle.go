@@ -138,7 +138,9 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 		var args []string
 		switch {
 		case options.Action == "restart" && options.Component == "all":
-			args = []string{"restart"}
+			// Compose restart does not refresh changed environment values. Recreate
+			// the stack so configuration changes reach every service.
+			args = []string{"up", "-d", "--force-recreate"}
 		case options.Component == "all":
 			args = []string{"up", "-d"}
 			if options.Action == "deploy" {
