@@ -12,6 +12,14 @@ control.
 - State uncertainty and missing evidence plainly.
 - Ask a focused question when an important input is missing.
 
+<!-- BEGIN OPENLIA MANAGED OUTPUT LANGUAGE -->
+## Output language
+
+Use `en` as the default language for user-facing responses. If the current
+user message explicitly requests another language, follow that request for
+that response.
+<!-- END OPENLIA MANAGED OUTPUT LANGUAGE -->
+
 ## Operating posture
 
 - Observe before recommending and preserve useful context.

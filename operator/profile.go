@@ -17,11 +17,13 @@ import (
 )
 
 const (
-	distributionName   = "openlia-personal-os"
-	hashScope          = "skill-files-v1"
-	protectedSkillName = "openlia-skill-migration"
-	fallbackBlockStart = "# BEGIN OPENLIA MANAGED FALLBACK PROVIDERS"
-	fallbackBlockEnd   = "# END OPENLIA MANAGED FALLBACK PROVIDERS"
+	distributionName         = "openlia-personal-os"
+	hashScope                = "skill-files-v1"
+	protectedSkillName       = "openlia-skill-migration"
+	fallbackBlockStart       = "# BEGIN OPENLIA MANAGED FALLBACK PROVIDERS"
+	fallbackBlockEnd         = "# END OPENLIA MANAGED FALLBACK PROVIDERS"
+	outputLanguageBlockStart = "<!-- BEGIN OPENLIA MANAGED OUTPUT LANGUAGE -->"
+	outputLanguageBlockEnd   = "<!-- END OPENLIA MANAGED OUTPUT LANGUAGE -->"
 )
 
 // ProfileOperator synchronizes distribution-owned profile files while leaving
@@ -213,6 +215,8 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 		var err error
 		if filepath.Base(item.dest) == "config.yaml" {
 			err = p.syncHermesConfig(item.source, item.dest, item.marker, item.mode)
+		} else if filepath.Base(item.dest) == "SOUL.md" {
+			err = p.syncSoul(item.source, item.dest, item.marker, item.mode)
 		} else {
 			err = p.syncFile(item.source, item.dest, item.marker, item.mode)
 		}
@@ -313,6 +317,123 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 		return ProfileSyncResult{}, err
 	}
 	return result, nil
+}
+
+func (p *ProfileOperator) syncSoul(source, destination, marker string, mode fs.FileMode) error {
+	sourceData, err := os.ReadFile(source)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	sourceHash := hashSoulWithoutOutputLanguage(sourceData)
+	destinationData, destinationErr := os.ReadFile(destination)
+	if errors.Is(destinationErr, os.ErrNotExist) {
+		destinationData = sourceData
+	} else if destinationErr != nil {
+		return destinationErr
+	}
+	previousHash := ""
+	if contents, readErr := os.ReadFile(marker); readErr == nil {
+		previousHash = strings.TrimSpace(string(contents))
+	}
+	destinationHash := hashSoulWithoutOutputLanguage(destinationData)
+	legacySourceHash, hashErr := fileSHA256(source)
+	if hashErr != nil {
+		return hashErr
+	}
+	legacyDestinationHash := ""
+	if destinationErr == nil {
+		legacyDestinationHash, hashErr = fileSHA256(destination)
+		if hashErr != nil {
+			return hashErr
+		}
+	}
+	managed := destinationErr != nil || (previousHash == "" && (destinationHash == sourceHash || legacyDestinationHash == legacySourceHash)) || (previousHash != "" && (destinationHash == previousHash || legacyDestinationHash == previousHash))
+	if managed {
+		destinationData = sourceData
+		if err := writeMarker(marker, sourceHash); err != nil {
+			return err
+		}
+	}
+	updated, err := renderOutputLanguageBlock(destinationData, p.Config.OutputLanguage)
+	if err != nil {
+		return err
+	}
+	if err := AtomicWriteFile(destination, updated, mode); err != nil {
+		return err
+	}
+	return os.Chmod(destination, mode)
+}
+
+func hashSoulWithoutOutputLanguage(data []byte) string {
+	normalized := normalizeOutputLanguageBlock(data)
+	digest := sha256.Sum256(normalized)
+	return "sha256:" + hex.EncodeToString(digest[:])
+}
+
+func normalizeOutputLanguageBlock(data []byte) []byte {
+	lines := strings.Split(string(data), "\n")
+	result := make([]string, 0, len(lines))
+	inBlock := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == outputLanguageBlockStart {
+			inBlock = true
+			result = append(result, outputLanguageBlockStart, outputLanguageBlockEnd)
+			continue
+		}
+		if inBlock {
+			if trimmed == outputLanguageBlockEnd {
+				inBlock = false
+			}
+			continue
+		}
+		result = append(result, line)
+	}
+	return []byte(strings.Join(result, "\n"))
+}
+
+func renderOutputLanguageBlock(data []byte, language string) ([]byte, error) {
+	lines := strings.Split(string(data), "\n")
+	block := []string{
+		outputLanguageBlockStart,
+		"## Output language",
+		"",
+		fmt.Sprintf("Use `%s` as the default language for user-facing responses. If the current", language),
+		"user message explicitly requests another language, follow that request for that response.",
+		outputLanguageBlockEnd,
+	}
+	start, end := -1, -1
+	for index, line := range lines {
+		switch strings.TrimSpace(line) {
+		case outputLanguageBlockStart:
+			if start >= 0 {
+				return nil, fmt.Errorf("SOUL.md contains duplicate managed output language blocks")
+			}
+			start = index
+		case outputLanguageBlockEnd:
+			if start < 0 || end >= 0 {
+				return nil, fmt.Errorf("SOUL.md contains an invalid managed output language block")
+			}
+			end = index
+		}
+	}
+	if start >= 0 && end < 0 {
+		return nil, fmt.Errorf("SOUL.md contains an incomplete managed output language block")
+	}
+	if start >= 0 {
+		updated := append([]string{}, lines[:start]...)
+		updated = append(updated, block...)
+		updated = append(updated, lines[end+1:]...)
+		return []byte(strings.Join(updated, "\n")), nil
+	}
+	if len(lines) > 0 && lines[len(lines)-1] != "" {
+		lines = append(lines, "")
+	}
+	lines = append(lines, block...)
+	return []byte(strings.Join(lines, "\n")), nil
 }
 
 func (p *ProfileOperator) syncHermesConfig(source, destination, marker string, mode fs.FileMode) error {

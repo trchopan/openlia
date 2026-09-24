@@ -17,6 +17,10 @@ type recordedRunner struct {
 	calls []string
 }
 
+type restartRunner struct {
+	calls []string
+}
+
 type workspaceUIRunner struct {
 	calls []string
 }
@@ -60,6 +64,21 @@ func (r *recordedRunner) Run(_ context.Context, name string, args ...string) (Co
 	return CommandResult{}, nil
 }
 
+func (r *restartRunner) Run(_ context.Context, name string, args ...string) (CommandResult, error) {
+	call := strings.Join(append([]string{name}, args...), " ")
+	r.calls = append(r.calls, call)
+	if name == "docker" && (strings.Contains(call, "ps --services") || strings.Contains(call, "ps -q hermes")) {
+		return CommandResult{Stdout: []byte("hermes\n")}, nil
+	}
+	if name == "docker" && strings.Contains(call, "config --services") {
+		return CommandResult{Stdout: []byte("hermes\n")}, nil
+	}
+	if name == "docker" && strings.Contains(call, "HostConfig.Privileged") {
+		return CommandResult{Stdout: []byte("false\n")}, nil
+	}
+	return CommandResult{}, nil
+}
+
 func TestValidateRuntimeDoesNotRequireTargetArchiveTools(t *testing.T) {
 	repo := t.TempDir()
 	config := testConfig(repo, filepath.Join(t.TempDir(), "runtime"))
@@ -90,6 +109,38 @@ func TestProtectedSkillRefreshRecreatesOnlyRunningHermes(t *testing.T) {
 	}
 	if len(runner.calls) != 1 || !strings.Contains(runner.calls[0], "up -d --no-deps --force-recreate hermes") {
 		t.Fatalf("unexpected protected skill refresh calls: %v", runner.calls)
+	}
+}
+
+func TestDeployRestartRecreatesFullStack(t *testing.T) {
+	config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+	for _, directory := range []string{config.DataRoot, config.BackupRoot, config.MetaRoot, config.LochoRoot, config.SecretDir} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(config.ComposeFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.ComposeFile, []byte("services: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.SecretFile, []byte("# test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteState(config, stateNeverStarted); err != nil {
+		t.Fatal(err)
+	}
+	runner := &restartRunner{}
+	if _, err := Deploy(context.Background(), config, NewCompose(config, runner), DeployOptions{Action: "restart", Component: "all", HealthAttempts: 1}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(runner.calls, "\n")
+	if !strings.Contains(joined, "up -d --force-recreate") {
+		t.Fatalf("restart did not recreate the full stack: %s", joined)
+	}
+	if strings.Contains(joined, " compose restart") {
+		t.Fatalf("restart still used Compose restart: %s", joined)
 	}
 }
 

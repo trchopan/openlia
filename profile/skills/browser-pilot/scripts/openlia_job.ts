@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 
 const baseUrl = (process.env.OPENLIA_BROWSER_JOBS_URL ?? "http://browser-tools:8932").replace(/\/+$/, "");
 const clientId = process.env.OPENLIA_BROWSER_CLIENT_ID ?? "default";
+const languagePattern = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/;
 
 async function request(method: string, path: string, body?: Record<string, unknown>): Promise<{ status: number; type: string; data: Uint8Array }> {
   const init: RequestInit = { method, headers: { Accept: "application/json", "X-OpenLia-Client-Id": clientId }, signal: AbortSignal.timeout(15_000) };
@@ -30,6 +31,17 @@ function timeoutValue(args: string[]): number {
   if (!/^\d+$/.test(raw.trim()))
     throw new Error("--timeout-seconds requires a non-negative integer");
   return Number(raw);
+}
+
+function outputLanguageValue(args: string[]): string {
+  const language = value(
+    args,
+    "--language",
+    process.env.OPENLIA_OUTPUT_LANGUAGE ?? "en",
+  ).trim();
+  if (!languagePattern.test(language))
+    throw new Error("--language must be a BCP 47 language tag");
+  return language;
 }
 
 async function printResult(result: { type: string; data: Uint8Array }): Promise<void> {
@@ -79,7 +91,7 @@ async function main(): Promise<void> {
   if (action === "submit") {
     const tool = args[1];
     if (tool !== "chatgpt-chat" && tool !== "gemini-chat") throw new Error("submit requires chatgpt-chat or gemini-chat");
-    const result = await request("POST", `/openlia/tools/${tool}`, { prompt: value(args, "--prompt"), topic: value(args, "--topic"), idempotency_key: value(args, "--idempotency-key"), timeout_seconds: timeoutValue(args) });
+    const result = await request("POST", `/openlia/tools/${tool}`, { prompt: value(args, "--prompt"), language: outputLanguageValue(args), topic: value(args, "--topic"), idempotency_key: value(args, "--idempotency-key"), timeout_seconds: timeoutValue(args) });
     await printResult(result);
     process.exit(result.status >= 200 && result.status < 300 ? 0 : 1);
   } else if (action === "status" || action === "result" || action === "cancel") {

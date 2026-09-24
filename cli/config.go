@@ -20,6 +20,7 @@ const (
 	defaultRemoteRoot      = "/srv/openlia"
 	defaultLocalRoot       = ".openlia"
 	defaultProject         = "openlia"
+	defaultOutputLanguage  = "en"
 	defaultTimezone        = "Asia/Ho_Chi_Minh"
 	defaultWorkspaceUIPort = 8089
 	defaultOpenWebUIPort   = 8090
@@ -66,6 +67,7 @@ type Config struct {
 	InstallRoot             string
 	Project                 string
 	Model                   string
+	OutputLanguage          string
 	FallbackProviders       []FallbackProviderConfig
 	Timezone                string
 	Provider                string
@@ -140,6 +142,7 @@ func defaultConfig() Config {
 		InstallRoot:     defaultRemoteRoot,
 		Project:         defaultProject,
 		Model:           "gpt-5.6-luna",
+		OutputLanguage:  defaultOutputLanguage,
 		Timezone:        defaultTimezone,
 		Provider:        "copilot",
 		HermesImage:     "openlia-hermes:v2026.9.14",
@@ -346,6 +349,8 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.Project, err = parseString(value)
 			case "openlia.model":
 				config.Model, err = parseString(value)
+			case "openlia.output_language":
+				config.OutputLanguage, err = parseString(value)
 			case "openlia.timezone":
 				config.Timezone, err = parseString(value)
 			case "openlia.provider":
@@ -480,6 +485,9 @@ func validateConfig(config Config) error {
 		return errors.New("version, project, and model are required")
 	}
 	if err := validateTimezone(config.Timezone); err != nil {
+		return err
+	}
+	if err := validateOutputLanguage(config.OutputLanguage); err != nil {
 		return err
 	}
 	if config.Mode != "local" && config.Mode != "ssh" {
@@ -820,6 +828,29 @@ func validateTimezone(value string) error {
 	return nil
 }
 
+func validateOutputLanguage(value string) error {
+	parts := strings.Split(value, "-")
+	if len(parts) == 0 || len(parts[0]) < 2 || len(parts[0]) > 8 {
+		return errors.New("output language must be a BCP 47 language tag")
+	}
+	for _, character := range parts[0] {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') {
+			return errors.New("output language must be a BCP 47 language tag")
+		}
+	}
+	for _, part := range parts[1:] {
+		if len(part) < 1 || len(part) > 8 {
+			return errors.New("output language must be a BCP 47 language tag")
+		}
+		for _, character := range part {
+			if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') && (character < '0' || character > '9') {
+				return errors.New("output language must be a BCP 47 language tag")
+			}
+		}
+	}
+	return nil
+}
+
 func validateAbsoluteRoot(root, label string) error {
 	if !strings.HasPrefix(root, "/") || strings.ContainsAny(root, "\r\n\t'\";$&|()<>`") || strings.Contains(root, "/../") || strings.HasSuffix(root, "/..") {
 		return fmt.Errorf("%s must be a safe absolute path", label)
@@ -920,7 +951,7 @@ func saveConfig(config Config) error {
 
 func renderConfig(config Config) string {
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "[openlia]\nschema = %d\nversion = %q\nmode = %q\ntarget = %q\nroot = %q\nproject = %q\nmodel = %q\ntimezone = %q\nprovider = %q\nexternal_network = %q\n\n", config.Schema, config.Version, config.Mode, config.Target, config.InstallRoot, config.Project, config.Model, config.Timezone, config.Provider, config.ExternalNetwork)
+	fmt.Fprintf(&builder, "[openlia]\nschema = %d\nversion = %q\nmode = %q\ntarget = %q\nroot = %q\nproject = %q\nmodel = %q\noutput_language = %q\ntimezone = %q\nprovider = %q\nexternal_network = %q\n\n", config.Schema, config.Version, config.Mode, config.Target, config.InstallRoot, config.Project, config.Model, config.OutputLanguage, config.Timezone, config.Provider, config.ExternalNetwork)
 	if config.BrowserTools.Configured {
 		fmt.Fprintf(&builder, "[browser-tools]\nmode = %q\ntarget = %q\nssh_port = %d\nroot = %q\nextension_token_file = %q\n\n", config.BrowserTools.Mode, config.BrowserTools.Target, config.BrowserTools.SSHPort, config.BrowserTools.Root, config.BrowserTools.ExtensionTokenFile)
 	}

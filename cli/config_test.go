@@ -22,6 +22,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	want.OpenWebUIImage = "ghcr.io/open-webui/open-webui:v0.5.20"
 	want.OpenWebUIAuth = false
 	want.Model = "test-model"
+	want.OutputLanguage = "vi"
 	want.FallbackProviders = []FallbackProviderConfig{
 		{Provider: "custom", Model: "gateway-model", BaseURL: "https://gateway.example.test/v1", KeyEnv: "OPENAI_GATEWAY_API_KEY"},
 		{Provider: "openai-api", Model: "official-model"},
@@ -57,7 +58,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Target != want.Target || got.Model != want.Model || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || got.WorkspaceGit != want.WorkspaceGit || got.BrowserTools != want.BrowserTools || len(got.SkillSources) != 2 || got.SkillSources[0] != want.SkillSources[0] || got.SkillSources[1] != want.SkillSources[1] {
+	if got.Target != want.Target || got.Model != want.Model || got.OutputLanguage != want.OutputLanguage || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || got.WorkspaceGit != want.WorkspaceGit || got.BrowserTools != want.BrowserTools || len(got.SkillSources) != 2 || got.SkillSources[0] != want.SkillSources[0] || got.SkillSources[1] != want.SkillSources[1] {
 		t.Fatalf("round trip mismatch: got %#v want %#v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -179,8 +180,28 @@ func TestConfigDefaultsTimezoneForLegacyConfig(t *testing.T) {
 	if got.Timezone != defaultTimezone {
 		t.Fatalf("timezone = %q, want %q", got.Timezone, defaultTimezone)
 	}
+	if got.OutputLanguage != defaultOutputLanguage {
+		t.Fatalf("output language = %q, want %q", got.OutputLanguage, defaultOutputLanguage)
+	}
 	if got.WorkspaceUIHost != "" || got.WorkspaceUIPort != defaultWorkspaceUIPort {
 		t.Fatalf("workspace UI = %q:%d, want disabled with default port", got.WorkspaceUIHost, got.WorkspaceUIPort)
+	}
+}
+
+func TestConfigRejectsInvalidOutputLanguage(t *testing.T) {
+	for _, language := range []string{"", "e", "en_US", "en space", "../vi", "en--US", "en-"} {
+		config := defaultConfig()
+		config.OutputLanguage = language
+		if err := validateConfig(config); err == nil {
+			t.Fatalf("output language %q was accepted", language)
+		}
+	}
+	for _, language := range []string{"en", "vi", "pt-BR", "zh-Hans-CN"} {
+		config := defaultConfig()
+		config.OutputLanguage = language
+		if err := validateConfig(config); err != nil {
+			t.Fatalf("valid output language %q was rejected: %v", language, err)
+		}
 	}
 }
 

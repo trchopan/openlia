@@ -44,6 +44,11 @@ bun /opt/data/skills/browser-pilot/scripts/openlia_job.ts submit gemini-chat \
   --topic "Wasm GC 2026 Status"
 ```
 
+The script uses the configured output language by default. When the user
+explicitly requests another language for the current query, add
+`--language <BCP47-tag>` to the command; the explicit request takes
+precedence over the configured default.
+
 The command returns a job ID immediately. Poll it with `status JOB_ID` and fetch
 the completed YAML with `result JOB_ID`; do not hold one terminal invocation open
 for the full remote-browser conversation.

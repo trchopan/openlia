@@ -22,6 +22,7 @@ type browserToolsTarget struct {
 	SSHPort            int
 	Root               string
 	ExtensionTokenFile string
+	OutputLanguage     string
 }
 
 func commandBrowserTools(options Options, args []string, assets fs.FS) int {
@@ -40,7 +41,7 @@ func commandBrowserTools(options Options, args []string, assets fs.FS) int {
 	if !config.BrowserTools.Configured {
 		return fail(options, ExitPrereq, "browser-tools is not configured; run `openlia browser-tools configure`", nil)
 	}
-	target := browserToolsTarget{Mode: config.BrowserTools.Mode, Target: config.BrowserTools.Target, SSHPort: config.BrowserTools.SSHPort, Root: config.BrowserTools.Root, ExtensionTokenFile: config.BrowserTools.ExtensionTokenFile}
+	target := browserToolsTarget{Mode: config.BrowserTools.Mode, Target: config.BrowserTools.Target, SSHPort: config.BrowserTools.SSHPort, Root: config.BrowserTools.Root, ExtensionTokenFile: config.BrowserTools.ExtensionTokenFile, OutputLanguage: config.OutputLanguage}
 	if err := validateBrowserToolsTarget(target); err != nil {
 		return fail(options, ExitUsage, err.Error(), nil)
 	}
@@ -210,11 +211,15 @@ func installBrowserTools(options Options, ctx context.Context, target browserToo
 	}
 	tokenPath := target.ExtensionTokenFile
 	nodeDir := filepath.Dir(nodePath)
-	runner := "#!/bin/sh\nset -eu\nexport PATH=" + shellQuote(nodeDir) + ":${PATH:-/usr/bin:/bin}\nexport BROWSER_TOOLS_BIND=127.0.0.1\nexport BROWSER_TOOLS_PORT=8932\nexport BROWSER_TOOLS_MCP_URL=http://localhost:8931/mcp\nexport BROWSER_TOOLS_PLAYWRIGHT_PORT=8931\nexport BROWSER_TOOLS_SUPERVISE_PLAYWRIGHT=1\nexport BROWSER_TOOLS_PLAYWRIGHT_TOKEN_FILE=" + shellQuote(tokenPath) + "\nexport BROWSER_TOOLS_PLAYWRIGHT_COMMAND=" + shellQuote(filepath.Join(nodeDir, "npx")) + "\nexport BROWSER_TOOLS_DATA_ROOT=" + shellQuote(filepath.Join(target.Root, "data")) + "\nexec " + shellQuote(nodePath) + " " + shellQuote(filepath.Join(target.Root, "server.js")) + "\n"
+	runner := renderBrowserToolsRunner(target, nodePath, nodeDir, tokenPath)
 	if err := browserToolsUpload(target, filepath.Join(target.Root, "run.sh"), []byte(runner), "700"); err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
 	return lifecycleBrowserTools(options, ctx, target, "restart")
+}
+
+func renderBrowserToolsRunner(target browserToolsTarget, nodePath, nodeDir, tokenPath string) string {
+	return "#!/bin/sh\nset -eu\nexport PATH=" + shellQuote(nodeDir) + ":${PATH:-/usr/bin:/bin}\nexport BROWSER_TOOLS_BIND=127.0.0.1\nexport BROWSER_TOOLS_PORT=8932\nexport BROWSER_TOOLS_MCP_URL=http://localhost:8931/mcp\nexport BROWSER_TOOLS_PLAYWRIGHT_PORT=8931\nexport BROWSER_TOOLS_SUPERVISE_PLAYWRIGHT=1\nexport BROWSER_TOOLS_PLAYWRIGHT_TOKEN_FILE=" + shellQuote(tokenPath) + "\nexport BROWSER_TOOLS_PLAYWRIGHT_COMMAND=" + shellQuote(filepath.Join(nodeDir, "npx")) + "\nexport BROWSER_TOOLS_DATA_ROOT=" + shellQuote(filepath.Join(target.Root, "data")) + "\nexport OPENLIA_OUTPUT_LANGUAGE=" + shellQuote(target.OutputLanguage) + "\nexec " + shellQuote(nodePath) + " " + shellQuote(filepath.Join(target.Root, "server.js")) + "\n"
 }
 
 func lifecycleBrowserTools(options Options, ctx context.Context, target browserToolsTarget, action string) int {

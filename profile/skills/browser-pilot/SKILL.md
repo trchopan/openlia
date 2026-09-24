@@ -75,6 +75,7 @@ to pilot the native browser session:
   > - **ChatGPT Research**: Submit a `chatgpt-chat` job through the OpenLia browser-job client, then poll and fetch its result. The worker runs the dedicated script, enforces Temporary Chat, and captures authentic Markdown.
   > - **Gemini Research**: Submit a `gemini-chat` job through the OpenLia browser-job client, then poll and fetch its result. The worker runs the dedicated script, toggles ephemeral Temporary Chat, and formats YAML.
 > - Both scripts output clean, standardized YAML transcripts with timestamp prefixes to `workspace/knowledge/<platform>/`.
+> - The job client uses the configured `OPENLIA_OUTPUT_LANGUAGE` by default. Add `--language <BCP47-tag>` only when the user's current request explicitly asks for a different response language.
 
 ### 3. Route & Traffic Intelligence (Google Maps)
 1. Navigate to Google Maps with start and destination parameters.
