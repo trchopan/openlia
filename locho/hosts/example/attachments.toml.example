@@ -13,10 +13,11 @@ listen_port = 18765
 # For example, if host is "<host>" and listen_port is 8088:
 # Configure this explicit endpoint in config.toml:
 #   base_url = "http://locho-<host>:8088/v1"
-# And for Playwright MCP on port 8931:
-#   OPENLIA_BROWSER_MCP_URL="http://locho-<host>:8931"
+# And for browser-tools on port 8932:
+#   OPENLIA_BROWSER_MCP_URL="http://locho-<host>:8932"
+#   OPENLIA_BROWSER_JOBS_URL="http://locho-<host>:8932"
 
-# Remote Playwright MCP browser attachment (e.g. Vivaldi / Chrome via Locho):
+# Host-local browser-tools service (job queue + Playwright MCP proxy):
 # [[services]]
-# capability = "playwright:tcp:<capability>"
-# listen_port = 8931
+# capability = "browser-tools:http:<capability>"
+# listen_port = 8932

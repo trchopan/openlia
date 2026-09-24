@@ -274,7 +274,7 @@ func composeServices(ctx context.Context, compose Compose) []string {
 	}
 	services := []string{}
 	for _, service := range strings.Split(strings.TrimSpace(string(result.Stdout)), "\n") {
-		if strings.HasPrefix(service, "locho-") || service == "openlia-tools" {
+		if strings.HasPrefix(service, "locho-") {
 			services = append(services, service)
 		}
 	}
@@ -366,7 +366,7 @@ func Healthcheck(ctx context.Context, config Config, compose Compose, allowStopp
 			services = append(services, service)
 			if compose.ServiceRunning(ctx, service) {
 				add("service:"+service, true, "running")
-				if strings.HasPrefix(service, "locho-") || service == "openlia-tools" {
+				if strings.HasPrefix(service, "locho-") {
 					published, portErr := compose.Run(ctx, "port", service)
 					if portErr != nil || strings.TrimSpace(string(published.Stdout)) == "" {
 						add("listener:"+service, true, "private_only")

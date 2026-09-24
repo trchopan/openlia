@@ -59,11 +59,25 @@ OpenLia itself is the operator control plane, not a long-running Compose
 service. The `openlia` CLI runs on the operator machine and either invokes local
 operations directly or uses SSH for a remote target. The default Compose stack
 contains only the Hermes and Locho runtime services. When a browser attachment
-is configured, the private `openlia-tools` Bun service is generated as a
-single-worker browser-job queue. The optional Workspace UI is disabled unless a
+is configured, Hermes connects to the host-local `browser-tools` service for
+browser jobs and the Playwright MCP proxy. The optional Workspace UI is disabled unless a
 `[workspace-ui]` section is present in `config.toml`. The optional Open WebUI
 chat interface is disabled unless an `[open-webui]` section is present in
 `config.toml` or `--open-webui` is provided during `openlia init`.
+
+Browser tools are configured independently from the Hermes deployment target:
+
+```toml
+[browser-tools]
+mode = "ssh"
+target = "user@browser-host"
+ssh_port = 22
+root = "/home/user/services/browser-tools"
+extension_token_file = "/home/user/services/playwright-server-token.txt"
+```
+
+Manage the selected browser host with `openlia browser-tools configure`,
+`install`, `start`, `stop`, `restart`, `status`, `logs`, and `uninstall`.
 
 The target repository layout is:
 
@@ -478,7 +492,7 @@ encrypt passwords, sessions, or workspace contents; use HTTPS through a reverse
 proxy when the network is not fully trusted. `/health` remains public for
 container health checks, while workspace APIs require authentication.
 
-When a service is mapped to the `playwright-browser` role, OpenLia registers its
+When a service is mapped to the `browser-tools` role, OpenLia registers its
 SSE MCP endpoint directly with Hermes and disables Hermes' native `agent-browser`
 toolset. This prevents two browser runtimes from competing for the same session.
 

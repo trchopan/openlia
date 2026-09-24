@@ -1,10 +1,14 @@
 #!/usr/bin/env bun
 /** Submit and inspect OpenLia browser jobs through the private Bun service. */
 
-const baseUrl = (process.env.OPENLIA_TOOLS_URL ?? "http://openlia-tools:8787").replace(/\/+$/, "");
+import { mkdir, rename } from "node:fs/promises";
+import { dirname, join } from "node:path";
+
+const baseUrl = (process.env.OPENLIA_BROWSER_JOBS_URL ?? "http://browser-tools:8932").replace(/\/+$/, "");
+const clientId = process.env.OPENLIA_BROWSER_CLIENT_ID ?? "default";
 
 async function request(method: string, path: string, body?: Record<string, unknown>): Promise<{ status: number; type: string; data: Uint8Array }> {
-  const init: RequestInit = { method, headers: { Accept: "application/json" }, signal: AbortSignal.timeout(15_000) };
+  const init: RequestInit = { method, headers: { Accept: "application/json", "X-OpenLia-Client-Id": clientId }, signal: AbortSignal.timeout(15_000) };
   if (body) {
     init.body = JSON.stringify(body);
     (init.headers as Record<string, string>)["Content-Type"] = "application/json";
@@ -38,10 +42,29 @@ async function printResult(result: { type: string; data: Uint8Array }): Promise<
   }
 }
 
+function workspaceRoot(): string {
+  return process.env.OPENLIA_WORKSPACE_ROOT ?? join(process.env.HERMES_HOME ?? "/opt/data", "workspace");
+}
+
+async function persistResult(
+  job: Record<string, unknown>,
+  data: Uint8Array,
+): Promise<string> {
+  const tool = String(job.tool ?? "");
+  const platform = tool === "chatgpt-chat" ? "chatgpt" : tool === "gemini-chat" ? "gemini" : "travel";
+  const resultName = String(job.result_name ?? `${String(job.job_id)}.yaml`).replace(/[^A-Za-z0-9._-]/g, "_");
+  const destination = join(workspaceRoot(), platform === "travel" ? "travel" : `knowledge/${platform}`, resultName);
+  await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+  const temporary = `${destination}.tmp-${crypto.randomUUID()}`;
+  await Bun.write(temporary, data);
+  await rename(temporary, destination);
+  return destination;
+}
+
 async function main(): Promise<void> {
   const args = Bun.argv.slice(2);
   if (args[0] === "--self-test") {
-    if (!baseUrl.startsWith("http")) throw new Error("OPENLIA_TOOLS_URL must be an HTTP URL");
+    if (!baseUrl.startsWith("http")) throw new Error("OPENLIA_BROWSER_JOBS_URL must be an HTTP URL");
     console.log("ok");
     return;
   }
@@ -63,7 +86,18 @@ async function main(): Promise<void> {
     const id = args[1];
     if (!id) throw new Error(`${action} requires a job ID`);
     const suffix = action === "result" ? "/result" : action === "cancel" ? "/cancel" : "";
+    let statusData: Record<string, unknown> | undefined;
+    if (action === "result") {
+      const status = await request("GET", `/openlia/jobs/${encodeURIComponent(id)}`);
+      if (status.type.includes("application/json")) {
+        try { statusData = JSON.parse(new TextDecoder().decode(status.data)) as Record<string, unknown>; } catch { statusData = undefined; }
+      }
+    }
     const result = await request(action === "cancel" ? "POST" : "GET", `/openlia/jobs/${encodeURIComponent(id)}${suffix}`, action === "cancel" ? {} : undefined);
+    if (action === "result" && result.status >= 200 && result.status < 300 && statusData?.ok === true) {
+      const path = await persistResult(statusData, result.data);
+      console.error(`saved result: ${path}`);
+    }
     await printResult(result);
     process.exit(result.status >= 200 && result.status < 300 ? 0 : 1);
   } else {

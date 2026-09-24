@@ -42,18 +42,18 @@ var defaultSkills = []string{
 }
 
 const (
-	RolePlaywrightBrowser = "playwright-browser"
-	RoleOpenAIGateway     = "openai-gateway"
+	RoleBrowserTools  = "browser-tools"
+	RoleOpenAIGateway = "openai-gateway"
 )
 
 var allowedServiceRoles = map[string]bool{
-	RolePlaywrightBrowser: true,
-	RoleOpenAIGateway:     true,
+	RoleBrowserTools:  true,
+	RoleOpenAIGateway: true,
 }
 
 func ValidateServiceRole(role string) error {
 	if !allowedServiceRoles[role] {
-		return fmt.Errorf("invalid service role %q; must be one of: %s, %s", role, RolePlaywrightBrowser, RoleOpenAIGateway)
+		return fmt.Errorf("invalid service role %q; must be one of: %s, %s", role, RoleBrowserTools, RoleOpenAIGateway)
 	}
 	return nil
 }
@@ -91,6 +91,7 @@ type Config struct {
 	WorkspaceGit            WorkspaceGitConfig
 	SkillSources            []SkillSourceConfig
 	Services                []ServiceHostConfig
+	BrowserTools            BrowserToolsConfig
 }
 
 type SkillSourceConfig struct {
@@ -120,6 +121,15 @@ type WorkspaceGitConfig struct {
 	Schedule    string
 	AuthorName  string
 	AuthorEmail string
+}
+
+type BrowserToolsConfig struct {
+	Configured         bool
+	Mode               string
+	Target             string
+	SSHPort            int
+	Root               string
+	ExtensionTokenFile string
 }
 
 func defaultConfig() Config {
@@ -152,7 +162,8 @@ func defaultConfig() Config {
 			AuthorName:  "OpenLia Agent",
 			AuthorEmail: "openlia@localhost",
 		},
-		Services: nil,
+		BrowserTools: BrowserToolsConfig{Mode: "local", SSHPort: 22},
+		Services:     nil,
 	}
 }
 
@@ -243,6 +254,9 @@ func parseConfigUnchecked(data string) (Config, error) {
 			section = strings.TrimSpace(line[1 : len(line)-1])
 			if section == "services" && len(config.Services) == 0 {
 				config.Services = append(config.Services, ServiceHostConfig{Roles: make(map[string]string)})
+			}
+			if section == "browser-tools" {
+				config.BrowserTools.Configured = true
 			}
 			continue
 		}
@@ -354,6 +368,16 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.OpenWebUIImage, err = parseString(value)
 			case "open-webui.auth":
 				config.OpenWebUIAuth, err = parseBool(value)
+			case "browser-tools.mode":
+				config.BrowserTools.Mode, err = parseString(value)
+			case "browser-tools.target":
+				config.BrowserTools.Target, err = parseString(value)
+			case "browser-tools.ssh_port":
+				config.BrowserTools.SSHPort, err = parseInt(value)
+			case "browser-tools.root":
+				config.BrowserTools.Root, err = parseString(value)
+			case "browser-tools.extension_token_file":
+				config.BrowserTools.ExtensionTokenFile, err = parseString(value)
 			case "components.open_webui_image":
 				config.OpenWebUIImage, err = parseString(value)
 			case "release.source":
@@ -503,6 +527,11 @@ func validateConfig(config Config) error {
 			return err
 		}
 	}
+	if config.BrowserTools.Configured {
+		if err := validateBrowserTools(config.BrowserTools); err != nil {
+			return err
+		}
+	}
 	if config.SecretSource != "" && !filepath.IsAbs(config.SecretSource) {
 		return errors.New("secret source must be an absolute path")
 	}
@@ -609,6 +638,43 @@ func validateOpenWebUI(host string, port int) error {
 	}
 	if port < 1 || port > 65535 {
 		return errors.New("open-webui.port must be between 1 and 65535")
+	}
+	return nil
+}
+
+func validateBrowserTools(config BrowserToolsConfig) error {
+	if config.Mode != "local" && config.Mode != "ssh" {
+		return errors.New("browser-tools.mode must be local or ssh")
+	}
+	if config.Root == "" {
+		return errors.New("browser-tools.root is required")
+	}
+	if config.ExtensionTokenFile == "" {
+		return errors.New("browser-tools.extension_token_file is required")
+	}
+	if err := validateAbsoluteRoot(config.ExtensionTokenFile, "browser-tools.extension_token_file"); err != nil {
+		return err
+	}
+	if err := validateAbsoluteRoot(config.Root, "browser-tools.root"); err != nil {
+		return err
+	}
+	if config.SSHPort < 1 || config.SSHPort > 65535 {
+		return errors.New("browser-tools.ssh_port must be between 1 and 65535")
+	}
+	if config.Mode == "local" {
+		if config.Target != "" {
+			return errors.New("browser-tools.target must be empty in local mode")
+		}
+		return nil
+	}
+	if config.Target == "" {
+		return errors.New("browser-tools.target is required in ssh mode")
+	}
+	if err := validateTarget(config.Target); err != nil {
+		return fmt.Errorf("browser-tools.target: %w", err)
+	}
+	if !strings.Contains(config.Target, "@") || strings.HasPrefix(config.Target, "@") || strings.HasSuffix(config.Target, "@") {
+		return errors.New("browser-tools.target must use user@host syntax")
 	}
 	return nil
 }
@@ -855,6 +921,9 @@ func saveConfig(config Config) error {
 func renderConfig(config Config) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "[openlia]\nschema = %d\nversion = %q\nmode = %q\ntarget = %q\nroot = %q\nproject = %q\nmodel = %q\ntimezone = %q\nprovider = %q\nexternal_network = %q\n\n", config.Schema, config.Version, config.Mode, config.Target, config.InstallRoot, config.Project, config.Model, config.Timezone, config.Provider, config.ExternalNetwork)
+	if config.BrowserTools.Configured {
+		fmt.Fprintf(&builder, "[browser-tools]\nmode = %q\ntarget = %q\nssh_port = %d\nroot = %q\nextension_token_file = %q\n\n", config.BrowserTools.Mode, config.BrowserTools.Target, config.BrowserTools.SSHPort, config.BrowserTools.Root, config.BrowserTools.ExtensionTokenFile)
+	}
 	if config.WorkspaceUIHost != "" {
 		fmt.Fprintf(&builder, "[workspace-ui]\nhost = %q\nport = %d\n", config.WorkspaceUIHost, config.WorkspaceUIPort)
 		if config.WorkspaceUIPublicOrigin != "" {
