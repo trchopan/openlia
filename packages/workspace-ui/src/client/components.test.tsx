@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
 import type { WorkspaceTreeEntry } from "../shared/api";
-import { FileNavigator, MarkdownPreview } from "./components";
+import { ChatgptPreview, FileNavigator, MarkdownPreview } from "./components";
 
 describe("workspace presentation components", () => {
   test("renders safe GFM structures semantically", () => {
@@ -17,6 +17,57 @@ describe("workspace presentation components", () => {
     expect(screen.getByRole("checkbox")).toBeDisabled();
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(container.querySelector("script")).toBeNull();
+  });
+
+  test("renders a ChatGPT export as a conversation with sources", () => {
+    render(
+      <ChatgptPreview
+        content={`schema: 1
+session:
+  platform: chatgpt
+  topic: Preview topic
+  model: ChatGPT
+messages:
+  - role: user
+    content: What happened?
+  - role: assistant
+    content: |
+      # The answer
+
+      It is documented.
+references:
+  - id: ref-1
+    title: Documentation
+    url: https://openlia.example/docs
+`}
+      />,
+    );
+
+    expect(
+      screen.getByRole("article", { name: "ChatGPT conversation" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Preview topic" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "The answer" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Sources (1)" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Documentation/ })).toHaveAttribute(
+      "href",
+      "https://openlia.example/docs",
+    );
+  });
+
+  test("falls back to raw YAML when a ChatGPT export is invalid", () => {
+    render(<ChatgptPreview content="schema: [invalid" />);
+
+    expect(
+      screen.getByRole("article", { name: "Raw chat export" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/could not be parsed/)).toBeInTheDocument();
   });
 
   test("sorts folders and files naturally while keeping empty folders visible", () => {

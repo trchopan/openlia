@@ -134,6 +134,14 @@ export function hiddenFromNavigator(path: string): boolean {
   );
 }
 
+export function isChatgptExportPath(path: string): boolean {
+  const normalized = path.replaceAll("\\", "/").toLowerCase();
+  return (
+    normalized.startsWith("knowledge/chatgpt/") &&
+    (normalized.endsWith(".yaml") || normalized.endsWith(".yml"))
+  );
+}
+
 function validateRelativePath(value: unknown): string {
   if (
     typeof value !== "string" ||
@@ -329,6 +337,14 @@ export class WorkspaceService {
       );
     }
 
+    if (isChatgptExportPath(path)) {
+      throw new WorkspaceError(
+        "ChatGPT exports are read-only",
+        403,
+        "read_only",
+      );
+    }
+
     const absolute = this.assertNoSymlink(path);
     const parent = dirname(absolute);
     mkdirSync(parent, { recursive: true, mode: 0o700 });
@@ -470,6 +486,7 @@ export class WorkspaceService {
       size: info.size,
       modified_at: info.mtime.toISOString(),
       editable:
+        !isChatgptExportPath(relativePath) &&
         editableExtensions.has(fileExtension(relativePath)) &&
         info.size <= this.maxEditableBytes,
     };

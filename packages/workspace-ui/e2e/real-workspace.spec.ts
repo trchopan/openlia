@@ -66,4 +66,32 @@ test.describe("copied workspace visual verification", () => {
     await page.getByLabel("Find files").fill("template");
     await expect(page.getByText(/No files match/)).toBeVisible();
   });
+
+  test("renders a ChatGPT export as a read-only conversation", async ({
+    page,
+  }, testInfo) => {
+    await page.goto("/");
+    await openFiles(page);
+    await page.getByLabel("Find files").fill("vietnam_crime");
+    const chat = page.getByRole("button", {
+      name: /20260924_092233_vietnam_crime_rate_comparison/i,
+    });
+    await expect(chat).toBeVisible();
+    await chat.click();
+
+    await expect(
+      page.getByRole("article", { name: "ChatGPT conversation" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", {
+        name: "Vietnam crime rate comparison Asia EU United States",
+      }),
+    ).toBeVisible();
+    await expect(page.getByText("Read-only chat export")).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "Document editor" }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
+    await captureScreenshot(page, testInfo, "chatgpt-conversation");
+  });
 });

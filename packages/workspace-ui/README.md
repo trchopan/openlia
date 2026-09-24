@@ -46,6 +46,11 @@ and the canonical starter templates. Empty workspace folders remain visible so
 the workspace structure is still discoverable. Search expands matching folders;
 use `Cmd+S` on macOS or `Ctrl+S` elsewhere to save an edited document.
 
+ChatGPT exports under `knowledge/chatgpt/` are rendered as read-only
+conversations with session metadata and deduplicated sources. Invalid or
+unsupported exports fall back to the original YAML text. Generic YAML files and
+other workspace documents keep their existing behavior.
+
 ## Real Backend Development
 
 To exercise the actual Bun filesystem server against a disposable workspace:
