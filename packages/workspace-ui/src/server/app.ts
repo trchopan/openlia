@@ -170,12 +170,23 @@ export function createWorkspaceHandler(
       if (request.method === "GET" && url.pathname === "/health") {
         return json({ schema: 1, ok: true, service: "workspace-ui" });
       }
-      if (
-        request.method === "GET" &&
-        (url.pathname === "/" || url.pathname.startsWith("/assets/"))
-      ) {
+      if (request.method === "GET" && url.pathname.startsWith("/assets/")) {
         return (
           staticFile(staticRoot, url.pathname) ??
+          json({ schema: 1, ok: false, error: "not_found" }, 404)
+        );
+      }
+      if (
+        request.method === "GET" &&
+        (url.pathname === "/" ||
+          url.pathname === "/index.html" ||
+          url.pathname.startsWith("/files/") ||
+          url.pathname === "/files" ||
+          url.pathname.startsWith("/file/") ||
+          url.pathname === "/file")
+      ) {
+        return (
+          staticFile(staticRoot, "/") ??
           json({ schema: 1, ok: false, error: "not_found" }, 404)
         );
       }

@@ -14,6 +14,7 @@ import {
   type WorkspaceView,
 } from "./components";
 import { diffLines } from "./markdown";
+import { navigateRoute, parseRoute } from "./route";
 import "./styles.css";
 
 type PendingAction =
@@ -126,9 +127,19 @@ function LoginScreen({
 }
 
 export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
+  const initialRoute = useRef(
+    typeof window !== "undefined"
+      ? parseRoute(window.location)
+      : {
+          filter: undefined,
+          path: undefined,
+          scenario: undefined,
+          view: undefined,
+        },
+  );
   const [tree, setTree] = useState<WorkspaceTreeEntry[]>([]);
   const [treeTruncated, setTreeTruncated] = useState(false);
-  const [filter, setFilter] = useState("");
+  const [filter, setFilter] = useState(() => initialRoute.current.filter ?? "");
   const [file, setFile] = useState<WorkspaceFile | null>(null);
   const [draft, setDraft] = useState("");
   const [git, setGit] = useState<WorkspaceGitStatus | null>(null);
@@ -145,11 +156,16 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   const [authError, setAuthError] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [view, setView] = useState<WorkspaceView>(defaultView);
+  const [detailsOpen, setDetailsOpen] = useState(
+    () => initialRoute.current.view === "info",
+  );
+  const [view, setView] = useState<WorkspaceView>(
+    () => initialRoute.current.view ?? defaultView(),
+  );
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const fileRequestSequence = useRef(0);
+  const initialPathOpened = useRef(false);
 
   const dirty = file !== null && file.content !== draft;
   const diff = dirty ? diffLines(file.content, draft) : [];
@@ -180,6 +196,19 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             setGit(gitResponse);
             setNeedsLogin(false);
             setAuthReady(true);
+            if (!initialPathOpened.current) {
+              initialPathOpened.current = true;
+              const route =
+                typeof window !== "undefined"
+                  ? parseRoute(window.location)
+                  : initialRoute.current;
+              if (route.path) {
+                void openFile(route.path, {
+                  keepView: Boolean(route.view),
+                  replaceHistory: true,
+                });
+              }
+            }
           },
         );
       })
@@ -207,6 +236,62 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [dirty]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: popstate coordinates with active file draft and route
+  useEffect(() => {
+    function handlePopState() {
+      const route = parseRoute(window.location);
+      if (dirty) {
+        if (file?.path) {
+          navigateRoute(
+            {
+              filter: filter || undefined,
+              path: file.path,
+              scenario: route.scenario,
+              view,
+            },
+            { replace: true },
+          );
+        }
+        setPendingAction({ kind: "open", path: route.path ?? "" });
+        return;
+      }
+
+      setFilter(route.filter ?? "");
+
+      if (route.view) {
+        setView(route.view);
+        if (route.view === "info") setDetailsOpen(true);
+      }
+
+      if (route.path) {
+        if (route.path !== file?.path) {
+          void openFile(route.path, {
+            keepView: Boolean(route.view),
+            replaceHistory: true,
+          });
+        }
+      } else {
+        setFile(null);
+        setDraft("");
+        setConflict("");
+        setDocumentError("");
+      }
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [dirty, file?.path, filter, view]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (file?.path) {
+      const name = file.path.split("/").at(-1) ?? file.path;
+      document.title = `${name} - OpenLia Workspace`;
+    } else {
+      document.title = "OpenLia Workspace";
+    }
+  }, [file?.path]);
+
   function handleUnauthorized() {
     setTree([]);
     setGit(null);
@@ -232,6 +317,19 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       setTreeTruncated(treeResponse.truncated);
       setGit(gitResponse);
       setWorkspaceError("");
+      if (!initialPathOpened.current) {
+        initialPathOpened.current = true;
+        const route =
+          typeof window !== "undefined"
+            ? parseRoute(window.location)
+            : initialRoute.current;
+        if (route.path) {
+          void openFile(route.path, {
+            keepView: Boolean(route.view),
+            replaceHistory: true,
+          });
+        }
+      }
     } catch (caught) {
       setPassword("");
       if (caught instanceof ApiError) {
@@ -260,6 +358,9 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     setNeedsLogin(true);
     setAuthRequired(true);
     setAuthError("");
+    const currentRoute =
+      typeof window !== "undefined" ? parseRoute(window.location) : {};
+    navigateRoute({ scenario: currentRoute.scenario }, { replace: true });
   }
 
   function requestSignOut() {
@@ -267,7 +368,10 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     else void performSignOut();
   }
 
-  async function openFile(path: string) {
+  async function openFile(
+    path: string,
+    options?: { keepView?: boolean; replaceHistory?: boolean },
+  ) {
     const requestSequence = ++fileRequestSequence.current;
     setFileLoading(true);
     setDocumentError("");
@@ -278,7 +382,22 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       setFile(response);
       setDraft(response.content);
       setFilesOpen(false);
-      setView(defaultView());
+      let nextView = view;
+      if (!options?.keepView) {
+        nextView = defaultView();
+        setView(nextView);
+      }
+      const currentRoute =
+        typeof window !== "undefined" ? parseRoute(window.location) : {};
+      navigateRoute(
+        {
+          filter: filter || undefined,
+          path,
+          scenario: currentRoute.scenario,
+          view: nextView,
+        },
+        { replace: options?.replaceHistory },
+      );
     } catch (caught) {
       if (requestSequence !== fileRequestSequence.current) return;
       if (caught instanceof ApiError && caught.status === 401) {
@@ -298,7 +417,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       return;
     }
     if (dirty) setPendingAction({ kind: "open", path });
-    else void openFile(path);
+    else void openFile(path, { keepView: true });
   }
 
   async function save(): Promise<boolean> {
@@ -337,8 +456,26 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     const saved = await save();
     if (!saved) return;
     setPendingAction(null);
-    if (action.kind === "open") void openFile(action.path);
-    else void performSignOut();
+    if (action.kind === "open") {
+      if (action.path) {
+        void openFile(action.path, { keepView: true });
+      } else {
+        setFile(null);
+        setDraft("");
+        const currentRoute =
+          typeof window !== "undefined" ? parseRoute(window.location) : {};
+        navigateRoute(
+          {
+            filter: filter || undefined,
+            scenario: currentRoute.scenario,
+            view,
+          },
+          { replace: true },
+        );
+      }
+    } else {
+      void performSignOut();
+    }
   }
 
   function discardAndContinue() {
@@ -346,29 +483,100 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     if (!action) return;
     setPendingAction(null);
     setDraft(file?.content ?? "");
-    if (action.kind === "open") void openFile(action.path);
-    else void performSignOut();
+    if (action.kind === "open") {
+      if (action.path) {
+        void openFile(action.path, { keepView: true });
+      } else {
+        setFile(null);
+        setDraft("");
+        const currentRoute =
+          typeof window !== "undefined" ? parseRoute(window.location) : {};
+        navigateRoute(
+          {
+            filter: filter || undefined,
+            scenario: currentRoute.scenario,
+            view,
+          },
+          { replace: true },
+        );
+      }
+    } else {
+      void performSignOut();
+    }
+  }
+
+  function handleFilterChange(nextFilter: string) {
+    setFilter(nextFilter);
+    const currentRoute =
+      typeof window !== "undefined" ? parseRoute(window.location) : {};
+    navigateRoute(
+      {
+        filter: nextFilter || undefined,
+        path: file?.path,
+        scenario: currentRoute.scenario,
+        view,
+      },
+      { replace: true },
+    );
   }
 
   function handleViewChange(nextView: WorkspaceView) {
     setView(nextView);
     if (nextView === "info") setDetailsOpen(true);
+    const currentRoute =
+      typeof window !== "undefined" ? parseRoute(window.location) : {};
+    navigateRoute(
+      {
+        filter: filter || undefined,
+        path: file?.path,
+        scenario: currentRoute.scenario,
+        view: nextView,
+      },
+      { replace: true },
+    );
   }
 
   function openHeaderDetails() {
     const nextOpen = !detailsOpen;
     setDetailsOpen(nextOpen);
+    let nextView = view;
     if (
       typeof window !== "undefined" &&
       !window.matchMedia("(min-width: 1280px)").matches
-    )
-      setView(nextOpen ? "info" : defaultView());
-    else if (!nextOpen && view === "info") setView(defaultView());
+    ) {
+      nextView = nextOpen ? "info" : defaultView();
+      setView(nextView);
+    } else if (!nextOpen && view === "info") {
+      nextView = defaultView();
+      setView(nextView);
+    }
+    const currentRoute =
+      typeof window !== "undefined" ? parseRoute(window.location) : {};
+    navigateRoute(
+      {
+        filter: filter || undefined,
+        path: file?.path,
+        scenario: currentRoute.scenario,
+        view: nextView,
+      },
+      { replace: true },
+    );
   }
 
   function openInfoView() {
     setDetailsOpen(true);
     setView("info");
+    const currentRoute =
+      typeof window !== "undefined" ? parseRoute(window.location) : {};
+    navigateRoute(
+      {
+        filter: filter || undefined,
+        path: file?.path,
+        scenario: currentRoute.scenario,
+        view: "info",
+      },
+      { replace: true },
+    );
   }
 
   if (!authReady)
@@ -425,7 +633,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           loading={loading}
           mobileOpen={filesOpen}
           onClose={() => setFilesOpen(false)}
-          onFilterChange={setFilter}
+          onFilterChange={handleFilterChange}
           onOpenFile={requestOpenFile}
           onRetry={() => setReloadToken((current) => current + 1)}
           selectedPath={file?.path}
@@ -446,7 +654,12 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           onDraftChange={setDraft}
           onOpenDetails={openInfoView}
           onRetry={() => {
-            if (file) void openFile(file.path);
+            const pathToRetry =
+              file?.path ??
+              (typeof window !== "undefined"
+                ? parseRoute(window.location).path
+                : undefined);
+            if (pathToRetry) void openFile(pathToRetry, { keepView: true });
           }}
           onSave={() => void save()}
           onViewChange={handleViewChange}

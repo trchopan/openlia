@@ -63,6 +63,19 @@ test.describe("mock visual catalog", () => {
     await captureScreenshot(page, testInfo, "selected-document");
   });
 
+  test("persists route path and params on browser reload", async ({ page }) => {
+    await page.goto("/files/notes.md?view=preview&filter=cal");
+    await expect(
+      page.getByRole("article", { name: "Markdown preview" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Find files")).toHaveValue("cal");
+    await page.reload();
+    await expect(
+      page.getByRole("article", { name: "Markdown preview" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Find files")).toHaveValue("cal");
+  });
+
   test("edited draft and revision context", async ({ page }, testInfo) => {
     await page.goto("/");
     await openNotes(page);

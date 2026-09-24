@@ -363,4 +363,35 @@ describe("workspace HTTP handler", () => {
     );
     expect(response.status).toBe(413);
   });
+
+  test("serves index.html for SPA routes (/files and /file)", async () => {
+    const staticDir = mkdtempSync(join(tmpdir(), "openlia-ui-static-"));
+    try {
+      writeFileSync(
+        join(staticDir, "index.html"),
+        "<!doctype html><html><body>Workspace App</body></html>",
+      );
+      const spaHandler = createWorkspaceHandler({
+        staticRoot: staticDir,
+        workspaceRoot: root,
+      });
+
+      for (const spaPath of [
+        "/",
+        "/index.html",
+        "/files/notes.md",
+        "/files/calendar/event.md",
+        "/file/tasks/todo.md",
+      ]) {
+        const response = await spaHandler(
+          new Request(`http://localhost${spaPath}`),
+        );
+        expect(response.status).toBe(200);
+        expect(response.headers.get("content-type")).toContain("text/html");
+        expect(await response.text()).toContain("Workspace App");
+      }
+    } finally {
+      rmSync(staticDir, { force: true, recursive: true });
+    }
+  });
 });

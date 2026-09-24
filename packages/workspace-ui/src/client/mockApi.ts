@@ -79,15 +79,31 @@ export function createMockWorkspaceApi({
     { ...metadata(path, content), kind: "file" },
   ];
 
+  const fileContents: Record<string, string> = {
+    "calendar/event.md":
+      "# Calendar event\n\nA sample event for UI development.\n",
+    "projects/project.md": "# Project\n\nA sample project.\n",
+    "tasks/task.md": "# Task\n\nA sample task.\n",
+    [path]: content,
+  };
+  const fileRevisions: Record<string, string> = {
+    "calendar/event.md": "sha256:mock-calendar",
+    "projects/project.md": "sha256:mock-project",
+    "tasks/task.md": "sha256:mock-task",
+    [path]: revision,
+  };
+
   function requireAuthentication() {
     if (!authenticated) throw error(401, "authentication_required");
   }
 
-  function fileResponse(): WorkspaceFile {
+  function fileResponse(filePath: string): WorkspaceFile {
+    const current = fileContents[filePath];
+    if (current === undefined) throw error(404, "not_found");
     return {
-      ...metadata(path, content),
-      content,
-      revision,
+      ...metadata(filePath, current),
+      content: current,
+      revision: fileRevisions[filePath] ?? revision,
       schema: 1,
     };
   }
@@ -127,24 +143,27 @@ export function createMockWorkspaceApi({
     },
     async loadFile(requestedPath) {
       requireAuthentication();
-      if (requestedPath !== path) throw error(404, "not_found");
-      return fileResponse();
+      return fileResponse(requestedPath);
     },
     async saveFile(requestedPath, nextContent, expectedRevision) {
       requireAuthentication();
-      if (requestedPath !== path) throw error(404, "not_found");
-      if (conflictPending) {
+      if (!(requestedPath in fileContents)) throw error(404, "not_found");
+      if (requestedPath === path && conflictPending) {
         conflictPending = false;
         throw error(409, "revision_conflict", "sha256:mock-current");
       }
-      if (expectedRevision !== revision)
-        throw error(409, "revision_conflict", revision);
-      content = nextContent;
-      revision = `sha256:mock-${++saveCount}`;
+      const currentRev = fileRevisions[requestedPath] ?? revision;
+      if (expectedRevision !== currentRev)
+        throw error(409, "revision_conflict", currentRev);
+      fileContents[requestedPath] = nextContent;
+      if (requestedPath === path) content = nextContent;
+      const nextRev = `sha256:mock-${++saveCount}`;
+      fileRevisions[requestedPath] = nextRev;
+      if (requestedPath === path) revision = nextRev;
       const response: WorkspaceWriteResponse = {
-        ...metadata(path, content),
+        ...metadata(requestedPath, nextContent),
         ok: true,
-        revision,
+        revision: nextRev,
         schema: 1,
       };
       return response;
@@ -154,13 +173,14 @@ export function createMockWorkspaceApi({
       return {
         branch: "main",
         configured: true,
-        dirty: content !== "Hello",
+        dirty: fileContents[path] !== "Hello",
         schema: 1,
       };
     },
     downloadUrl(requestedPath) {
-      if (requestedPath !== path) return "#";
-      return `data:text/plain;charset=utf-8,${encodeURIComponent(content)}`;
+      const current = fileContents[requestedPath];
+      if (current === undefined) return "#";
+      return `data:text/plain;charset=utf-8,${encodeURIComponent(current)}`;
     },
   };
 }
