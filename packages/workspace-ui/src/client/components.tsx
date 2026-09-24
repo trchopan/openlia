@@ -667,23 +667,38 @@ export function DocumentPane({
         </>
       ) : (
         <div className="workspace-empty-document">
-          <div className="max-w-sm">
-            <p className="workspace-eyebrow">READY WHEN YOU ARE</p>
-            <h2 className="mt-2 text-2xl font-bold tracking-tight">
-              Choose a document to begin
-            </h2>
-            <p className="mt-3 text-sm leading-6 text-base-content/60">
-              Browse the workspace files, then edit and preview a document side
-              by side.
-            </p>
-            <button
-              className="btn btn-primary mt-6 xl:hidden"
-              onClick={onCloseFiles}
-              type="button"
-            >
-              Browse files
-            </button>
-          </div>
+          {documentError ? (
+            <div className="max-w-md w-full p-4">
+              <div className="alert alert-error rounded-lg" role="alert">
+                <span>{documentError}</span>
+                <button
+                  className="btn btn-error btn-sm"
+                  onClick={onRetry}
+                  type="button"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-sm">
+              <p className="workspace-eyebrow">READY WHEN YOU ARE</p>
+              <h2 className="mt-2 text-2xl font-bold tracking-tight">
+                Choose a document to begin
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-base-content/60">
+                Browse the workspace files, then edit and preview a document
+                side by side.
+              </p>
+              <button
+                className="btn btn-primary mt-6 xl:hidden"
+                onClick={onCloseFiles}
+                type="button"
+              >
+                Browse files
+              </button>
+            </div>
+          )}
         </div>
       )}
     </section>
