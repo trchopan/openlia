@@ -2,6 +2,12 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode, RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  isChatgptExportPath,
+  parseChatgptExport,
+  presentationContent,
+  type ChatExport,
+} from "./chatgpt";
 import type {
   WorkspaceFile,
   WorkspaceGitStatus,
@@ -450,7 +456,7 @@ export function FileNavigator({
 
 const markdownComponents = {
   a: ({ children, ...props }: ComponentProps<"a">) => (
-    <a {...props} rel="noreferrer" target="_blank">
+    <a {...props} rel="noreferrer noopener" target="_blank">
       {children}
     </a>
   ),
@@ -475,6 +481,117 @@ export function MarkdownPreview({ content }: { content: string }) {
       >
         {content}
       </ReactMarkdown>
+    </article>
+  );
+}
+
+function chatRole(role: string): "assistant" | "other" | "user" {
+  if (role === "assistant") return "assistant";
+  if (role === "user") return "user";
+  return "other";
+}
+
+function ChatMetadata({ chat }: { chat: ChatExport }) {
+  const { session } = chat;
+  const startedAt = session.startedAt ? new Date(session.startedAt) : null;
+  const validStartedAt = startedAt && !Number.isNaN(startedAt.valueOf());
+  return (
+    <header className="workspace-chat-header">
+      <p className="workspace-eyebrow">CHATGPT / TEMPORARY CHAT</p>
+      <h2 className="mt-2 text-2xl font-bold tracking-tight">
+        {session.topic ?? "ChatGPT conversation"}
+      </h2>
+      <dl className="workspace-chat-meta mt-4">
+        {session.model && (
+          <div>
+            <dt>Model</dt>
+            <dd>{session.model}</dd>
+          </div>
+        )}
+        <div>
+          <dt>Messages</dt>
+          <dd>{chat.messages.length}</dd>
+        </div>
+        {validStartedAt && session.startedAt && (
+          <div>
+            <dt>Started</dt>
+            <dd>
+              <time dateTime={session.startedAt}>
+                {startedAt.toLocaleString()}
+              </time>
+            </dd>
+          </div>
+        )}
+      </dl>
+      <p className="workspace-chat-privacy" role="status">
+        This conversation is saved locally in the workspace.
+      </p>
+    </header>
+  );
+}
+
+function ChatReferences({ chat }: { chat: ChatExport }) {
+  if (chat.references.length === 0) return null;
+  return (
+    <section
+      aria-labelledby="workspace-chat-sources"
+      className="workspace-chat-sources"
+    >
+      <div className="mb-3">
+        <p className="workspace-eyebrow">REFERENCES</p>
+        <h3 className="mt-1 text-xl font-bold" id="workspace-chat-sources">
+          Sources ({chat.references.length})
+        </h3>
+      </div>
+      <ol className="workspace-chat-source-list">
+        {chat.references.map((reference) => (
+          <li key={reference.url}>
+            <a href={reference.url} rel="noreferrer noopener" target="_blank">
+              <span className="font-semibold">{reference.title}</span>
+              <span className="workspace-chat-source-domain">
+                {reference.domain}
+              </span>
+            </a>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function RawChatPreview({ content }: { content: string }) {
+  return (
+    <article aria-label="Raw chat export" className="workspace-raw-document">
+      <div className="alert alert-warning mb-4 rounded-lg">
+        This ChatGPT export could not be parsed. The original YAML is shown
+        unchanged.
+      </div>
+      <pre>{content}</pre>
+    </article>
+  );
+}
+
+export function ChatgptPreview({ content }: { content: string }) {
+  const chat = parseChatgptExport(content);
+  if (!chat) return <RawChatPreview content={content} />;
+  return (
+    <article
+      aria-label="ChatGPT conversation"
+      className="workspace-chat-preview"
+    >
+      <ChatMetadata chat={chat} />
+      <div className="workspace-chat-messages">
+        {chat.messages.map((message) => (
+          <section
+            className={`workspace-chat-message workspace-chat-message-${chatRole(message.role)}`}
+            key={`${message.turn ?? "message"}-${message.role}-${message.content.slice(0, 80)}`}
+          >
+            <div className="workspace-chat-message-label">{message.role}</div>
+            <MarkdownPreview content={presentationContent(message.content)} />
+          </section>
+        ))}
+      </div>
+      <ChatReferences chat={chat} />
     </article>
   );
 }
@@ -646,6 +763,7 @@ export function DocumentPane({
 }) {
   const dirty = file !== null && file.content !== draft;
   const canEdit = Boolean(file?.editable);
+  const isChatExport = file !== null && isChatgptExportPath(file.path);
 
   return (
     <section aria-label="Document workspace" className="workspace-document">
@@ -656,32 +774,44 @@ export function DocumentPane({
               <p className="workspace-document-name" title={file.path}>
                 {file.path}
               </p>
-              {!canEdit && <p className="text-xs text-warning">Read only</p>}
+              {!canEdit && (
+                <p className="text-xs text-warning">
+                  {isChatExport ? "Read-only chat export" : "Read only"}
+                </p>
+              )}
             </div>
             <div aria-label="Document view" className="join" role="toolbar">
-              <ModeButton
-                active={view === "edit"}
-                onClick={() => onViewChange("edit")}
-                value="edit"
-              >
-                Edit
-              </ModeButton>
-              <ModeButton
-                active={view === "split"}
-                className="hidden md:inline-flex"
-                onClick={() => onViewChange("split")}
-                value="split"
-              >
-                <span className="hidden md:inline">Split</span>
-                <span className="md:hidden">Edit</span>
-              </ModeButton>
-              <ModeButton
-                active={view === "preview"}
-                onClick={() => onViewChange("preview")}
-                value="preview"
-              >
-                Preview
-              </ModeButton>
+              {isChatExport ? (
+                <span className="btn btn-xs btn-primary pointer-events-none">
+                  Conversation
+                </span>
+              ) : (
+                <>
+                  <ModeButton
+                    active={view === "edit"}
+                    onClick={() => onViewChange("edit")}
+                    value="edit"
+                  >
+                    Edit
+                  </ModeButton>
+                  <ModeButton
+                    active={view === "split"}
+                    className="hidden md:inline-flex"
+                    onClick={() => onViewChange("split")}
+                    value="split"
+                  >
+                    <span className="hidden md:inline">Split</span>
+                    <span className="md:hidden">Edit</span>
+                  </ModeButton>
+                  <ModeButton
+                    active={view === "preview"}
+                    onClick={() => onViewChange("preview")}
+                    value="preview"
+                  >
+                    Preview
+                  </ModeButton>
+                </>
+              )}
               <ModeButton
                 active={view === "info"}
                 className="xl:hidden"
@@ -692,14 +822,16 @@ export function DocumentPane({
               </ModeButton>
             </div>
             <div className="flex shrink-0 gap-2">
-              <button
-                className="btn btn-primary btn-sm"
-                disabled={!canEdit || !dirty || saving}
-                onClick={onSave}
-                type="button"
-              >
-                {saving ? "Saving..." : dirty ? "Save" : "Saved"}
-              </button>
+              {!isChatExport && (
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={!canEdit || !dirty || saving}
+                  onClick={onSave}
+                  type="button"
+                >
+                  {saving ? "Saving..." : dirty ? "Save" : "Saved"}
+                </button>
+              )}
               <button
                 className="btn btn-outline btn-sm"
                 onClick={onDownload}
@@ -740,6 +872,14 @@ export function DocumentPane({
           )}
           {view === "info" ? (
             <DocumentInspector diff={diff} draft={draft} file={file} />
+          ) : isChatExport ? (
+            <section
+              aria-label="Conversation"
+              className="workspace-preview-pane"
+            >
+              <div className="workspace-pane-label">Conversation</div>
+              <ChatgptPreview content={draft} />
+            </section>
           ) : view === "edit" ? (
             <EditorPane
               draft={draft}

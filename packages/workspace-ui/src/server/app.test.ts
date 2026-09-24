@@ -95,6 +95,49 @@ describe("workspace HTTP handler", () => {
     }
   });
 
+  test("exposes ChatGPT exports as read-only documents", async () => {
+    const chatPath = join(root, "knowledge", "chatgpt");
+    const content = "schema: 1\nsession:\n  platform: chatgpt\n";
+    mkdirSync(chatPath, { recursive: true });
+    writeFileSync(join(chatPath, "export.yaml"), content);
+
+    const treeResponse = await request("/api/workspace/tree");
+    const tree = (await treeResponse.json()) as {
+      entries: Array<{ editable?: boolean; kind: string; path: string }>;
+    };
+    expect(tree.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          editable: false,
+          kind: "file",
+          path: "knowledge/chatgpt/export.yaml",
+        }),
+      ]),
+    );
+
+    const readResponse = await request(
+      "/api/workspace/file?path=knowledge%2Fchatgpt%2Fexport.yaml",
+    );
+    const document = (await readResponse.json()) as {
+      editable: boolean;
+      content: string;
+    };
+    expect(document).toMatchObject({ content, editable: false });
+
+    const writeBody = JSON.stringify({
+      content,
+      expected_revision: revision(new TextEncoder().encode(content)),
+      path: "knowledge/chatgpt/export.yaml",
+    });
+    const writeResponse = await request("/api/workspace/file", {
+      body: writeBody,
+      headers: { "Content-Type": "application/json" },
+      method: "PUT",
+    });
+    expect(writeResponse.status).toBe(403);
+    expect(await writeResponse.json()).toMatchObject({ error: "read_only" });
+  });
+
   test("reads, writes, and rejects stale revisions", async () => {
     writeFileSync(join(root, "note.md"), "before");
     const readResponse = await request("/api/workspace/file?path=note.md");

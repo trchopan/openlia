@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
+import type { WorkspaceApi } from "./api";
 import { createMockWorkspaceApi } from "./mockApi";
 
 afterEach(() => {
@@ -145,5 +146,69 @@ describe("workspace application", () => {
       await screen.findByText("This document could not be opened. Try again."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  test("opens ChatGPT exports in a read-only conversation preview", async () => {
+    const path = "knowledge/chatgpt/export.yaml";
+    const content = `schema: 1
+session:
+  platform: chatgpt
+  topic: A saved conversation
+messages:
+  - role: user
+    content: What is this?
+  - role: assistant
+    content: It is a saved conversation.
+`;
+    const baseApi = createMockWorkspaceApi();
+    const chatApi: WorkspaceApi = {
+      ...baseApi,
+      async loadFile(requestedPath) {
+        if (requestedPath === path)
+          return {
+            content,
+            editable: false,
+            modified_at: "2026-09-24T00:00:00.000Z",
+            path,
+            revision: "sha256:chat",
+            schema: 1,
+            size: new TextEncoder().encode(content).byteLength,
+          };
+        return baseApi.loadFile(requestedPath);
+      },
+      async loadTree() {
+        const response = await baseApi.loadTree();
+        return {
+          ...response,
+          entries: [
+            ...response.entries,
+            { kind: "directory", path: "knowledge" },
+            { kind: "directory", path: "knowledge/chatgpt" },
+            {
+              editable: false,
+              kind: "file",
+              modified_at: "2026-09-24T00:00:00.000Z",
+              path,
+              size: new TextEncoder().encode(content).byteLength,
+            },
+          ],
+        };
+      },
+    };
+
+    window.history.replaceState(null, "", `/files/${path}`);
+    render(<App api={chatApi} />);
+
+    expect(
+      await screen.findByRole("article", { name: "ChatGPT conversation" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "A saved conversation" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Read-only chat export")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("textbox", { name: "Document editor" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 });

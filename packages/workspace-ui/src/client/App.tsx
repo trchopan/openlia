@@ -5,6 +5,7 @@ import type {
   WorkspaceTreeEntry,
 } from "../shared/api";
 import { ApiError, httpWorkspaceApi, type WorkspaceApi } from "./api";
+import { isChatgptExportPath } from "./chatgpt";
 import {
   DirtyDraftDialog,
   DocumentInspector,
@@ -420,7 +421,13 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       setDraft(response.content);
       setFilesOpen(false);
       let nextView = view;
-      if (!options?.keepView) {
+      if (
+        isChatgptExportPath(path) &&
+        !(options?.keepView && view === "info")
+      ) {
+        nextView = "preview";
+        setView(nextView);
+      } else if (!options?.keepView) {
         nextView = defaultView();
         setView(nextView);
       }
