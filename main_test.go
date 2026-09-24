@@ -27,7 +27,6 @@ func TestEmbeddedBunRuntimeAssets(t *testing.T) {
 		"packages/browser-tools/dist/server.js",
 		"packages/workspace-ui/dist/server.js",
 		"packages/workspace-ui/dist/public/index.html",
-		"packages/openlia-job/dist/openlia-job.js",
 		"docker/workspace-ui.Dockerfile",
 	} {
 		if _, err := fs.ReadFile(releaseAssets, path); err != nil {

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-test("the distributed job client is built from the runtime skill", () => {
+test("the browser job client passes its self-test", () => {
   const result = Bun.spawnSync([
     "bun",
     "profile/skills/browser-pilot/scripts/openlia_job.ts",

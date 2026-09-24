@@ -6,24 +6,23 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bun run build:browser-tools && bun run build:ui && bun run build:job",
+    "build": "bun run build:browser-tools && bun run build:ui",
     "build:browser-tools": "bun build packages/browser-tools/src/server.ts --target=node --format=esm --outfile=packages/browser-tools/dist/server.js",
     "build:ui": "bun run --cwd packages/workspace-ui build",
     "build:ui:client": "bun run --cwd packages/workspace-ui build:client",
     "build:ui:server": "bun run --cwd packages/workspace-ui build:server",
-    "build:job": "bun build profile/skills/browser-pilot/scripts/openlia_job.ts --target=bun --format=esm --outfile=packages/openlia-job/dist/openlia-job.js",
     "typecheck": "bun run typecheck:browser-tools && bun run typecheck:ui && bun run typecheck:job",
     "typecheck:browser-tools": "tsc -p packages/browser-tools/tsconfig.json --noEmit",
     "typecheck:ui": "bun run --cwd packages/workspace-ui typecheck",
-    "typecheck:job": "tsc -p packages/openlia-job/tsconfig.json --noEmit",
-    "test": "bun run test:server && bun run test:ui && bun test packages/browser-tools packages/openlia-job",
+    "typecheck:job": "tsc -p tsconfig.job.json --noEmit",
+    "test": "bun run test:server && bun run test:ui && bun test packages/browser-tools tests/openlia_job.test.ts",
     "test:server": "bun run --cwd packages/workspace-ui test:server",
     "test:ui": "bun run --cwd packages/workspace-ui test",
-    "format": "biome format --write packages package.json tsconfig.base.json biome.json",
-    "format:check": "biome format packages package.json tsconfig.base.json biome.json",
-    "lint": "biome lint packages package.json tsconfig.base.json",
+    "format": "biome format --write packages tests/openlia_job.test.ts package.json tsconfig.base.json tsconfig.job.json biome.json",
+    "format:check": "biome format packages tests/openlia_job.test.ts package.json tsconfig.base.json tsconfig.job.json biome.json",
+    "lint": "biome lint packages tests/openlia_job.test.ts package.json tsconfig.base.json tsconfig.job.json",
     "check": "bun run format:check && bun run lint && bun run typecheck",
-    "verify-dist": "bun run build && test -s packages/browser-tools/dist/server.js && test -s packages/workspace-ui/dist/server.js && test -s packages/workspace-ui/dist/public/index.html && test -s packages/openlia-job/dist/openlia-job.js"
+    "verify-dist": "bun run build && test -s packages/browser-tools/dist/server.js && test -s packages/workspace-ui/dist/server.js && test -s packages/workspace-ui/dist/public/index.html"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.1",
