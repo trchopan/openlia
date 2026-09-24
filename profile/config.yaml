@@ -72,6 +72,6 @@ secrets:
 # Remote MCP attachments reachable over the internal openlia-private network:
 # mcp_servers:
 #   browser:
-#     url: "http://locho-<host>:8931/mcp"
+#     url: "http://locho-<host>:8932/mcp"
 #     connect_timeout: 30
 #     timeout: 120

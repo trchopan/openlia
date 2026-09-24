@@ -9,6 +9,17 @@ import {
   writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import {
+  StreamableHTTPClientTransport,
+  StreamableHTTPError,
+} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import {
+  ErrorCode,
+  McpError,
+  ResultSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 
 export type BrowserMessage = {
   role: "user" | "assistant" | "system";
@@ -95,217 +106,133 @@ function parseEvaluate(raw: string): unknown {
   }
 }
 
-type Pending = {
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-};
-
 export class McpClient {
   readonly baseUrl: string;
   readonly host: string;
+  private client: Client | undefined;
+  private transport: StreamableHTTPClientTransport | undefined;
+  private connectPromise: Promise<void> | undefined;
   private controller = new AbortController();
-  private reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-  private postUrl: string | undefined;
-  private nextId = 0;
-  private pending = new Map<number, Pending>();
-  private endpointResolve: ((value: string) => void) | undefined;
-  private endpointReject: ((error: Error) => void) | undefined;
-  constructor(baseUrl = "http://localhost:8931") {
-    this.baseUrl = baseUrl.replace(/\/+$/, "") || "http://localhost:8931";
+  private closed = false;
+  private generation = 0;
+  constructor(baseUrl = "http://localhost:8931/mcp") {
+    const endpoint = new URL(baseUrl || "http://localhost:8931/mcp");
+    if (endpoint.pathname === "/" || endpoint.pathname === "")
+      endpoint.pathname = "/mcp";
+    endpoint.pathname = endpoint.pathname.replace(/\/+$/, "") || "/mcp";
+    this.baseUrl = endpoint.href.replace(/\/$/, "");
     this.host = hostHeader(this.baseUrl);
   }
 
   async connect(): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/sse`, {
-      headers: { Accept: "text/event-stream", Host: this.host },
-      signal: this.controller.signal,
-    });
-    if (!response.ok || !response.body)
-      throw new Error(`MCP SSE connection failed: HTTP ${response.status}`);
-    this.reader = response.body.getReader();
-    void this.readSse();
-    this.postUrl = await new Promise<string>((resolve, reject) => {
-      this.endpointResolve = resolve;
-      this.endpointReject = reject;
-      setTimeout(
-        () => reject(new Error("SSE stream closed before endpoint received")),
-        10_000,
-      );
-    });
-    await this.call(
-      "initialize",
-      {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "openlia-browser-tools", version: "0.1.0" },
-      },
-      15_000,
-    );
-    await this.notify("notifications/initialized");
-  }
-
-  private async readSse(): Promise<void> {
-    if (!this.reader) return;
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let event = "message";
-    let data: string[] = [];
-    const flush = (): void => {
-      if (!data.length) return;
-      const payload = data.join("\n");
-      if (!this.postUrl && (event === "endpoint" || !payload.startsWith("{"))) {
+    if (this.closed) throw new Error("MCP session is closed");
+    if (this.client) return;
+    if (!this.connectPromise) {
+      const generation = ++this.generation;
+      this.connectPromise = (async () => {
+        const transport = new StreamableHTTPClientTransport(
+          new URL(this.baseUrl),
+          { requestInit: { headers: { Host: this.host } } },
+        );
+        const client = new Client(
+          { name: "openlia-browser-tools", version: "0.1.0" },
+          { capabilities: {} },
+        );
         try {
-          const url = new URL(payload, this.baseUrl).href;
-          this.endpointResolve?.(url);
-          this.endpointResolve = undefined;
-          this.endpointReject = undefined;
-        } catch {
-          this.endpointReject?.(new Error("MCP endpoint event was invalid"));
-        }
-      } else {
-        try {
-          const parsed = JSON.parse(payload) as {
-            id?: number;
-            result?: unknown;
-            error?: { message?: string };
-          };
-          if (typeof parsed.id === "number") {
-            const pending = this.pending.get(parsed.id);
-            if (pending) {
-              this.pending.delete(parsed.id);
-              clearTimeout(pending.timer);
-              if (parsed.error)
-                pending.reject(
-                  new Error(parsed.error.message ?? "MCP request failed"),
-                );
-              else pending.resolve(parsed.result);
-            }
+          await client.connect(transport as Transport, {
+            signal: this.controller.signal,
+            timeout: 15_000,
+          });
+          if (this.closed || this.generation !== generation) {
+            await client.close().catch(() => undefined);
+            throw new Error("MCP connection was superseded");
           }
-        } catch {
-          // Ignore non-JSON server events; the browser relay may send comments or diagnostics.
+          this.transport = transport;
+          this.client = client;
+        } catch (error) {
+          await transport.close().catch(() => undefined);
+          throw error;
         }
-      }
-      event = "message";
-      data = [];
-    };
-    try {
-      while (true) {
-        const chunk = await this.reader.read();
-        if (chunk.done) break;
-        buffer += decoder.decode(chunk.value, { stream: true });
-        const lines = buffer.split(/\r?\n/);
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line) flush();
-          else if (line.startsWith(":")) continue;
-          else if (line.startsWith("event:")) event = line.slice(6).trim();
-          else if (line.startsWith("data:"))
-            data.push(line.slice(5).trimStart());
-        }
-      }
-      flush();
-      const error = new Error("MCP SSE stream closed");
-      this.endpointReject?.(error);
-      for (const pending of this.pending.values()) {
-        clearTimeout(pending.timer);
-        pending.reject(error);
-      }
-      this.pending.clear();
-    } catch (error) {
-      const failure = error instanceof Error ? error : new Error(String(error));
-      this.endpointReject?.(failure);
-      for (const pending of this.pending.values()) {
-        clearTimeout(pending.timer);
-        pending.reject(failure);
-      }
-      this.pending.clear();
+      })().finally(() => {
+        this.connectPromise = undefined;
+      });
     }
+    await this.connectPromise;
   }
 
   async call(
     method: string,
     params: Record<string, unknown>,
     timeout = 90_000,
+    signal = this.controller.signal,
   ): Promise<unknown> {
-    if (!this.postUrl) throw new Error("MCP session is not connected");
-    const id = ++this.nextId;
-    const result = new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`MCP request timed out: ${method}`));
-      }, timeout);
-      this.pending.set(id, { resolve, reject, timer });
-    });
+    await this.connect();
+    const client = this.client;
+    const transport = this.transport;
+    const generation = this.generation;
+    if (!client || !transport) throw new Error("MCP connection failed");
     try {
-      const response = await fetch(this.postUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Host: this.host },
-        body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-        signal: this.controller.signal,
+      if (method === "tools/list")
+        return await client.listTools(params, {
+          signal,
+          timeout,
+        });
+      if (method === "ping") return await client.ping({ signal, timeout });
+      return await client.request({ method, params } as never, ResultSchema, {
+        signal,
+        timeout,
       });
-      if (!response.ok)
-        throw new Error(`MCP request failed: HTTP ${response.status}`);
-      const contentType = response.headers.get("content-type") ?? "";
-      if (contentType.includes("application/json")) {
-        const body = (await response.json()) as {
-          id?: number;
-          result?: unknown;
-          error?: { message?: string };
-        };
-        const pending = this.pending.get(body.id ?? id);
-        if (pending && body.id === id) {
-          this.pending.delete(id);
-          clearTimeout(pending.timer);
-          if (body.error)
-            pending.reject(
-              new Error(body.error.message ?? "MCP request failed"),
-            );
-          else pending.resolve(body.result);
-        }
-      }
     } catch (error) {
-      const pending = this.pending.get(id);
-      if (pending) {
-        this.pending.delete(id);
-        clearTimeout(pending.timer);
-        pending.reject(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
+      if (this.isConnectionFailure(error, signal))
+        this.invalidate(client, transport, generation);
       throw error;
     }
-    return result;
   }
 
   async notify(
     method: string,
     params: Record<string, unknown> = {},
   ): Promise<void> {
-    if (!this.postUrl) throw new Error("MCP session is not connected");
-    const response = await fetch(this.postUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Host: this.host },
-      body: JSON.stringify({ jsonrpc: "2.0", method, params }),
-      signal: this.controller.signal,
-    });
-    if (!response.ok)
-      throw new Error(`MCP notification failed: HTTP ${response.status}`);
+    await this.connect();
+    const client = this.client;
+    const transport = this.transport;
+    const generation = this.generation;
+    if (!client || !transport) throw new Error("MCP connection failed");
+    try {
+      await client.notification({ method, params } as never);
+    } catch (error) {
+      if (this.isConnectionFailure(error))
+        this.invalidate(client, transport, generation);
+      throw error;
+    }
   }
 
   async callTool(
     name: string,
     argumentsValue: Record<string, unknown>,
     timeout = 90_000,
+    signal = this.controller.signal,
   ): Promise<ToolResult> {
-    const result = await this.call(
-      "tools/call",
-      { name, arguments: argumentsValue },
-      timeout,
-    );
+    await this.connect();
+    const client = this.client;
+    const transport = this.transport;
+    const generation = this.generation;
+    if (!client || !transport) throw new Error("MCP connection failed");
+    let result: Awaited<ReturnType<Client["callTool"]>>;
+    try {
+      result = await client.callTool(
+        { name, arguments: argumentsValue },
+        undefined,
+        { signal, timeout },
+      );
+    } catch (error) {
+      if (this.isConnectionFailure(error, signal))
+        this.invalidate(client, transport, generation);
+      throw error;
+    }
     if (!result || typeof result !== "object")
       throw new Error(`MCP tool ${name} returned no result`);
-    return result as ToolResult;
+    return result as unknown as ToolResult;
   }
 
   getToolText(result: ToolResult): string {
@@ -313,18 +240,69 @@ export class McpClient {
   }
 
   close(): void {
+    this.closed = true;
+    this.generation += 1;
     this.controller.abort();
-    void this.reader?.cancel().catch(() => undefined);
-    for (const pending of this.pending.values()) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error("MCP session closed"));
-    }
-    this.pending.clear();
+    const client = this.client;
+    const transport = this.transport;
+    this.client = undefined;
+    this.transport = undefined;
+    void (async () => {
+      await transport?.terminateSession().catch(() => undefined);
+      await client?.close().catch(() => undefined);
+    })();
+  }
+
+  private invalidate(
+    client: Client,
+    transport: StreamableHTTPClientTransport,
+    generation: number,
+  ): void {
+    if (this.closed || this.generation !== generation || this.client !== client)
+      return;
+    this.generation += 1;
+    this.controller.abort();
+    this.client = undefined;
+    this.transport = undefined;
+    this.controller = new AbortController();
+    void (async () => {
+      await transport.terminateSession().catch(() => undefined);
+      await client
+        .close()
+        .catch(() => transport.close().catch(() => undefined));
+    })();
+  }
+
+  private isConnectionFailure(error: unknown, signal?: AbortSignal): boolean {
+    if (signal?.aborted) return false;
+    if (error instanceof StreamableHTTPError) return true;
+    if (error instanceof McpError)
+      return (
+        error.code === ErrorCode.ConnectionClosed &&
+        !/cancel/i.test(error.message)
+      );
+    if (error instanceof TypeError) return true;
+    const code =
+      error && typeof error === "object"
+        ? String(
+            (error as { code?: unknown; cause?: { code?: unknown } }).code ??
+              (error as { cause?: { code?: unknown } }).cause?.code ??
+              "",
+          )
+        : "";
+    return new Set([
+      "ECONNABORTED",
+      "ECONNREFUSED",
+      "ECONNRESET",
+      "EHOSTUNREACH",
+      "ENETUNREACH",
+      "EPIPE",
+    ]).has(code);
   }
 }
 
 type TabEntry = { index: number; current: boolean; label: string };
-type OwnedTab = { index: number; created: boolean };
+export type OwnedTab = { index: number; created: boolean };
 
 function tabEntries(text: string): TabEntry[] {
   return [...text.matchAll(/^\s*-\s*(\d+):([^\n]*)$/gm)].map((match) => ({
@@ -351,7 +329,10 @@ async function selectTab(client: McpClient, index: number): Promise<void> {
   await client.callTool("browser_tabs", { action: "select", index }, 10_000);
 }
 
-async function openOwnedTab(client: McpClient, url: string): Promise<OwnedTab> {
+export async function openOwnedTab(
+  client: McpClient,
+  url: string,
+): Promise<OwnedTab> {
   const before = await listTabs(client);
   if (!before.length) throw new Error("browser MCP returned no tabs");
   const current = before.find((tab) => tab.current);
@@ -380,13 +361,20 @@ async function openOwnedTab(client: McpClient, url: string): Promise<OwnedTab> {
     return { index: created.index, created: true };
   } catch (error) {
     if (!current) throw error;
-    await callOwnedTool(
-      client,
-      current.index,
-      "browser_navigate",
-      { url },
-      60_000,
-    );
+    try {
+      await callOwnedTool(
+        client,
+        current.index,
+        "browser_navigate",
+        { url },
+        60_000,
+      );
+    } catch (fallbackError) {
+      throw new AggregateError(
+        [error, fallbackError],
+        `browser tab creation and current-tab fallback both failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     return { index: current.index, created: false };
   }
 }

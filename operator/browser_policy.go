@@ -15,7 +15,7 @@ const (
 )
 
 func managedBrowserPolicy(endpoint string) []string {
-	mcpEndpoint := strings.TrimRight(endpoint, "/") + "/sse"
+	mcpEndpoint := strings.TrimRight(endpoint, "/") + "/mcp"
 	return []string{
 		managedBrowserPolicyStart,
 		"agent:",
@@ -24,7 +24,6 @@ func managedBrowserPolicy(endpoint string) []string {
 		"mcp_servers:",
 		"  openlia-playwright:",
 		"    url: " + strconv.Quote(mcpEndpoint),
-		"    transport: \"sse\"",
 		"    connect_timeout: 30",
 		"    timeout: 120",
 		managedBrowserPolicyEnd,

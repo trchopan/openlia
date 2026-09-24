@@ -513,8 +513,10 @@ proxy when the network is not fully trusted. `/health` remains public for
 container health checks, while workspace APIs require authentication.
 
 When a service is mapped to the `browser-tools` role, OpenLia registers its
-SSE MCP endpoint directly with Hermes and disables Hermes' native `agent-browser`
-toolset. This prevents two browser runtimes from competing for the same session.
+Streamable HTTP MCP endpoint at `/mcp` directly with Hermes and disables Hermes'
+native `agent-browser` toolset. Legacy `/sse` and `/messages` requests are
+rejected. This prevents two browser runtimes from competing for the same
+session.
 
 ### Open WebUI Chat Interface
 
