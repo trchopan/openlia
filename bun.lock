@@ -21,11 +21,11 @@
         "vitest": "3.2.4",
       },
     },
+    "packages/browser-tools": {
+      "name": "@openlia/browser-tools",
+    },
     "packages/openlia-job": {
       "name": "@openlia/openlia-job",
-    },
-    "packages/openlia-tools": {
-      "name": "@openlia/openlia-tools",
     },
     "packages/workspace-ui": {
       "name": "@openlia/workspace-ui",
@@ -179,9 +179,9 @@
 
     "@napi-rs/lzma-linux-x64-gnu": ["@napi-rs/lzma-linux-x64-gnu@1.5.1", "", { "os": "linux", "cpu": "x64" }, "sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ=="],
 
-    "@openlia/openlia-job": ["@openlia/openlia-job@workspace:packages/openlia-job"],
+    "@openlia/browser-tools": ["@openlia/browser-tools@workspace:packages/browser-tools"],
 
-    "@openlia/openlia-tools": ["@openlia/openlia-tools@workspace:packages/openlia-tools"],
+    "@openlia/openlia-job": ["@openlia/openlia-job@workspace:packages/openlia-job"],
 
     "@openlia/workspace-ui": ["@openlia/workspace-ui@workspace:packages/workspace-ui"],
 
