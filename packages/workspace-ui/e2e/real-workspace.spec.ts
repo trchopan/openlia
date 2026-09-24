@@ -32,6 +32,13 @@ test.describe("copied workspace visual verification", () => {
     await expect(
       page.getByRole("button", { name: "README.md", exact: true }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: ".gitkeep", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "event-note-template.md", exact: true }),
+    ).toHaveCount(0);
+    await expect(page.getByLabel("archive, empty folder")).toBeVisible();
     await captureScreenshot(page, testInfo, "copied-workspace");
   });
 
@@ -51,5 +58,12 @@ test.describe("copied workspace visual verification", () => {
       page.getByRole("textbox", { name: "Document editor" }),
     ).not.toHaveValue("");
     await captureScreenshot(page, testInfo, "copied-calendar-document");
+  });
+
+  test("does not expose starter templates through search", async ({ page }) => {
+    await page.goto("/");
+    await openFiles(page);
+    await page.getByLabel("Find files").fill("template");
+    await expect(page.getByText(/No files match/)).toBeVisible();
   });
 });
