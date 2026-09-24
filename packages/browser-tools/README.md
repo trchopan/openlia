@@ -14,7 +14,7 @@ Run it on the browser host:
 ```sh
 BROWSER_TOOLS_ROOT="<path_to_browser_tools_root>" \
 BROWSER_TOOLS_TOKEN_FILE="<path_to_extension_token_file>" \
-  BROWSER_TOOLS_MCP_URL=http://127.0.0.1:8931 \
+  BROWSER_TOOLS_MCP_URL=http://127.0.0.1:8931/mcp \
   BROWSER_TOOLS_PORT=8932 \
   BROWSER_TOOLS_SUPERVISE_PLAYWRIGHT=1 \
   BROWSER_TOOLS_PLAYWRIGHT_TOKEN_FILE="$BROWSER_TOOLS_TOKEN_FILE" \
@@ -27,6 +27,10 @@ The host service should be supervised as the logged-in browser user and bound
 to loopback. Export port `8932` through Locho as the `browser-tools` service;
 OpenLia then uses the same endpoint for both `OPENLIA_BROWSER_MCP_URL` and
 `OPENLIA_BROWSER_JOBS_URL`.
+
+The MCP proxy supports Streamable HTTP at `/mcp`. Legacy `/sse` and `/messages`
+requests return `410 Gone` so clients cannot silently use the deprecated
+transport.
 
 Raw Playwright MCP must remain loopback-only. OpenLia clients should never be
 attached directly to the underlying Playwright endpoint after this service is

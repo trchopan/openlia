@@ -284,7 +284,7 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(attachment), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(attachment, []byte("host_id = \"laptop\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"genai:http:capability\"\nlisten_port = 8088\n[[services]]\ncapability = \"browser-tools:http:capability\"\nlisten_port = 8931\n"), 0o600); err != nil {
+	if err := os.WriteFile(attachment, []byte("host_id = \"laptop\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"genai:http:capability\"\nlisten_port = 8088\n[[services]]\ncapability = \"browser-tools:http:capability\"\nlisten_port = 8932\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := GenerateAttachments(config); err != nil {
@@ -295,7 +295,7 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, expected := range []string{"locho-laptop:", "build:", "docker/locho.Dockerfile", "cap_drop: [ALL]", "no-new-privileges:true", "OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8931\"", "OPENLIA_BROWSER_JOBS_URL: \"http://locho-laptop:8931\""} {
+	for _, expected := range []string{"locho-laptop:", "build:", "docker/locho.Dockerfile", "cap_drop: [ALL]", "no-new-privileges:true", "OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8932\"", "OPENLIA_BROWSER_JOBS_URL: \"http://locho-laptop:8932\""} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("generated Compose missing %q:\n%s", expected, text)
 		}
@@ -432,7 +432,7 @@ func TestGeneratedAttachmentsDisableHermesBrowserToolsetForPlaywrightRole(t *tes
 	if err := os.MkdirAll(filepath.Dir(attachment), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(attachment, []byte("host_id = \"laptop\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"browser-tools:http:capability\"\nlisten_port = 8931\n"), 0o600); err != nil {
+	if err := os.WriteFile(attachment, []byte("host_id = \"laptop\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"browser-tools:http:capability\"\nlisten_port = 8932\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(config.DataRoot, 0o700); err != nil {
@@ -449,7 +449,7 @@ func TestGeneratedAttachmentsDisableHermesBrowserToolsetForPlaywrightRole(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "disabled_toolsets:\n    - browser") || !strings.Contains(string(data), "url: \"http://locho-laptop:8931/sse\"") || !strings.Contains(string(data), "transport: \"sse\"") {
+	if !strings.Contains(string(data), "disabled_toolsets:\n    - browser") || !strings.Contains(string(data), "url: \"http://locho-laptop:8932/mcp\"") || strings.Contains(string(data), "transport: \"sse\"") {
 		t.Fatalf("browser toolset was not disabled:\n%s", data)
 	}
 	config.ServiceRoles["laptop.browser-tools"] = "unassigned"
@@ -467,7 +467,7 @@ func TestGeneratedAttachmentsDisableHermesBrowserToolsetForPlaywrightRole(t *tes
 
 func TestBrowserPolicyRefusesUserAgentMapping(t *testing.T) {
 	data := []byte("agent:\n  disabled_toolsets: [terminal]\n")
-	if _, _, err := renderBrowserPolicy(data, true, "http://locho-laptop:8931"); err == nil {
+	if _, _, err := renderBrowserPolicy(data, true, "http://locho-laptop:8932"); err == nil {
 		t.Fatal("browser policy overwrote a user-owned agent mapping")
 	}
 }
@@ -662,7 +662,7 @@ listen_host = "0.0.0.0"
 
 [[services]]
  capability = "browser-tools:http:supersecrettoken1"
- listen_port = 8931
+ listen_port = 8932
 
 [[services]]
 capability = "ollama:http:supersecrettoken2"
@@ -711,8 +711,8 @@ listen_port = 2222
 		t.Errorf("ssh role = %q, want 'unassigned'", roleMap["ssh"])
 	}
 
-	if endpointMap["browser-tools"] != "http://locho-laptop:8931" {
-		t.Errorf("browser-tools endpoint = %q, want 'http://locho-laptop:8931'", endpointMap["browser-tools"])
+	if endpointMap["browser-tools"] != "http://locho-laptop:8932" {
+		t.Errorf("browser-tools endpoint = %q, want 'http://locho-laptop:8932'", endpointMap["browser-tools"])
 	}
 	if endpointMap["ollama"] != "http://locho-laptop:11434" {
 		t.Errorf("ollama endpoint = %q, want 'http://locho-laptop:11434'", endpointMap["ollama"])
@@ -759,9 +759,9 @@ listen_port = 2222
 	}
 
 	for _, expected := range []string{
-		"OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8931\"",
-		"OPENLIA_BROWSER_JOBS_URL: \"http://locho-laptop:8931\"",
-		"OPENLIA_SERVICE_LAPTOP_BROWSER_TOOLS_URL: \"http://locho-laptop:8931\"",
+		"OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8932\"",
+		"OPENLIA_BROWSER_JOBS_URL: \"http://locho-laptop:8932\"",
+		"OPENLIA_SERVICE_LAPTOP_BROWSER_TOOLS_URL: \"http://locho-laptop:8932\"",
 		"OPENLIA_SERVICE_LAPTOP_OLLAMA_URL: \"http://locho-laptop:11434\"",
 	} {
 		if !strings.Contains(composeText, expected) {

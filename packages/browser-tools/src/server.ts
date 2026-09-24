@@ -9,12 +9,20 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import { Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import {
+  CallToolRequestSchema,
+  isInitializeRequest,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { executeBrowserChat, executeBrowserRoute, McpClient } from "./browser";
 
 const bind = process.env.BROWSER_TOOLS_BIND ?? "127.0.0.1";
 const port = Number(process.env.BROWSER_TOOLS_PORT ?? "8932");
 const mcpUrl = (
-  process.env.BROWSER_TOOLS_MCP_URL ?? "http://127.0.0.1:8931"
+  process.env.BROWSER_TOOLS_MCP_URL ?? "http://127.0.0.1:8931/mcp"
 ).replace(/\/+$/, "");
 const dataRoot = resolve(
   process.env.BROWSER_TOOLS_DATA_ROOT ??
@@ -32,6 +40,18 @@ const playwrightPort = Number(
 const playwrightTokenFile =
   process.env.BROWSER_TOOLS_PLAYWRIGHT_TOKEN_FILE ?? "";
 const maxBodyBytes = 1024 * 1024;
+const interactiveLeaseGraceMs = Number(
+  process.env.BROWSER_TOOLS_INTERACTIVE_LEASE_GRACE_MS ?? "5000",
+);
+const mcpSessionIdleMs = Number(
+  process.env.BROWSER_TOOLS_MCP_SESSION_IDLE_MS ?? "900000",
+);
+const allowedOrigins = new Set(
+  (process.env.BROWSER_TOOLS_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean),
+);
 const routeModes = new Set(["driving", "transit", "walking", "bicycling"]);
 const tools = new Set(["chatgpt-chat", "gemini-chat", "maps-route"]);
 
@@ -299,6 +319,9 @@ class Arbiter {
       waiting: this.waiting.length,
     };
   }
+  hasWaiters(): boolean {
+    return this.waiting.length > 0;
+  }
 }
 
 class JobService {
@@ -490,13 +513,23 @@ class JobService {
   }
 }
 
-type ProxySession = {
+type InteractiveSession = {
   id: string;
-  response: ServerResponse;
   client?: McpClient;
-  release?: () => void;
+  connectPromise: Promise<McpClient> | undefined;
+  release: (() => void) | undefined;
+  releaseTimer: ReturnType<typeof setTimeout> | undefined;
+  leaseGeneration: number;
+  activeCalls: number;
+  callChain: Promise<void>;
+  closing: boolean;
+  lastSeen: number;
 };
-const sessions = new Map<string, ProxySession>();
+type HttpMcpSession = InteractiveSession & {
+  server: McpServer;
+  transport: StreamableHTTPServerTransport;
+};
+const httpSessions = new Map<string, HttpMcpSession>();
 const jobs = new JobService();
 let playwright: ChildProcess | undefined;
 let stopping = false;
@@ -538,7 +571,7 @@ function startPlaywright(): void {
     (process.platform === "darwin" ? "/opt/homebrew/bin/npx" : "npx");
   const args = [
     "--yes",
-    "@playwright/mcp@latest",
+    "@playwright/mcp@0.0.82",
     "--allowed-hosts",
     `localhost:${playwrightPort}`,
     "--host",
@@ -589,65 +622,219 @@ function startPlaywright(): void {
   });
 }
 
-function sse(response: ServerResponse, event: string, value: unknown): void {
-  response.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`);
+function newInteractiveSession(id: string): InteractiveSession {
+  return {
+    id,
+    connectPromise: undefined,
+    release: undefined,
+    releaseTimer: undefined,
+    leaseGeneration: 0,
+    activeCalls: 0,
+    callChain: Promise.resolve(),
+    closing: false,
+    lastSeen: Date.now(),
+  };
 }
 
-async function ensureMcp(session: ProxySession): Promise<McpClient> {
-  if (!session.client) {
-    session.client = new McpClient(mcpUrl);
+async function ensureMcp(session: InteractiveSession): Promise<McpClient> {
+  if (session.client) {
     await session.client.connect();
+    return session.client;
   }
-  return session.client;
-}
-
-async function proxyMessage(
-  session: ProxySession,
-  message: JsonObject,
-): Promise<void> {
-  const id = message.id;
-  const method = typeof message.method === "string" ? message.method : "";
-  if (method === "initialize") {
-    if (id !== undefined)
-      sse(session.response, "message", {
-        jsonrpc: "2.0",
-        id,
-        result: {
-          protocolVersion: "2024-11-05",
-          capabilities: { tools: {} },
-          serverInfo: { name: "openlia-browser-tools", version: "0.1.0" },
-        },
+  if (!session.connectPromise) {
+    const client = new McpClient(mcpUrl);
+    session.connectPromise = client
+      .connect()
+      .then(() => {
+        if (session.closing) {
+          client.close();
+          throw new Error("MCP session closed while connecting");
+        }
+        session.client = client;
+        return client;
+      })
+      .catch((error) => {
+        client.close();
+        throw error;
+      })
+      .finally(() => {
+        session.connectPromise = undefined;
       });
-    return;
   }
-  if (method === "notifications/initialized") return;
-  const client = await ensureMcp(session);
-  if (method === "tools/call") {
-    if (!session.release)
-      session.release = await jobs.arbiter.acquire(
-        `interactive:${session.id}`,
-        30_000,
-      );
-    const params = (message.params ?? {}) as JsonObject;
-    const result = await client.callTool(
-      String(params.name ?? ""),
-      (params.arguments ?? {}) as Record<string, unknown>,
-    );
-    if (id !== undefined)
-      sse(session.response, "message", { jsonrpc: "2.0", id, result });
-    return;
-  }
-  const result = await client.call(
-    method,
-    (message.params ?? {}) as Record<string, unknown>,
-  );
-  if (id !== undefined)
-    sse(session.response, "message", { jsonrpc: "2.0", id, result });
+  return session.connectPromise;
 }
 
-async function readMessages(request: IncomingMessage): Promise<JsonObject[]> {
-  const parsed = await body(request);
-  return parsed ? [parsed] : [];
+function releaseInteractiveLease(session: InteractiveSession): void {
+  if (session.releaseTimer) clearTimeout(session.releaseTimer);
+  session.releaseTimer = undefined;
+  session.leaseGeneration += 1;
+  session.release?.();
+  session.release = undefined;
+}
+
+function finishInteractiveCall(
+  session: InteractiveSession,
+  succeeded: boolean,
+): void {
+  session.activeCalls -= 1;
+  if (session.activeCalls > 0) return;
+  if (session.closing || !succeeded || jobs.arbiter.hasWaiters()) {
+    releaseInteractiveLease(session);
+    return;
+  }
+  const generation = ++session.leaseGeneration;
+  session.releaseTimer = setTimeout(
+    () => {
+      if (session.leaseGeneration === generation && session.activeCalls === 0)
+        releaseInteractiveLease(session);
+    },
+    Math.max(0, interactiveLeaseGraceMs),
+  );
+  session.releaseTimer.unref?.();
+}
+
+async function withInteractiveLease<T>(
+  session: InteractiveSession,
+  operation: () => Promise<T>,
+): Promise<T> {
+  let resolveResult: (value: T | PromiseLike<T>) => void;
+  let rejectResult: (reason?: unknown) => void;
+  const result = new Promise<T>((resolve, reject) => {
+    resolveResult = resolve;
+    rejectResult = reject;
+  });
+  const previous = session.callChain;
+  session.callChain = previous
+    .catch(() => undefined)
+    .then(async () => {
+      if (session.closing) throw new Error("MCP session is closed");
+      session.lastSeen = Date.now();
+      if (session.releaseTimer) clearTimeout(session.releaseTimer);
+      session.releaseTimer = undefined;
+      session.leaseGeneration += 1;
+      if (!session.release) {
+        const release = await jobs.arbiter.acquire(
+          `interactive:${session.id}`,
+          30_000,
+        );
+        if (session.closing) {
+          release();
+          throw new Error("MCP session is closed");
+        }
+        session.release = release;
+      }
+      session.activeCalls += 1;
+      let succeeded = false;
+      try {
+        const value = await operation();
+        succeeded = true;
+        resolveResult(value);
+      } catch (error) {
+        rejectResult(error);
+      } finally {
+        finishInteractiveCall(session, succeeded);
+      }
+    })
+    .catch((error) => {
+      rejectResult(error);
+    });
+  return result;
+}
+
+function closeInteractiveSession(session: InteractiveSession): void {
+  if (session.closing) return;
+  session.closing = true;
+  session.client?.close();
+  if (session.activeCalls === 0) releaseInteractiveLease(session);
+}
+
+async function createHttpMcpSession(): Promise<HttpMcpSession> {
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: randomUUID,
+    enableJsonResponse: true,
+    onsessioninitialized: (sessionId) => {
+      session.id = sessionId;
+      httpSessions.set(sessionId, session);
+    },
+  });
+  const server = new McpServer(
+    { name: "openlia-browser-tools", version: "0.1.0" },
+    { capabilities: { tools: {} } },
+  );
+  const session: HttpMcpSession = Object.assign(
+    newInteractiveSession(randomUUID()),
+    { server, transport },
+  );
+  server.setRequestHandler(ListToolsRequestSchema, async (request, extra) => {
+    session.lastSeen = Date.now();
+    const client = await ensureMcp(session);
+    return (await client.call(
+      "tools/list",
+      request.params ?? {},
+      90_000,
+      extra.signal,
+    )) as never;
+  });
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    return (await withInteractiveLease(session, async () => {
+      const client = await ensureMcp(session);
+      return client.callTool(
+        request.params.name,
+        request.params.arguments ?? {},
+        90_000,
+        extra.signal,
+      );
+    })) as never;
+  });
+  transport.onclose = () => {
+    const sessionId = transport.sessionId;
+    if (sessionId) httpSessions.delete(sessionId);
+    closeInteractiveSession(session);
+    void server.close().catch(() => undefined);
+  };
+  await server.connect(transport as Transport);
+  return session;
+}
+
+async function handleStreamableHttp(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  const origin = request.headers.origin;
+  if (origin && !allowedOrigins.has(origin)) {
+    json(response, { ok: false, error: "origin is not allowed" }, 403);
+    return;
+  }
+  const sessionHeader = request.headers["mcp-session-id"];
+  const sessionId = Array.isArray(sessionHeader)
+    ? sessionHeader[0]
+    : sessionHeader;
+  let parsedBody: JsonObject | undefined;
+  if (request.method === "POST") {
+    parsedBody = (await body(request)) ?? undefined;
+    if (!parsedBody) {
+      json(response, { ok: false, error: "invalid MCP request body" }, 400);
+      return;
+    }
+  }
+  let session = sessionId ? httpSessions.get(sessionId) : undefined;
+  if (!session && request.method === "POST" && isInitializeRequest(parsedBody))
+    session = await createHttpMcpSession();
+  if (!session) {
+    json(
+      response,
+      {
+        ok: false,
+        error: sessionId
+          ? "MCP session not found"
+          : "MCP initialization required",
+      },
+      sessionId ? 404 : 400,
+    );
+    return;
+  }
+  session.lastSeen = Date.now();
+  await session.transport.handleRequest(request, response, parsedBody);
 }
 
 async function handler(
@@ -662,11 +849,29 @@ async function handler(
     request.url ?? "/",
     `http://${request.headers.host ?? "localhost"}`,
   );
+  if (url.pathname === "/mcp") {
+    await handleStreamableHttp(request, response);
+    return;
+  }
+  if (url.pathname === "/sse" || url.pathname === "/messages") {
+    json(
+      response,
+      {
+        ok: false,
+        error: "legacy SSE transport is disabled; use /mcp",
+        mcp_endpoint: "/mcp",
+      },
+      410,
+    );
+    return;
+  }
   if (request.method === "GET" && url.pathname === "/health") {
     json(response, {
       ok: true,
       service: "browser-tools",
       mcp_url: mcpUrl,
+      mcp_transport: "streamable-http",
+      mcp_sessions: httpSessions.size,
       playwright_pid: playwright?.pid ?? null,
       browser_lease: jobs.arbiter.status(),
     });
@@ -752,48 +957,6 @@ async function handler(
       return;
     }
   }
-  if (request.method === "GET" && url.pathname === "/sse") {
-    const id = randomUUID();
-    const session: ProxySession = { id, response };
-    sessions.set(id, session);
-    response.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
-    response.write(
-      `event: endpoint\ndata: /messages?sessionId=${encodeURIComponent(id)}\n\n`,
-    );
-    request.on("close", () => {
-      sessions.delete(id);
-      session.release?.();
-      session.client?.close();
-    });
-    return;
-  }
-  if (request.method === "POST" && url.pathname === "/messages") {
-    const id = url.searchParams.get("sessionId") ?? "";
-    const session = sessions.get(id);
-    if (!session)
-      return json(response, { ok: false, error: "MCP session not found" }, 404);
-    for (const message of await readMessages(request)) {
-      try {
-        await proxyMessage(session, message);
-      } catch (error) {
-        if (message.id !== undefined)
-          sse(session.response, "message", {
-            jsonrpc: "2.0",
-            id: message.id,
-            error: {
-              code: -32000,
-              message: error instanceof Error ? error.message : String(error),
-            },
-          });
-      }
-    }
-    response.writeHead(202).end();
-    return;
-  }
   json(response, { ok: false, error: "not found" }, 404);
 }
 
@@ -804,6 +967,15 @@ const server = createServer((request, response) => {
     else response.destroy();
   });
 });
+const sessionReaper = setInterval(() => {
+  if (!Number.isFinite(mcpSessionIdleMs) || mcpSessionIdleMs <= 0) return;
+  const cutoff = Date.now() - mcpSessionIdleMs;
+  for (const session of httpSessions.values()) {
+    if (session.activeCalls === 0 && session.lastSeen < cutoff)
+      void session.transport.close().catch(() => undefined);
+  }
+}, 60_000);
+sessionReaper.unref();
 
 server.listen(port, bind, () => {
   console.log(`browser-tools listening on http://${bind}:${port}`);
@@ -818,10 +990,10 @@ server.listen(port, bind, () => {
 
 function shutdown(): void {
   stopping = true;
-  for (const session of sessions.values()) {
-    session.release?.();
-    session.client?.close();
-    session.response.end();
+  clearInterval(sessionReaper);
+  for (const session of httpSessions.values()) {
+    closeInteractiveSession(session);
+    void session.transport.close().catch(() => undefined);
   }
   jobs.store.db.close();
   playwright?.kill("SIGTERM");
