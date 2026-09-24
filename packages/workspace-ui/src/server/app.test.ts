@@ -61,6 +61,40 @@ describe("workspace HTTP handler", () => {
     ]);
   });
 
+  test("hides navigator scaffolding while keeping workspace folders visible", async () => {
+    mkdirSync(join(root, "calendar"), { recursive: true });
+    mkdirSync(join(root, "archive"), { recursive: true });
+    writeFileSync(join(root, "calendar", ".gitkeep"), "placeholder");
+    writeFileSync(join(root, "calendar", "event-note-template.md"), "template");
+    writeFileSync(join(root, "calendar", "event.md"), "event");
+    writeFileSync(join(root, "archive", ".DS_Store"), "metadata");
+    writeFileSync(join(root, "README.md"), "workspace guide");
+
+    const response = await request("/api/workspace/tree");
+    const payload = (await response.json()) as {
+      entries: Array<{ path: string; kind: string }>;
+    };
+    const paths = payload.entries.map((entry) => entry.path);
+
+    expect(paths).toContain("archive");
+    expect(paths).toContain("calendar");
+    expect(paths).toContain("calendar/event.md");
+    expect(paths).toContain("README.md");
+    expect(paths).not.toContain("calendar/.gitkeep");
+    expect(paths).not.toContain("calendar/event-note-template.md");
+    expect(paths).not.toContain("archive/.DS_Store");
+
+    for (const hiddenPath of [
+      "calendar/.gitkeep",
+      "calendar/event-note-template.md",
+    ]) {
+      const hiddenResponse = await request(
+        `/api/workspace/file?path=${encodeURIComponent(hiddenPath)}`,
+      );
+      expect(hiddenResponse.status).toBe(403);
+    }
+  });
+
   test("reads, writes, and rejects stale revisions", async () => {
     writeFileSync(join(root, "note.md"), "before");
     const readResponse = await request("/api/workspace/file?path=note.md");
@@ -138,7 +172,15 @@ describe("workspace HTTP handler", () => {
     writeFileSync(join(root, "project", ".git", "config"), "secret");
     writeFileSync(join(root, "project", ".env.local"), "secret");
 
-    for (const path of ["project/.git/config", "project/.env.local"]) {
+    mkdirSync(join(root, "project", "Logs"), { recursive: true });
+    writeFileSync(join(root, "project", "Logs", "records.txt"), "secret");
+
+    for (const path of [
+      "project/.git/config",
+      "project/.env.local",
+      "project/logs/records.txt",
+      "project/Logs/records.txt",
+    ]) {
       const response = await request(
         `/api/workspace/file?path=${encodeURIComponent(path)}`,
       );

@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import type { ComponentProps, ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import type { ComponentProps, ReactNode, RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
@@ -48,7 +48,21 @@ function buildTree(entries: WorkspaceTreeEntry[]): TreeNode[] {
     });
   }
 
-  return root.children;
+  function sortNodes(nodes: TreeNode[]): TreeNode[] {
+    return [...nodes]
+      .sort((left, right) => {
+        if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
+        return (
+          left.name.localeCompare(right.name, undefined, {
+            numeric: true,
+            sensitivity: "base",
+          }) || left.path.localeCompare(right.path)
+        );
+      })
+      .map((node) => ({ ...node, children: sortNodes(node.children) }));
+  }
+
+  return sortNodes(root.children);
 }
 
 function countFiles(nodes: TreeNode[]): number {
@@ -89,6 +103,7 @@ export function WorkspaceHeader({
   authRequired,
   detailsOpen,
   dirty,
+  filesButtonRef,
   file,
   git,
   onOpenDetails,
@@ -98,6 +113,7 @@ export function WorkspaceHeader({
   authRequired: boolean;
   detailsOpen: boolean;
   dirty: boolean;
+  filesButtonRef: RefObject<HTMLButtonElement | null>;
   file: WorkspaceFile | null;
   git: WorkspaceGitStatus | null;
   onOpenDetails: () => void;
@@ -112,6 +128,7 @@ export function WorkspaceHeader({
     <header className="workspace-header">
       <button
         className="btn btn-ghost btn-sm xl:hidden"
+        ref={filesButtonRef}
         onClick={onOpenFiles}
         type="button"
       >
@@ -183,6 +200,48 @@ export function FileNavigator({
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const nodes = useMemo(() => buildTree(entries), [entries]);
+  const initializedTree = useRef(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef(onClose);
+  const filesHeadingId = useId();
+
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    if (initializedTree.current || nodes.length === 0) return;
+    initializedTree.current = true;
+    setCollapsed(
+      new Set(
+        nodes
+          .filter((node) => node.kind === "directory")
+          .map((node) => node.path),
+      ),
+    );
+  }, [nodes]);
+
+  useEffect(() => {
+    if (!selectedPath) return;
+    const parts = selectedPath.split("/");
+    const ancestors = parts
+      .slice(0, -1)
+      .map((_, index) => parts.slice(0, index + 1).join("/"));
+    setCollapsed((current) => {
+      const next = new Set(current);
+      for (const ancestor of ancestors) next.delete(ancestor);
+      return next;
+    });
+  }, [selectedPath]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    closeButtonRef.current?.focus();
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") closeRef.current();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mobileOpen]);
+
   const query = filter.trim().toLowerCase();
   const totalFiles = countFiles(nodes);
   const visibleFiles = query ? matchedFiles(nodes, query) : totalFiles;
@@ -195,32 +254,59 @@ export function FileNavigator({
           const isCollapsed = collapsed.has(node.path);
           const isDirectory = node.kind === "directory";
           const forcedOpen = Boolean(query);
-          const childrenVisible = isDirectory && (!isCollapsed || forcedOpen);
-          const directoryId = `workspace-directory-${node.path.replaceAll("/", "-")}`;
+          const hasChildren = isDirectory && node.children.length > 0;
+          const childrenVisible = hasChildren && (!isCollapsed || forcedOpen);
+          const directoryId = `workspace-directory-${encodeURIComponent(node.path)}`;
           return (
             <li key={node.path}>
               {isDirectory ? (
                 <>
-                  <button
-                    aria-controls={directoryId}
-                    aria-expanded={childrenVisible}
-                    className="workspace-tree-row workspace-tree-directory"
-                    onClick={() => {
-                      setCollapsed((current) => {
-                        const next = new Set(current);
-                        if (next.has(node.path)) next.delete(node.path);
-                        else next.add(node.path);
-                        return next;
-                      });
-                    }}
-                    style={{ paddingInlineStart: `${depth * 12 + 8}px` }}
-                    type="button"
-                  >
-                    <span aria-hidden="true" className="workspace-tree-chevron">
-                      {childrenVisible ? "▾" : "▸"}
-                    </span>
-                    <span className="truncate">{node.name}</span>
-                  </button>
+                  {hasChildren ? (
+                    <button
+                      aria-controls={directoryId}
+                      aria-expanded={childrenVisible}
+                      className="workspace-tree-row workspace-tree-directory"
+                      disabled={forcedOpen}
+                      onClick={() => {
+                        setCollapsed((current) => {
+                          const next = new Set(current);
+                          if (next.has(node.path)) next.delete(node.path);
+                          else next.add(node.path);
+                          return next;
+                        });
+                      }}
+                      style={{ paddingInlineStart: `${depth * 12 + 8}px` }}
+                      title={
+                        forcedOpen
+                          ? "Clear search to collapse folders"
+                          : node.path
+                      }
+                      type="button"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="workspace-tree-chevron"
+                      >
+                        {childrenVisible ? "▾" : "▸"}
+                      </span>
+                      <span className="truncate">{node.name}</span>
+                    </button>
+                  ) : (
+                    <div
+                      aria-label={`${node.name}, empty folder`}
+                      className="workspace-tree-row workspace-tree-directory workspace-tree-empty-directory"
+                      role="treeitem"
+                      style={{ paddingInlineStart: `${depth * 12 + 8}px` }}
+                      tabIndex={-1}
+                      title={`${node.path} (empty)`}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="workspace-tree-chevron"
+                      />
+                      <span className="truncate">{node.name}</span>
+                    </div>
+                  )}
                   {childrenVisible && (
                     <div id={directoryId}>
                       {renderNodes(node.children, depth + 1)}
@@ -233,6 +319,7 @@ export function FileNavigator({
                   className={`workspace-tree-row workspace-tree-file ${selectedPath === node.path ? "workspace-tree-file-selected" : ""}`}
                   onClick={() => onOpenFile(node.path)}
                   style={{ paddingInlineStart: `${depth * 12 + 28}px` }}
+                  title={node.path}
                   type="button"
                 >
                   <span className="min-w-0 truncate">{node.name}</span>
@@ -253,19 +340,24 @@ export function FileNavigator({
       {mobileOpen && (
         <button
           aria-label="Close files"
-          className="fixed inset-0 z-30 bg-black/60 xl:hidden"
+          className="fixed inset-0 z-30 bg-black/75 backdrop-blur-sm xl:hidden"
           onClick={onClose}
           type="button"
         />
       )}
       <aside
         aria-label="Workspace files"
-        className={`workspace-navigator ${mobileOpen ? "fixed inset-y-0 left-0 z-40 flex w-[min(88vw,340px)]" : "hidden"} xl:relative xl:flex`}
+        aria-labelledby={mobileOpen ? filesHeadingId : undefined}
+        className={`workspace-navigator ${mobileOpen ? "fixed inset-y-0 left-0 z-40 flex w-[min(88vw,340px)] bg-base-100 shadow-2xl" : "hidden"} xl:relative xl:flex`}
+        role={mobileOpen ? "dialog" : "complementary"}
       >
         <div className="flex items-center justify-between border-b border-base-content/10 px-4 py-3 xl:hidden">
-          <h2 className="font-semibold">Files</h2>
+          <h2 className="font-semibold" id={filesHeadingId}>
+            Files
+          </h2>
           <button
             className="btn btn-ghost btn-sm"
+            ref={closeButtonRef}
             onClick={onClose}
             type="button"
           >
@@ -276,7 +368,10 @@ export function FileNavigator({
           <div className="mb-4 flex items-end justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold">Files</h2>
-              <p className="mt-1 text-xs text-base-content/50">
+              <p
+                aria-live="polite"
+                className="mt-1 text-xs text-base-content/50"
+              >
                 {query
                   ? `${visibleFiles} matching files`
                   : `${totalFiles} files`}
@@ -303,6 +398,13 @@ export function FileNavigator({
             type="search"
             value={filter}
           />
+          {query &&
+            selectedPath &&
+            !selectedPath.toLowerCase().includes(query) && (
+              <p className="mt-2 text-xs text-warning" role="status">
+                Current document is outside this search.
+              </p>
+            )}
           {truncated && (
             <p className="alert alert-warning mt-3 p-3 text-xs">
               Showing the first {entries.length} workspace entries.

@@ -37,6 +37,37 @@ const editableExtensions = new Set([
   ".csv",
 ]);
 
+const protectedDirectoryNames = new Set([
+  "browser-profile",
+  "cache",
+  "logs",
+  "mcp-tokens",
+  "pairing",
+  "sessions",
+]);
+
+const navigationHiddenBasenames = new Set([
+  ".ds_store",
+  ".gitkeep",
+  "desktop.ini",
+  "thumbs.db",
+]);
+
+const templatePaths = new Set([
+  "areas/area-template.md",
+  "calendar/event-note-template.md",
+  "decisions/decision-template.md",
+  "finance/finance-template.md",
+  "goals/goal-template.md",
+  "ideas/idea-template.md",
+  "monitors/monitor-template.md",
+  "people/person-template.md",
+  "projects/project-template.md",
+  "shopping/item-template.md",
+  "tasks/task-template.md",
+  "travel/trip-template.md",
+]);
+
 export interface WorkspaceServiceOptions {
   workspaceRoot: string;
   maxEditableBytes?: number;
@@ -69,34 +100,37 @@ export function revision(contents: Uint8Array): string {
 
 export function protectedPath(path: string): boolean {
   const normalized = path.replaceAll("\\", "/");
-  const parts = normalized.split("/");
-  const basename = normalized.split("/").at(-1) ?? "";
+  const lowerPath = normalized.toLowerCase();
+  const parts = lowerPath.split("/");
+  const basename = parts.at(-1) ?? "";
   return (
-    normalized === ".env" ||
-    normalized.startsWith(".env.") ||
-    normalized.endsWith(".env") ||
-    normalized.includes(".secret") ||
-    normalized.endsWith(".pem") ||
-    normalized.endsWith(".key") ||
-    normalized.endsWith(".p12") ||
-    normalized.endsWith(".pfx") ||
+    lowerPath === ".env" ||
+    lowerPath.startsWith(".env.") ||
+    lowerPath.endsWith(".env") ||
+    lowerPath.includes(".secret") ||
+    lowerPath.endsWith(".pem") ||
+    lowerPath.endsWith(".key") ||
+    lowerPath.endsWith(".p12") ||
+    lowerPath.endsWith(".pfx") ||
     basename === "auth.json" ||
-    normalized.startsWith("sessions/") ||
-    normalized.startsWith("logs/") ||
-    normalized.startsWith("cache/") ||
-    normalized.startsWith("browser-profile/") ||
-    normalized.startsWith("mcp-tokens/") ||
-    normalized.startsWith("pairing/") ||
-    normalized === ".gitignore" ||
-    normalized.endsWith("/.gitignore") ||
+    parts.some((part) => protectedDirectoryNames.has(part)) ||
+    basename === ".gitignore" ||
     parts.some(
       (part) => part === ".git" || part === ".env" || part.startsWith(".env."),
     ) ||
-    basename === "AGENTS.md" ||
-    basename === "CLAUDE.md" ||
-    basename === ".cursorrules" ||
-    normalized === ".git" ||
-    normalized.startsWith(".git/")
+    basename === "agents.md" ||
+    basename === "claude.md" ||
+    basename === ".cursorrules"
+  );
+}
+
+export function hiddenFromNavigator(path: string): boolean {
+  const normalized = path.replaceAll("\\", "/").toLowerCase();
+  const basename = normalized.split("/").at(-1) ?? "";
+  return (
+    navigationHiddenBasenames.has(basename) ||
+    basename.startsWith("._") ||
+    templatePaths.has(normalized)
   );
 }
 
@@ -122,6 +156,13 @@ function validateRelativePath(value: unknown): string {
       "workspace path is protected",
       403,
       "protected_path",
+    );
+  }
+  if (hiddenFromNavigator(normalized)) {
+    throw new WorkspaceError(
+      "workspace path is not available in the navigator",
+      403,
+      "hidden_path",
     );
   }
   return normalized;
@@ -155,8 +196,8 @@ export class WorkspaceService {
 
   tree(): WorkspaceTreeResponse {
     const entries: WorkspaceTreeResponse["entries"] = [];
+    let truncated = false;
     const visit = (directory: string): void => {
-      if (entries.length >= this.maxTreeEntries) return;
       let directoryEntries: Dirent<string>[] = [];
       try {
         directoryEntries = readdirSync(directory, {
@@ -167,6 +208,10 @@ export class WorkspaceService {
         return;
       }
       for (const entry of directoryEntries) {
+        if (entries.length >= this.maxTreeEntries) {
+          truncated = true;
+          return;
+        }
         const absolute = join(directory, entry.name);
         const path = relative(this.workspaceRoot, absolute)
           .split(sep)
@@ -183,16 +228,14 @@ export class WorkspaceService {
           entries.push({ path, kind: "directory" });
           visit(absolute);
         } else if (entry.isFile()) {
+          if (hiddenFromNavigator(path)) continue;
           try {
             entries.push({
               kind: "file",
               ...this.fileMetadata(absolute, path),
             });
-          } catch {
-            continue;
-          }
+          } catch {}
         }
-        if (entries.length >= this.maxTreeEntries) return;
       }
     };
 
@@ -201,7 +244,7 @@ export class WorkspaceService {
     return {
       schema: 1,
       entries,
-      truncated: entries.length >= this.maxTreeEntries,
+      truncated,
     };
   }
 
@@ -417,7 +460,6 @@ export class WorkspaceService {
       configured: true,
       branch,
       dirty: lines.some((line) => /^\s*[MADRCU?!]/.test(line)),
-      status,
     };
   }
 

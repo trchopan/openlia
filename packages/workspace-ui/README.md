@@ -41,6 +41,11 @@ so scenarios can be switched without restarting Vite:
 http://127.0.0.1:5173/?scenario=conflict
 ```
 
+The file navigator hides workspace scaffolding such as `.gitkeep`, OS metadata,
+and the canonical starter templates. Empty workspace folders remain visible so
+the workspace structure is still discoverable. Search expands matching folders;
+use `Cmd+S` on macOS or `Ctrl+S` elsewhere to save an edited document.
+
 ## Real Backend Development
 
 To exercise the actual Bun filesystem server against a disposable workspace:

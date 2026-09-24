@@ -55,6 +55,7 @@ describe("workspace application", () => {
       name: "Document editor",
     });
     fireEvent.change(editor, { target: { value: "draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "calendar" }));
     fireEvent.click(screen.getByRole("button", { name: "event.md" }));
 
     expect(await screen.findByRole("dialog")).toHaveTextContent(

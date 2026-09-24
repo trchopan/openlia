@@ -156,6 +156,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   const [authError, setAuthError] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
+  const filesButtonRef = useRef<HTMLButtonElement>(null);
   const [detailsOpen, setDetailsOpen] = useState(
     () => initialRoute.current.view === "info",
   );
@@ -174,6 +175,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     file,
     filter,
     openFile,
+    save,
     view,
   });
   useEffect(() => {
@@ -182,6 +184,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       file,
       filter,
       openFile,
+      save,
       view,
     };
   });
@@ -255,6 +258,20 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     window.addEventListener("beforeunload", warnBeforeUnload);
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [dirty]);
+
+  useEffect(() => {
+    function handleSaveShortcut(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s")
+        return;
+      if (!appStateRef.current.dirty || !appStateRef.current.file?.editable)
+        return;
+      event.preventDefault();
+      void appStateRef.current.save();
+    }
+
+    window.addEventListener("keydown", handleSaveShortcut);
+    return () => window.removeEventListener("keydown", handleSaveShortcut);
+  }, []);
 
   useEffect(() => {
     function handlePopState() {
@@ -527,11 +544,12 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
   function handleFilterChange(nextFilter: string) {
     setFilter(nextFilter);
+    const normalizedFilter = nextFilter.trim();
     const currentRoute =
       typeof window !== "undefined" ? parseRoute(window.location) : {};
     navigateRoute(
       {
-        filter: nextFilter || undefined,
+        filter: normalizedFilter || undefined,
         path: file?.path,
         scenario: currentRoute.scenario,
         view,
@@ -632,6 +650,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         authRequired={authRequired}
         detailsOpen={detailsOpen}
         dirty={dirty}
+        filesButtonRef={filesButtonRef}
         file={file}
         git={git}
         onOpenDetails={openHeaderDetails}
@@ -645,14 +664,17 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         />
       )}
       <div
-        className={`workspace-layout ${detailsOpen ? "xl:grid-cols-[clamp(15rem,18vw,18rem)_minmax(0,1fr)_clamp(16rem,20vw,20rem)]" : "xl:grid-cols-[clamp(15rem,18vw,18rem)_minmax(0,1fr)]"}`}
+        className={`workspace-layout ${detailsOpen ? "xl:grid-cols-[clamp(18rem,22vw,22rem)_minmax(0,1fr)_clamp(16rem,20vw,20rem)]" : "xl:grid-cols-[clamp(18rem,22vw,22rem)_minmax(0,1fr)]"}`}
       >
         <FileNavigator
           entries={tree}
           filter={filter}
           loading={loading}
           mobileOpen={filesOpen}
-          onClose={() => setFilesOpen(false)}
+          onClose={() => {
+            setFilesOpen(false);
+            filesButtonRef.current?.focus();
+          }}
           onFilterChange={handleFilterChange}
           onOpenFile={requestOpenFile}
           onRetry={() => void loadWorkspace()}
