@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type {
   WorkspaceFile,
   WorkspaceGitStatus,
@@ -163,24 +163,37 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     () => initialRoute.current.view ?? defaultView(),
   );
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
-  const [reloadToken, setReloadToken] = useState(0);
   const fileRequestSequence = useRef(0);
   const initialPathOpened = useRef(false);
 
   const dirty = file !== null && file.content !== draft;
   const diff = dirty ? diffLines(file.content, draft) : [];
 
-  // Retry intentionally reruns this effect even though it does not affect the request payload.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadToken is the retry trigger
+  const appStateRef = useRef({
+    dirty,
+    file,
+    filter,
+    openFile,
+    view,
+  });
   useEffect(() => {
-    let active = true;
-    setAuthReady(false);
-    setLoading(true);
-    setWorkspaceError("");
-    void api
-      .loadSession()
-      .then((session) => {
-        if (!active) return;
+    appStateRef.current = {
+      dirty,
+      file,
+      filter,
+      openFile,
+      view,
+    };
+  });
+
+  const loadWorkspace = useCallback(
+    async (isActive?: () => boolean) => {
+      setAuthReady(false);
+      setLoading(true);
+      setWorkspaceError("");
+      try {
+        const session = await api.loadSession();
+        if (isActive && !isActive()) return;
         setAuthRequired(session.auth_required);
         if (session.auth_required && !session.authenticated) {
           setNeedsLogin(true);
@@ -188,43 +201,50 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           setLoading(false);
           return;
         }
-        return Promise.all([api.loadTree(), api.loadGitStatus()]).then(
-          ([treeResponse, gitResponse]) => {
-            if (!active) return;
-            setTree(treeResponse.entries);
-            setTreeTruncated(treeResponse.truncated);
-            setGit(gitResponse);
-            setNeedsLogin(false);
-            setAuthReady(true);
-            if (!initialPathOpened.current) {
-              initialPathOpened.current = true;
-              const route =
-                typeof window !== "undefined"
-                  ? parseRoute(window.location)
-                  : initialRoute.current;
-              if (route.path) {
-                void openFile(route.path, {
-                  keepView: Boolean(route.view),
-                  replaceHistory: true,
-                });
-              }
-            }
-          },
-        );
-      })
-      .catch(() => {
-        if (!active) return;
+        const [treeResponse, gitResponse] = await Promise.all([
+          api.loadTree(),
+          api.loadGitStatus(),
+        ]);
+        if (isActive && !isActive()) return;
+        setTree(treeResponse.entries);
+        setTreeTruncated(treeResponse.truncated);
+        setGit(gitResponse);
+        setNeedsLogin(false);
+        setAuthReady(true);
+        if (!initialPathOpened.current) {
+          initialPathOpened.current = true;
+          const route =
+            typeof window !== "undefined"
+              ? parseRoute(window.location)
+              : initialRoute.current;
+          if (route.path) {
+            void appStateRef.current.openFile(route.path, {
+              keepView: Boolean(route.view),
+              replaceHistory: true,
+            });
+          }
+        }
+      } catch {
+        if (isActive && !isActive()) return;
         setWorkspaceError("Workspace data could not be loaded.");
         setGit(null);
         setAuthReady(true);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+      } finally {
+        if (!isActive || isActive()) {
+          setLoading(false);
+        }
+      }
+    },
+    [api],
+  );
+
+  useEffect(() => {
+    let active = true;
+    void loadWorkspace(() => active);
     return () => {
       active = false;
     };
-  }, [api, reloadToken]);
+  }, [loadWorkspace]);
 
   useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
@@ -236,9 +256,9 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [dirty]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: popstate coordinates with active file draft and route
   useEffect(() => {
     function handlePopState() {
+      const { dirty, file, filter, openFile, view } = appStateRef.current;
       const route = parseRoute(window.location);
       if (dirty) {
         if (file?.path) {
@@ -280,7 +300,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [dirty, file?.path, filter, view]);
+  }, []);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -621,7 +641,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       {workspaceError && (
         <ErrorMessage
           error={workspaceError}
-          onRetry={() => setReloadToken((current) => current + 1)}
+          onRetry={() => void loadWorkspace()}
         />
       )}
       <div
@@ -635,7 +655,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           onClose={() => setFilesOpen(false)}
           onFilterChange={handleFilterChange}
           onOpenFile={requestOpenFile}
-          onRetry={() => setReloadToken((current) => current + 1)}
+          onRetry={() => void loadWorkspace()}
           selectedPath={file?.path}
           truncated={treeTruncated}
           workspaceError={workspaceError}
