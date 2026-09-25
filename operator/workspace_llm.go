@@ -4,18 +4,67 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 )
+
+// TargetWorkspaceProfile captures the live structure and conventions of the target workspace.
+type TargetWorkspaceProfile struct {
+	RootPath          string            `json:"root_path"`
+	ActiveDirectories []string          `json:"active_directories"` // Top-level and notable subdirectories
+	LivingTemplates   map[string]string `json:"living_templates"`   // domain -> template relative path
+}
+
+// InspectTargetWorkspace scans workspaceRoot to discover active directories and living templates.
+func InspectTargetWorkspace(workspaceRoot string) TargetWorkspaceProfile {
+	profile := TargetWorkspaceProfile{
+		RootPath:        workspaceRoot,
+		LivingTemplates: make(map[string]string),
+	}
+
+	entries, err := os.ReadDir(workspaceRoot)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+				profile.ActiveDirectories = append(profile.ActiveDirectories, entry.Name())
+			}
+		}
+	}
+
+	_ = filepath.Walk(workspaceRoot, func(p string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(workspaceRoot, p)
+		if err != nil {
+			return nil
+		}
+		cleanRel := filepath.ToSlash(rel)
+		if strings.HasSuffix(cleanRel, "-template.md") || strings.Contains(cleanRel, "templates/") {
+			dir := filepath.Dir(cleanRel)
+			if dir == "." {
+				dir = strings.TrimSuffix(cleanRel, "-template.md")
+			}
+			profile.LivingTemplates[dir] = cleanRel
+		}
+		return nil
+	})
+
+	return profile
+}
 
 // LLMClassificationRequest represents the input given to the LLM for classifying a file.
 type LLMClassificationRequest struct {
-	RelativePath string `json:"relative_path"`
-	Content      string `json:"content"`
+	RelativePath string                 `json:"relative_path"`
+	Content      string                 `json:"content"`
+	Profile      TargetWorkspaceProfile `json:"profile,omitempty"`
 }
 
 // LLMClassificationResponse represents the structured decision returned by the LLM.
 type LLMClassificationResponse struct {
-	Domain          string `json:"domain"`           // Canonical domain
+	Domain          string `json:"domain"`           // Target directory / domain
 	TargetPath      string `json:"target_path"`      // Suggested path in OpenLia workspace
 	ProposedContent string `json:"proposed_content"` // Adapted markdown conforming to domain template
 	Rationale       string `json:"rationale"`        // Short explanation of the classification
@@ -27,40 +76,50 @@ type LLMPlanner interface {
 }
 
 // SystemPromptForMigration generates the schema and instructions for LLM planning.
-func SystemPromptForMigration() string {
-	return `You are OpenLia's Personal OS Migration Assistant.
-Your task is to analyze user notes and files from an external directory/vault and adapt them into OpenLia's canonical Personal OS workspace structure.
+func SystemPromptForMigration(profile TargetWorkspaceProfile) string {
+	dirsList := strings.Join(profile.ActiveDirectories, ", ")
+	if dirsList == "" {
+		dirsList = "tasks, projects, goals, areas, decisions, monitors, people, ideas, travel, shopping, finance, calendar, knowledge, archive, inbox"
+	}
 
-OpenLia canonical domains:
-1. "tasks": Concrete physical actions. Follows tasks/task-template.md (# Title, ## Action, ## Status: todo, ## Context, ## Checklist / Substeps).
-2. "projects": Bounded initiatives with deliverables and milestones. Follows projects/project-template.md (# Title, ## Objective, ## Status: active, ## Context & Constraints, ## Milestones, ## Next Tasks).
-3. "goals": High-level aspirations and outcomes. Follows goals/goal-template.md (# Title, ## Objective, ## Status: active, ## Timeframe, ## Key Results & Milestones).
-4. "areas": Enduring life domains & standards. Follows areas/area-template.md (# Title, ## Scope & Purpose, ## Standards & Principles, ## Recurring Responsibilities).
-5. "decisions": Decisions, trade-offs, options considered. Follows decisions/decision-template.md (# Title, ## Question, ## Status: proposed/decided, ## Context And Constraints, ## Options Considered).
-6. "monitors": Standing checks and watch rules. Follows monitors/monitor-template.md (# Title, ## Target Condition, ## Status: active, ## Watch Details).
-7. "people": Contact & relationship profiles. Follows people/person-template.md (# Title, ## Relationship & Context, ## Important Dates, ## Open Loops & Commitments).
-8. "ideas": Hypotheses, seeds, exploration concepts. Follows ideas/idea-template.md (# Title, ## Concept, ## Status: seed, ## Potential Value & Opportunity, ## Next Exploration Step).
-9. "travel": Trips and itineraries. Follows travel/trip-template.md (# Title, ## Overview, ## Itinerary Outline, ## Packing & Preparation Checklist).
-10. "shopping": Purchase research and items. Follows shopping/item-template.md (# Title, ## Assessment, ## Budget & Price Targets, ## Candidate Options).
-11. "finance": Budget and financial reviews. Follows finance/finance-template.md (# Title, ## Scope & Period, ## Spending Summary & Targets).
-12. "calendar": Event notes and meeting agendas. Follows calendar/event-note-template.md (# Title, ## Details, ## Purpose & Agenda, ## Discussion & Raw Notes, ## Follow-up Action Items).
-13. "knowledge/claims": Reusable claims with frontmatter (claim, source, provenance, kind, status).
-14. "knowledge": General durable notes, research, educational lessons, and curriculum.
-15. "archive": Inactive records, past logs, completed tasks.
-16. "inbox": Unclassified captures or ambiguous notes.
+	templatesSummary := ""
+	if len(profile.LivingTemplates) > 0 {
+		var tmplLines []string
+		for dom, tmpl := range profile.LivingTemplates {
+			tmplLines = append(tmplLines, fmt.Sprintf("- %s: %s", dom, tmpl))
+		}
+		templatesSummary = "Discovered living templates (for style guidance only, do NOT enforce rigidly):\n" + strings.Join(tmplLines, "\n") + "\n"
+	}
 
-Output strictly valid JSON with keys:
-- "domain": string (one of the canonical domains above)
-- "target_path": string (e.g. "tasks/buy-groceries.md")
-- "proposed_content": string (the markdown text adapted cleanly to the template while fully preserving original facts and notes)
-- "rationale": string (1-sentence rationale)`
+	return fmt.Sprintf(`You are OpenLia's Personal OS Migration Assistant.
+Your task is to analyze user notes and determine their best placement within the user's living OpenLia workspace.
+
+CORE PRINCIPLES:
+1. LIVING WORKSPACE STRUCTURE: The target workspace is personalized. Prioritize placing notes into the ACTIVE DIRECTORIES discovered below.
+2. TEMPLATES ARE BOILERPLATE SUGGESTIONS ONLY: Do NOT force incoming notes into rigid template headings or schemas. Do NOT inject empty checklists, fake overviews, or synthetic placeholder sections. Keep the author's original writing style, structure, and prose.
+3. PRESERVE ORIGINAL CONTENT FIDELITY: Your primary job is intelligent routing and high-fidelity preservation. Only remove foreign agent-specific metadata (such as agent IDs, vector database headers, or bot instructions) while preserving all user-authored text and facts.
+4. CONFIDENTIAL/KEYS: If a file contains sensitive secrets, tokens, or private keys, set domain to "quarantine".
+
+ACTIVE DIRECTORIES IN TARGET WORKSPACE:
+%s
+
+%s
+Respond strictly in valid JSON format:
+{
+  "domain": "<directory name from active directories or canonical domain>",
+  "target_path": "<relative path in target workspace, e.g. areas/commute.md or travel/tokyo.md>",
+  "proposed_content": "<markdown text preserving original notes, cleaned of foreign agent metadata if present>",
+  "rationale": "<1-sentence rationale for the placement>"
+}`, dirsList, templatesSummary)
 }
 
 // FallbackDeterministicPlanner implements LLMPlanner using deterministic heuristics.
-type FallbackDeterministicPlanner struct{}
+type FallbackDeterministicPlanner struct {
+	Profile TargetWorkspaceProfile
+}
 
 func (f *FallbackDeterministicPlanner) ClassifyAndAdapt(ctx context.Context, req LLMClassificationRequest) (LLMClassificationResponse, error) {
-	targetPath, domain, adaptedContent, rationale := ClassifyAndAdaptFile(req.RelativePath, []byte(req.Content))
+	targetPath, domain, adaptedContent, rationale := ClassifyAndAdaptFileWithProfile(req.RelativePath, []byte(req.Content), f.Profile)
 	return LLMClassificationResponse{
 		Domain:          domain,
 		TargetPath:      targetPath,
@@ -73,22 +132,26 @@ func (f *FallbackDeterministicPlanner) ClassifyAndAdapt(ctx context.Context, req
 type ComposeLLMPlanner struct {
 	Compose Compose
 	Config  Config
+	Profile TargetWorkspaceProfile
 }
 
 func (c *ComposeLLMPlanner) ClassifyAndAdapt(ctx context.Context, req LLMClassificationRequest) (LLMClassificationResponse, error) {
+	fallback := &FallbackDeterministicPlanner{Profile: c.Profile}
+
 	// If hermes service is not running or context timed out, fallback to deterministic
 	if c.Compose.Config.ProjectName == "" || !c.Compose.ServiceRunning(ctx, "hermes") {
-		fallback := &FallbackDeterministicPlanner{}
 		return fallback.ClassifyAndAdapt(ctx, req)
 	}
 
 	prompt := fmt.Sprintf("%s\n\nClassify this file:\nRelative Path: %s\nContent:\n%s",
-		SystemPromptForMigration(), req.RelativePath, req.Content)
+		SystemPromptForMigration(c.Profile), req.RelativePath, req.Content)
 
-	// Invoke hermes in container
-	res, err := c.Compose.Run(ctx, "exec", "-T", "hermes", "hermes", "chat", "--oneshot", "-q", prompt)
+	// Invoke hermes in container with timeout
+	invokeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	res, err := c.Compose.Run(invokeCtx, "exec", "-T", "hermes", "hermes", "-z", prompt)
 	if err != nil {
-		fallback := &FallbackDeterministicPlanner{}
 		return fallback.ClassifyAndAdapt(ctx, req)
 	}
 
@@ -97,9 +160,14 @@ func (c *ComposeLLMPlanner) ClassifyAndAdapt(ctx context.Context, req LLMClassif
 	jsonStr := extractJSONBlock(stdout)
 	var resp LLMClassificationResponse
 	if err := json.Unmarshal([]byte(jsonStr), &resp); err != nil || resp.Domain == "" || resp.TargetPath == "" {
-		fallback := &FallbackDeterministicPlanner{}
 		return fallback.ClassifyAndAdapt(ctx, req)
 	}
+
+	// Ensure proposed content is not empty
+	if resp.ProposedContent == "" {
+		resp.ProposedContent = req.Content
+	}
+
 	return resp, nil
 }
 

@@ -437,6 +437,26 @@ func ClassifyAndAdaptFile(relPath string, data []byte) (targetPath string, domai
 	return "inbox/" + base, "inbox", contentStr, "Unclassified note routed to inbox for review"
 }
 
+// ClassifyAndAdaptFileWithProfile adapts a note, checking first against discovered active directories in target workspace.
+func ClassifyAndAdaptFileWithProfile(relPath string, data []byte, profile TargetWorkspaceProfile) (string, string, string, string) {
+	cleanPath := filepath.ToSlash(relPath)
+	contentStr := string(data)
+
+	// Check if the top-level directory directly matches one of the active directories in the target workspace
+	parts := strings.Split(cleanPath, "/")
+	if len(parts) > 1 {
+		topDir := parts[0]
+		for _, activeDir := range profile.ActiveDirectories {
+			if strings.EqualFold(topDir, activeDir) {
+				cleanRel := strings.TrimPrefix(cleanPath, topDir+"/")
+				return activeDir + "/" + cleanRel, activeDir, contentStr, fmt.Sprintf("Preserved under active workspace directory %s", activeDir)
+			}
+		}
+	}
+
+	return ClassifyAndAdaptFile(relPath, data)
+}
+
 // BuildMigrationPlan creates the chunks and file mapping plan.
 func BuildMigrationPlan(migrationID string, sourceDir string, workspaceRoot string, chunkSize int, useLLM bool, config Config) (*WorkspaceMigrationPlan, error) {
 	if chunkSize <= 0 {
@@ -445,6 +465,22 @@ func BuildMigrationPlan(migrationID string, sourceDir string, workspaceRoot stri
 	workspaceIndex, err := IndexWorkspace(workspaceRoot)
 	if err != nil {
 		return nil, fmt.Errorf("index workspace: %w", err)
+	}
+
+	profile := InspectTargetWorkspace(workspaceRoot)
+
+	var planner LLMPlanner
+	if useLLM {
+		compose := NewCompose(config, nil)
+		planner = &ComposeLLMPlanner{
+			Compose: compose,
+			Config:  config,
+			Profile: profile,
+		}
+	} else {
+		planner = &FallbackDeterministicPlanner{
+			Profile: profile,
+		}
 	}
 
 	plan := &WorkspaceMigrationPlan{
@@ -492,7 +528,28 @@ func BuildMigrationPlan(migrationID string, sourceDir string, workspaceRoot stri
 			return nil
 		}
 
-		targetPath, domain, proposedContent, rationale := ClassifyAndAdaptFile(rel, data)
+		targetPath, domain, proposedContent, rationale := ClassifyAndAdaptFileWithProfile(rel, data, profile)
+
+		// If classification defaulted to inbox, try LLM planner to see if it can find a better home
+		if domain == "inbox" && useLLM {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			resp, llmErr := planner.ClassifyAndAdapt(ctx, LLMClassificationRequest{
+				RelativePath: rel,
+				Content:      string(data),
+				Profile:      profile,
+			})
+			cancel()
+			if llmErr == nil && resp.Domain != "" && resp.TargetPath != "" && resp.Domain != "inbox" {
+				domain = resp.Domain
+				targetPath = resp.TargetPath
+				if resp.ProposedContent != "" {
+					proposedContent = resp.ProposedContent
+				}
+				if resp.Rationale != "" {
+					rationale = resp.Rationale
+				}
+			}
+		}
 
 		status := FileStatusNew
 		targetHash := ""
