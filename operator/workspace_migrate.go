@@ -62,18 +62,18 @@ type WorkspaceMigrationChunk struct {
 
 // WorkspaceMigrationPlan represents the complete plan for a migration run.
 type WorkspaceMigrationPlan struct {
-	Schema           int                       `json:"schema"`
-	ID               string                    `json:"id"`
-	CreatedAt        string                    `json:"created_at"`
-	TargetFolder     string                    `json:"target_folder,omitempty"`
-	WorkspaceRoot    string                    `json:"workspace_root"`
-	TotalFiles       int                       `json:"total_files"`
-	TotalChunks      int                       `json:"total_chunks"`
-	TotalNew         int                       `json:"total_new"`
-	TotalIdentical   int                       `json:"total_identical"`
-	TotalConflicts   int                       `json:"total_conflicts"`
-	TotalBlockedSec  int                       `json:"total_blocked_secrets"`
-	Chunks           []WorkspaceMigrationChunk `json:"chunks"`
+	Schema          int                       `json:"schema"`
+	ID              string                    `json:"id"`
+	CreatedAt       string                    `json:"created_at"`
+	TargetFolder    string                    `json:"target_folder,omitempty"`
+	WorkspaceRoot   string                    `json:"workspace_root"`
+	TotalFiles      int                       `json:"total_files"`
+	TotalChunks     int                       `json:"total_chunks"`
+	TotalNew        int                       `json:"total_new"`
+	TotalIdentical  int                       `json:"total_identical"`
+	TotalConflicts  int                       `json:"total_conflicts"`
+	TotalBlockedSec int                       `json:"total_blocked_secrets"`
+	Chunks          []WorkspaceMigrationChunk `json:"chunks"`
 }
 
 // MigrationStatus tracks background worker progress.
