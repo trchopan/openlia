@@ -122,10 +122,14 @@ var (
 	}
 )
 
-// IsIgnoredPath returns true if relative path is considered cache or tool noise.
+// IsIgnoredPath returns true if relative path is considered cache, tool noise, foreign agent operation, or foreign code.
 func IsIgnoredPath(relPath string) bool {
 	clean := filepath.ToSlash(filepath.Clean(relPath))
 	parts := strings.Split(clean, "/")
+	base := filepath.Base(clean)
+	ext := strings.ToLower(filepath.Ext(base))
+
+	// 1. Standard ignored directories and metadata
 	for _, part := range parts {
 		if part == ".obsidian" || part == ".git" || part == "node_modules" ||
 			part == "__pycache__" || part == ".venv" || part == ".trash" ||
@@ -133,7 +137,47 @@ func IsIgnoredPath(relPath string) bool {
 			return true
 		}
 	}
+
+	// 2. Foreign agent operations, personas, and system files at root
+	if len(parts) == 1 {
+		if base == "AGENTS.md" || base == "README.md" || base == "SOUL.md" ||
+			base == "IDENTITY.md" || base == "DREAMS.md" {
+			return true
+		}
+	}
+
+	// 3. Subdirectory folder guide README files (templates)
+	if len(parts) > 1 && base == "README.md" {
+		return true
+	}
+
+	// 4. Foreign agent skills, tools, and prompts directories
+	if len(parts) > 0 && (parts[0] == "skills" || parts[0] == "tools" || parts[0] == "prompts" || parts[0] == "agents") {
+		return true
+	}
+
+	// 5. Foreign agent internal memory / dreaming runtime directories
+	if strings.Contains(clean, ".dreams") || strings.Contains(clean, "/dreaming/") || strings.HasPrefix(clean, "dreaming/") {
+		return true
+	}
+
+	// 6. Foreign scripts, code, and configs
+	if ext == ".sh" || ext == ".py" || ext == ".js" || ext == ".mjs" || ext == ".cjs" ||
+		ext == ".ts" || ext == ".json" || ext == ".css" || ext == ".go" || ext == ".rb" {
+		return true
+	}
+
 	return false
+}
+
+var emptyStubRegex = regexp.MustCompile(`(?i)\bno\s+[\w\s-]+\s+(have|has)\s+been\s+(recorded|agreed|approved|defined|planned)\s+yet`)
+
+// IsEmptyStub returns true if note content contains only boilerplate placeholder text.
+func IsEmptyStub(data []byte) bool {
+	if len(data) > 500 {
+		return false
+	}
+	return emptyStubRegex.Match(data)
 }
 
 // DetectSecretContent returns true if file content appears to contain confidential credentials.
@@ -200,6 +244,9 @@ func CreateCleanTarball(sourceDir string, outWriter io.Writer) (int, int, error)
 		if DetectSecretContent(rel, data) {
 			blockedCount++
 			return nil // strictly exclude secret file
+		}
+		if IsEmptyStub(data) {
+			return nil
 		}
 
 		header, err := tar.FileInfoHeader(f, f.Name())
@@ -311,142 +358,83 @@ func IndexWorkspace(workspaceRoot string) (map[string]string, error) {
 
 // Starter template references in OpenLia Personal OS
 var CanonicalDomains = []string{
-	"tasks",
-	"projects",
-	"goals",
+	"calendar",
 	"areas",
-	"decisions",
-	"monitors",
 	"people",
 	"ideas",
+	"tasks",
 	"travel",
-	"shopping",
-	"finance",
-	"calendar",
-	"knowledge/claims",
 	"knowledge",
 	"archive",
 	"inbox",
+	"goals",
+	"projects",
+	"decisions",
+	"monitors",
+	"shopping",
+	"finance",
 }
 
-// ClassifyAndAdaptFile applies deterministic heuristic classification and template alignment.
+// ClassifyAndAdaptFile applies deterministic heuristic classification and mapping to OpenLia domains.
 func ClassifyAndAdaptFile(relPath string, data []byte) (targetPath string, domain string, adaptedContent string, rationale string) {
 	cleanPath := filepath.ToSlash(relPath)
 	lowerPath := strings.ToLower(cleanPath)
 	contentStr := string(data)
-	lowerContent := strings.ToLower(contentStr)
 	base := filepath.Base(cleanPath)
-	title := strings.TrimSuffix(base, filepath.Ext(base))
-	title = strings.ReplaceAll(title, "-", " ")
-	title = strings.ReplaceAll(title, "_", " ")
-	title = strings.Title(title)
 
-	// Protected root files (AGENTS.md, README.md, SOUL.md, IDENTITY.md, USER.md)
-	if cleanPath == "AGENTS.md" || cleanPath == "README.md" || cleanPath == "SOUL.md" || cleanPath == "IDENTITY.md" || cleanPath == "USER.md" || cleanPath == "DREAMS.md" {
-		targetName := strings.ToLower(strings.TrimSuffix(cleanPath, ".md"))
-		return "knowledge/agent/" + targetName + ".md", "knowledge", contentStr, "Archived agent identity metadata under knowledge/agent/"
+	// User Context / Identity / Preferences -> people domain
+	if cleanPath == "USER.md" {
+		return "people/user-context.md", "people", contentStr, "User context and communication preferences"
 	}
 
-	// 1. Directory prefix prioritization
+	// 1. Directory-level routing takes precedence over filename keywords
 	if strings.HasPrefix(lowerPath, "travel/") {
 		cleanRel := strings.TrimPrefix(cleanPath, "travel/")
-		if !strings.Contains(contentStr, "## Overview") {
-			adapted := fmt.Sprintf("# %s\n\n## Overview\n%s\n\n## Packing & Preparation Checklist\n- [ ] Review travel requirements\n", title, contentStr)
-			return "travel/" + cleanRel, "travel", adapted, "Adapted to travel/trip-template.md"
-		}
-		return "travel/" + cleanRel, "travel", contentStr, "Direct travel record"
+		return "travel/" + cleanRel, "travel", contentStr, "Travel note preserved under travel"
 	}
-
 	if strings.HasPrefix(lowerPath, "learning/") {
 		cleanRel := strings.TrimPrefix(cleanPath, "learning/")
-		return "knowledge/learning/" + cleanRel, "knowledge", contentStr, "Preserved under knowledge/learning/"
+		return "knowledge/learning/" + cleanRel, "knowledge", contentStr, "Learning note preserved under knowledge/learning"
 	}
-
-	if strings.HasPrefix(lowerPath, "maintenance/") {
-		cleanRel := strings.TrimPrefix(cleanPath, "maintenance/")
-		return "knowledge/maintenance/" + cleanRel, "knowledge", contentStr, "Preserved under knowledge/maintenance/"
-	}
-
 	if strings.HasPrefix(lowerPath, "memory/") {
 		cleanRel := strings.TrimPrefix(cleanPath, "memory/")
-		return "archive/memory/" + cleanRel, "archive", contentStr, "Preserved under archive/memory/"
+		return "archive/memory/" + cleanRel, "archive", contentStr, "Daily memory log preserved under archive/memory"
 	}
-
-	if strings.HasPrefix(lowerPath, "skills/") {
-		cleanRel := strings.TrimPrefix(cleanPath, "skills/")
-		return "knowledge/skills/" + cleanRel, "knowledge", contentStr, "Preserved skill reference under knowledge/skills/"
-	}
-
-	// 2. Calendar: daily notes or event notes
-	if strings.Contains(lowerPath, "calendar") || regexp.MustCompile(`^\d{4}-\d{2}-\d{2}`).MatchString(base) {
-		if !strings.Contains(contentStr, "## Details") {
-			adapted := fmt.Sprintf("# %s\n\n## Details\n- Date: %s\n\n## Purpose & Agenda\n- Notes from %s\n\n## Discussion & Raw Notes\n%s\n", title, base, cleanPath, contentStr)
-			return "calendar/" + base, "calendar", adapted, "Mapped to calendar event note"
-		}
-		return "calendar/" + base, "calendar", contentStr, "Mapped to calendar note"
-	}
-
-	// 3. Ideas: personal ideas or brainstorming
-	if strings.Contains(lowerPath, "idea") || strings.Contains(lowerContent, "## concept") || strings.Contains(lowerContent, "hypothesis") {
-		if !strings.Contains(contentStr, "## Concept") {
-			adapted := fmt.Sprintf("# %s\n\n## Concept\n%s\n\n## Status\nseed\n\n## Potential Value & Opportunity\n- Migrated from %s\n\n## Next Exploration Step\n- [ ] Review concept\n", title, contentStr, cleanPath)
-			return "ideas/" + base, "ideas", adapted, "Adapted to ideas/idea-template.md"
-		}
-		return "ideas/" + base, "ideas", contentStr, "Direct idea note"
-	}
-
-	// 4. People / Contacts / Profile
-	if strings.Contains(lowerPath, "profile") || strings.Contains(lowerPath, "contact") || strings.Contains(lowerPath, "people") || strings.Contains(lowerContent, "## identity") {
-		if !strings.Contains(contentStr, "## Relationship & Context") {
-			adapted := fmt.Sprintf("# %s\n\n## Relationship & Context\n%s\n\n## Important Dates\n- Recorded: %s\n\n## Interaction Notes & Context\n- Migrated from %s\n", title, contentStr, time.Now().Format("2006-01-02"), cleanPath)
-			return "people/" + base, "people", adapted, "Adapted to people/person-template.md"
-		}
-		return "people/" + base, "people", contentStr, "Direct people record"
-	}
-
-	// 5. Tasks: checklists, action items, to-dos
-	if strings.Contains(lowerPath, "task") || strings.Contains(lowerPath, "todo") || strings.Contains(lowerContent, "- [ ]") {
-		if !strings.Contains(contentStr, "## Action") {
-			adapted := fmt.Sprintf("# %s\n\n## Action\n%s\n\n## Status\ntodo\n\n## Context\n- Priority: medium\n- Migrated from: %s\n", title, contentStr, cleanPath)
-			return "tasks/" + base, "tasks", adapted, "Adapted to tasks/task-template.md"
-		}
-		return "tasks/" + base, "tasks", contentStr, "Direct task record"
-	}
-
-	// 6. Learning / Lessons / Knowledge
-	if strings.HasPrefix(lowerPath, "learning/") || strings.Contains(lowerPath, "lesson") || strings.Contains(lowerPath, "research") {
-		cleanRel := strings.TrimPrefix(cleanPath, "learning/")
-		return "knowledge/learning/" + cleanRel, "knowledge", contentStr, "Preserved under knowledge/learning/"
-	}
-
-	// 7. Maintenance / Assets / Schedules
 	if strings.HasPrefix(lowerPath, "maintenance/") {
 		cleanRel := strings.TrimPrefix(cleanPath, "maintenance/")
-		return "knowledge/maintenance/" + cleanRel, "knowledge", contentStr, "Preserved under knowledge/maintenance/"
+		return "knowledge/maintenance/" + cleanRel, "knowledge", contentStr, "Maintenance record under knowledge/maintenance"
 	}
 
-	// 8. Memory / Historical logs
-	if strings.HasPrefix(lowerPath, "memory/") {
-		cleanRel := strings.TrimPrefix(cleanPath, "memory/")
-		return "archive/memory/" + cleanRel, "archive", contentStr, "Preserved under archive/memory/"
+	// 2. Profile, Contacts & Preferences
+	if strings.Contains(lowerPath, "profile") || strings.Contains(lowerPath, "contact") {
+		return "people/" + base, "people", contentStr, "Personal profile and identity details"
+	}
+	if strings.Contains(lowerPath, "preference") {
+		return "people/" + base, "people", contentStr, "Personal preferences"
 	}
 
-	// 9. Skills reference
-	if strings.HasPrefix(lowerPath, "skills/") {
-		cleanRel := strings.TrimPrefix(cleanPath, "skills/")
-		return "knowledge/skills/" + cleanRel, "knowledge", contentStr, "Preserved skill reference under knowledge/skills/"
+	// 3. Commute routine or Personal area routines -> areas domain
+	if strings.Contains(lowerPath, "commute") || strings.Contains(lowerPath, "routine") {
+		return "areas/" + base, "areas", contentStr, "Personal routine preserved under areas"
 	}
 
-	// 10. Decisions
-	if strings.Contains(lowerPath, "decision") || strings.Contains(lowerContent, "trade-off") || strings.Contains(lowerContent, "options considered") {
-		return "decisions/" + base, "decisions", contentStr, "Mapped to decisions domain"
+	// 4. Calendar: date notes, events, holiday calendars
+	if strings.Contains(lowerPath, "calendar") || strings.Contains(lowerPath, "holiday") || regexp.MustCompile(`^\d{4}-\d{2}-\d{2}`).MatchString(base) {
+		return "calendar/" + base, "calendar", contentStr, "Calendar note preserved under calendar"
 	}
 
-	// Default fallback: preserve path or place in inbox
-	if strings.HasSuffix(lowerPath, ".md") || strings.HasSuffix(lowerPath, ".txt") {
-		return "inbox/" + base, "inbox", contentStr, "Routed to inbox for initial review"
+	// 5. Ideas
+	if strings.Contains(lowerPath, "idea") {
+		return "ideas/" + base, "ideas", contentStr, "Idea note preserved under ideas"
 	}
-	return "knowledge/" + base, "knowledge", contentStr, "Filed under knowledge"
+
+	// 6. Tasks / Queues
+	if strings.Contains(lowerPath, "task") || strings.Contains(lowerPath, "todo") || strings.Contains(lowerPath, "queue") {
+		return "tasks/" + base, "tasks", contentStr, "Task record preserved under tasks"
+	}
+
+	// Fallback to inbox
+	return "inbox/" + base, "inbox", contentStr, "Unclassified note routed to inbox for review"
 }
 
 // BuildMigrationPlan creates the chunks and file mapping plan.
@@ -483,6 +471,9 @@ func BuildMigrationPlan(migrationID string, sourceDir string, workspaceRoot stri
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
+		}
+		if IsEmptyStub(data) {
+			return nil
 		}
 
 		sourceHash := ComputeHash(data)
@@ -544,6 +535,18 @@ func BuildMigrationPlan(migrationID string, sourceDir string, workspaceRoot stri
 		domainGroups[f.Domain] = append(domainGroups[f.Domain], f)
 	}
 
+	domainTitles := map[string]string{
+		"calendar":  "Calendar & Schedules",
+		"areas":     "Personal Routines & Areas",
+		"people":    "Personal Profile & Preferences",
+		"ideas":     "Ideas & Concepts",
+		"tasks":     "Tasks & Action Items",
+		"travel":    "Travel Ideas & Plans",
+		"knowledge": "Learning Lessons & Notes",
+		"archive":   "Historical Daily Memory Logs",
+		"inbox":     "Inbox Items for Review",
+	}
+
 	chunkCounter := 1
 	for _, domain := range CanonicalDomains {
 		files, exists := domainGroups[domain]
@@ -557,10 +560,14 @@ func BuildMigrationPlan(migrationID string, sourceDir string, workspaceRoot stri
 			}
 			chunkFiles := files[i:end]
 			chunkID := fmt.Sprintf("chunk-%d-%s", chunkCounter, strings.ReplaceAll(domain, "/", "-"))
+			title := fmt.Sprintf("Migrate %d file(s) into %s/", len(chunkFiles), domain)
+			if friendly, ok := domainTitles[domain]; ok {
+				title = fmt.Sprintf("%s (%d file(s))", friendly, len(chunkFiles))
+			}
 			plan.Chunks = append(plan.Chunks, WorkspaceMigrationChunk{
 				ID:          chunkID,
 				Domain:      domain,
-				Title:       fmt.Sprintf("Migrate %d file(s) into %s/", len(chunkFiles), domain),
+				Title:       title,
 				State:       ChunkStatePending,
 				Files:       chunkFiles,
 				Explanation: fmt.Sprintf("Domain batch %d for %s", (i/chunkSize)+1, domain),

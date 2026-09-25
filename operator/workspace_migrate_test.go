@@ -45,12 +45,42 @@ func TestIsIgnoredPath(t *testing.T) {
 		{"personal/calendar/2026-09-20.md", false},
 		{"personal/.DS_Store", true},
 		{"learning/lessons/lesson-1.md", false},
+		{"AGENTS.md", true},
+		{"SOUL.md", true},
+		{"IDENTITY.md", true},
+		{"DREAMS.md", true},
+		{"README.md", true},
+		{"travel/upcoming/README.md", true},
+		{"skills/life-manager/SKILL.md", true},
+		{"memory/.dreams/corpus.txt", true},
+		{"memory/dreaming/rem/1.md", true},
+		{"script.sh", true},
+		{"helper.py", true},
+		{"USER.md", false},
 	}
 
 	for _, c := range cases {
 		got := IsIgnoredPath(c.path)
 		if got != c.want {
 			t.Errorf("IsIgnoredPath(%q) = %v, want %v", c.path, got, c.want)
+		}
+	}
+}
+
+func TestIsEmptyStub(t *testing.T) {
+	cases := []struct {
+		content string
+		want    bool
+	}{
+		{"# Goals\n\nNo long-term goals have been recorded yet.\n", true},
+		{"# Travel Preferences\n\nNo travel preferences have been recorded yet.\n", true},
+		{"# Curriculum\n\nNo curriculum has been agreed yet.\n", true},
+		{"# Real Note\n\nWe met today at 14:00 to discuss architecture.\n", false},
+	}
+	for _, c := range cases {
+		got := IsEmptyStub([]byte(c.content))
+		if got != c.want {
+			t.Errorf("IsEmptyStub(%q) = %v, want %v", c.content, got, c.want)
 		}
 	}
 }
@@ -70,6 +100,7 @@ func TestCleanTarballAndExtraction(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(sourceDir, ".obsidian", "cache.json"), []byte("noise"), 0o600)
 	_ = os.WriteFile(filepath.Join(sourceDir, "notes", "valid.md"), []byte("# Note 1"), 0o600)
 	_ = os.WriteFile(filepath.Join(sourceDir, "notes", ".env"), []byte("SECRET=123"), 0o600)
+	_ = os.WriteFile(filepath.Join(sourceDir, "notes", "stub.md"), []byte("# Goals\n\nNo long-term goals have been recorded yet.\n"), 0o600)
 
 	var buf bytes.Buffer
 	packaged, blocked, err := CreateCleanTarball(sourceDir, &buf)
@@ -99,6 +130,9 @@ func TestCleanTarballAndExtraction(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(destDir, "notes", ".env")); !os.IsNotExist(err) {
 		t.Errorf(".env should not have been packaged or extracted")
 	}
+	if _, err := os.Stat(filepath.Join(destDir, "notes", "stub.md")); !os.IsNotExist(err) {
+		t.Errorf("stub.md should not have been packaged or extracted")
+	}
 	if _, err := os.Stat(filepath.Join(destDir, ".obsidian")); !os.IsNotExist(err) {
 		t.Errorf(".obsidian should have been ignored")
 	}
@@ -111,14 +145,15 @@ func TestClassifyAndAdaptFile(t *testing.T) {
 		wantDomain string
 		wantPrefix string
 	}{
+		{"USER.md", "# User Context\nTimezone: Asia/Ho_Chi_Minh", "people", "people/user-context.md"},
+		{"personal/commute-routine.md", "# Commute\nRoute details", "areas", "areas/commute-routine.md"},
 		{"personal/calendar/2026-09-20.md", "# Sunday\n- Meeting", "calendar", "calendar/"},
 		{"personal/ideas/iphone-edge.md", "# iPhone\nA concept for edge device", "ideas", "ideas/"},
 		{"personal/profile.md", "# Personal Profile\nGiven name: Quang", "people", "people/"},
 		{"personal/tasks.md", "# Tasks\n- [ ] Buy groceries", "tasks", "tasks/"},
-		{"travel/ideas/japan.md", "# Japan Trip\nItinerary", "travel", "travel/"},
-		{"learning/lessons/lesson-1.md", "# Lesson 1", "knowledge", "knowledge/learning/"},
-		{"AGENTS.md", "# Alfred instructions", "knowledge", "knowledge/agent/agents.md"},
-		{"SOUL.md", "# Alfred soul", "knowledge", "knowledge/agent/soul.md"},
+		{"travel/ideas/japan.md", "# Japan Trip\nItinerary", "travel", "travel/ideas/"},
+		{"learning/lessons/lesson-1.md", "# Lesson 1", "knowledge", "knowledge/learning/lessons/"},
+		{"memory/2026-09-15.md", "# Daily log", "archive", "archive/memory/"},
 		{"random.txt", "Some text note", "inbox", "inbox/"},
 	}
 

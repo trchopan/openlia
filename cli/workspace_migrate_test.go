@@ -27,16 +27,22 @@ func TestWorkspaceMigrateUploadRejectsMissingFolder(t *testing.T) {
 	}
 }
 
-func TestWorkspaceMigrateMergeRequiresInteractiveWithoutAutoApprove(t *testing.T) {
+func TestWorkspaceMigrateMergeRejectsAutoApproveAndRequiresInteractive(t *testing.T) {
 	tempDir := t.TempDir()
 	configDir := filepath.Join(tempDir, "config")
 	_ = os.MkdirAll(configDir, 0o700)
 
-	// In non-interactive mode without --auto-approve, merge should fail
-	options := Options{JSON: true, NonInteractive: true}
-	code := commandWorkspaceMigrateMerge(options, []string{"mig-nonexistent"})
-	// If config not initialized, will return ExitPrereq or ExitUsage
+	// --auto-approve should be rejected as an unknown flag
+	options := Options{JSON: true}
+	code := commandWorkspaceMigrateMerge(options, []string{"--auto-approve", "mig-nonexistent"})
+	if code != ExitUsage {
+		t.Fatalf("merge with --auto-approve exit code = %d, want %d", code, ExitUsage)
+	}
+
+	// In non-interactive mode, merge should fail
+	options = Options{JSON: true, NonInteractive: true}
+	code = commandWorkspaceMigrateMerge(options, []string{"mig-nonexistent"})
 	if code == ExitOK {
-		t.Fatalf("merge in non-interactive mode should not succeed without auto-approve")
+		t.Fatalf("merge in non-interactive mode should not succeed")
 	}
 }

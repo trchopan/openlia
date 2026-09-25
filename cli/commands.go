@@ -1484,7 +1484,7 @@ func commandWorkspaceMigrateUpload(options Options, args []string) int {
 		return fail(options, ExitFailure, "package migration archive: "+err.Error(), nil)
 	}
 	if packaged == 0 {
-		return fail(options, ExitUsage, "target folder contains no valid files to migrate", nil)
+		return fail(options, ExitUsage, "source folder contains no valid files to migrate", nil)
 	}
 
 	migrationID := fmt.Sprintf("mig-%s", time.Now().UTC().Format("20060102-150405"))
@@ -1602,16 +1602,16 @@ func commandWorkspaceMigrateList(options Options, args []string) int {
 }
 
 func commandWorkspaceMigrateMerge(options Options, args []string) int {
-	autoApprove := false
 	dryRun := false
 	var remaining []string
 	for _, arg := range args {
 		switch arg {
-		case "--auto-approve":
-			autoApprove = true
 		case "--dry-run":
 			dryRun = true
 		default:
+			if strings.HasPrefix(arg, "-") {
+				return fail(options, ExitUsage, fmt.Sprintf("unknown flag %s; merge requires interactive chunk-by-chunk confirmation", arg), nil)
+			}
 			remaining = append(remaining, arg)
 		}
 	}
@@ -1676,11 +1676,11 @@ func commandWorkspaceMigrateMerge(options Options, args []string) int {
 		return renderPlanDryRun(options, plan)
 	}
 
-	if options.NonInteractive && !autoApprove {
-		return fail(options, ExitUsage, "workspace migrate merge requires interactive confirmation or --auto-approve", nil)
+	if options.NonInteractive {
+		return fail(options, ExitUsage, "workspace migrate merge requires an interactive terminal for chunk decision making; use --dry-run for non-interactive inspection", nil)
 	}
 
-	return runInteractiveMergeLoop(options, deployment, ctx, migrationID, plan, autoApprove)
+	return runInteractiveMergeLoop(options, deployment, ctx, migrationID, plan)
 }
 
 func renderPlanDryRun(options Options, plan operator.WorkspaceMigrationPlan) int {
@@ -1696,7 +1696,7 @@ func renderPlanDryRun(options Options, plan operator.WorkspaceMigrationPlan) int
 	return writeResult(options, plan, strings.Join(lines, "\n"))
 }
 
-func runInteractiveMergeLoop(options Options, deployment deployment, ctx context.Context, migrationID string, plan operator.WorkspaceMigrationPlan, autoApprove bool) int {
+func runInteractiveMergeLoop(options Options, deployment deployment, ctx context.Context, migrationID string, plan operator.WorkspaceMigrationPlan) int {
 	inReader := bufio.NewReader(os.Stdin)
 	appliedCount := 0
 	rejectedCount := 0
@@ -1706,7 +1706,6 @@ func runInteractiveMergeLoop(options Options, deployment deployment, ctx context
 			continue
 		}
 
-		hasConflict := false
 		fmt.Printf("\n========================================================================\n")
 		fmt.Printf("Chunk %d of %d: [%s] (%d files)\n", i+1, len(plan.Chunks), chunk.Domain, len(chunk.Files))
 		fmt.Printf("Title: %s\n", chunk.Title)
@@ -1715,25 +1714,9 @@ func runInteractiveMergeLoop(options Options, deployment deployment, ctx context
 		for idx, f := range chunk.Files {
 			badge := strings.ToUpper(f.Status)
 			if f.Status == operator.FileStatusConflict {
-				hasConflict = true
 				badge = "CONFLICT"
 			}
 			fmt.Printf("  %d. [%s] %s -> %s\n", idx+1, badge, f.SourcePath, f.TargetPath)
-		}
-
-		if autoApprove {
-			if hasConflict {
-				fmt.Println("  Skipping chunk with conflict in auto-approve mode.")
-				continue
-			}
-			_, err := deployment.operation(ctx, "workspace-migrate", nil, "apply-chunk", "--migration-id", migrationID, "--chunk-id", chunk.ID, "--json")
-			if err != nil {
-				fmt.Printf("  Failed to apply chunk: %v\n", err)
-			} else {
-				fmt.Println("  Chunk auto-approved and applied.")
-				appliedCount++
-			}
-			continue
 		}
 
 		decided := false
