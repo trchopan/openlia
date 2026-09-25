@@ -143,7 +143,7 @@ func CreateRollback(config Config, reason string, now time.Time, paths ...string
 	if err != nil {
 		return BackupResult{}, err
 	}
-	metadata := backupMetadata{Schema: 2, Kind: "rollback", Archive: destination, SHA256: digest, Reason: reason, CreatedAt: utcTimestamp(now), Secrets: secretStatus}
+	metadata := backupMetadata{Schema: 2, Kind: "rollback", Archive: filepath.Base(destination), SHA256: digest, Reason: reason, CreatedAt: utcTimestamp(now), Secrets: secretStatus}
 	data, err := json.Marshal(metadata)
 	if err != nil {
 		return BackupResult{}, err
@@ -327,7 +327,7 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 	if err := os.Chmod(destination, 0o600); err != nil {
 		return BackupResult{}, err
 	}
-	metadata := backupMetadata{Schema: 2, Kind: "durable", Archive: destination, SHA256: digest, Reason: reason, CreatedAt: utcTimestamp(now), Secrets: "excluded"}
+	metadata := backupMetadata{Schema: 2, Kind: "durable", Archive: filepath.Base(destination), SHA256: digest, Reason: reason, CreatedAt: utcTimestamp(now), Secrets: "excluded"}
 	metadataData, err := json.Marshal(metadata)
 	if err != nil {
 		return BackupResult{}, err
@@ -638,22 +638,30 @@ func restoreDurableBackup(config Config, archivePath, staging string, preRestore
 		}
 	}
 	if _, err := os.Stat(workspaceStage); err == nil {
-		if err := os.Rename(workspaceTarget, oldWorkspace); err != nil {
-			return BackupResult{}, fmt.Errorf("current workspace move failed; restore was not applied")
+		if _, statErr := os.Lstat(workspaceTarget); statErr == nil {
+			if err := os.Rename(workspaceTarget, oldWorkspace); err != nil {
+				return BackupResult{}, fmt.Errorf("current workspace move failed; restore was not applied")
+			}
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return BackupResult{}, statErr
 		}
 		if err := os.Rename(workspaceStage, workspaceTarget); err != nil {
 			_ = os.Rename(oldWorkspace, workspaceTarget)
 			return BackupResult{}, fmt.Errorf("workspace restore failed; current state was restored")
 		}
 	}
-	if err := restoreDurableTree(hermesStage, config.DataRoot); err != nil {
+	if err := restoreDurableTreeFiltered(hermesStage, config.DataRoot, portableHermesGeneratedPath); err != nil {
 		restoreWorkspace()
 		_ = RecordChange(config, "restore", "failed", preRestore.Archive, "durable restore failed", now)
 		return BackupResult{}, err
 	}
-	if err := restoreDurableTree(metaStage, config.MetaRoot); err != nil {
+	if err := restoreDurableTreeFiltered(metaStage, config.MetaRoot, portableMetaGeneratedPath); err != nil {
 		restoreWorkspace()
 		_ = RecordChange(config, "restore", "failed", preRestore.Archive, "durable metadata restore failed", now)
+		return BackupResult{}, err
+	}
+	if err := WriteRuntimeMetadata(config, now); err != nil {
+		restoreWorkspace()
 		return BackupResult{}, err
 	}
 	if err := WriteState(config, stateStopped); err != nil {
@@ -667,6 +675,10 @@ func restoreDurableBackup(config Config, archivePath, staging string, preRestore
 }
 
 func restoreDurableTree(source, destination string) error {
+	return restoreDurableTreeFiltered(source, destination, nil)
+}
+
+func restoreDurableTreeFiltered(source, destination string, skip func(string, fs.DirEntry) bool) error {
 	return filepath.WalkDir(source, func(current string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -676,6 +688,12 @@ func restoreDurableTree(source, destination string) error {
 			return err
 		}
 		if relative == "." {
+			return nil
+		}
+		if skip != nil && skip(filepath.ToSlash(relative), entry) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		target := filepath.Join(destination, relative)
@@ -880,7 +898,7 @@ func durableHermesPath(relative string, entry fs.DirEntry, bundledGroups map[str
 			return false
 		}
 	}
-	if base == ".bundled_manifest" || base == ".openlia-disabled" || base == "auth.json" || strings.HasPrefix(base, "models_dev_cache") {
+	if portableHermesGeneratedPath(relative, entry) || base == ".bundled_manifest" || base == ".openlia-disabled" || base == "auth.json" || strings.HasPrefix(base, "models_dev_cache") {
 		return false
 	}
 	if strings.HasSuffix(base, ".sock") || strings.HasSuffix(base, ".pid") || strings.HasSuffix(base, ".lock") || strings.HasSuffix(base, ".env") {
@@ -893,6 +911,9 @@ func durableHermesPath(relative string, entry fs.DirEntry, bundledGroups map[str
 }
 
 func durableMetaPath(relative string, entry fs.DirEntry) bool {
+	if portableMetaGeneratedPath(relative, entry) {
+		return false
+	}
 	parts := strings.Split(relative, "/")
 	for _, part := range parts {
 		if part == "locks" || strings.HasSuffix(part, ".lock") {
@@ -900,6 +921,30 @@ func durableMetaPath(relative string, entry fs.DirEntry) bool {
 		}
 	}
 	return true
+}
+
+func portableHermesGeneratedPath(relative string, entry fs.DirEntry) bool {
+	if entry.IsDir() {
+		return relative == "backups"
+	}
+	switch relative {
+	case "config.yaml", "services.json", "gateway_state.json", "channel_directory.json", ".clean_shutdown", "gateway-starts.log", "gateway.lock", "gateway.pid", "gateway.sock":
+		return true
+	default:
+		return false
+	}
+}
+
+func portableMetaGeneratedPath(relative string, entry fs.DirEntry) bool {
+	if entry.IsDir() {
+		return relative == "locks"
+	}
+	switch relative {
+	case "runtime.json", "last-change.json", "stack-state", "services.json":
+		return true
+	default:
+		return false
+	}
 }
 
 func bundledSkillGroups(dataRoot string) map[string]bool {

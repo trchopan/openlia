@@ -711,7 +711,10 @@ custom or external skills. It excludes Open WebUI, bundled image skills,
 rebuildable caches and environments, logs, releases, Docker images, secrets,
 and Locho capability files. Mutating operations use smaller rollback snapshots
 of only the files they change; deploy and restart do not archive the whole
-runtime.
+runtime. Archive members use logical `hermes/` and `meta/` roots rather than
+host absolute paths. Durable restore maps them to the destination runtime and
+regenerates installation identity, stack state, service registries, and host
+configuration; provide destination secrets and attachment sources separately.
 
 `openlia update` is read-only without a component. `openlia update openlia`
 synchronizes the Go operator, profile, templates, and bundled skills.

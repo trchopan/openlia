@@ -381,6 +381,71 @@ func TestRestoreRollbackAppliesOnlyDeclaredPaths(t *testing.T) {
 	}
 }
 
+func TestDurableBackupRestoresAcrossRuntimeRoots(t *testing.T) {
+	sourceConfig := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "source-runtime"))
+	for _, directory := range []string{sourceConfig.DataRoot, sourceConfig.MetaRoot, sourceConfig.BackupRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, contents := range map[string]string{
+		filepath.Join(sourceConfig.DataRoot, "workspace", "note.md"):  "portable",
+		filepath.Join(sourceConfig.DataRoot, "config.yaml"):           "old host config",
+		filepath.Join(sourceConfig.DataRoot, "services.json"):         "old services",
+		filepath.Join(sourceConfig.MetaRoot, "runtime.json"):          `{"install_root":"/old/root"}`,
+		filepath.Join(sourceConfig.MetaRoot, "managed", "state.json"): "managed state",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archive, err := CreateBackup(sourceConfig, "portable", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata backupMetadata
+	metadataData, err := os.ReadFile(archive.Archive + ".json")
+	if err != nil || json.Unmarshal(metadataData, &metadata) != nil || metadata.Archive != filepath.Base(archive.Archive) {
+		t.Fatalf("backup metadata is not portable: %s", metadataData)
+	}
+	targetConfig := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "new-runtime"))
+	for _, directory := range []string{targetConfig.DataRoot, targetConfig.MetaRoot, targetConfig.BackupRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archiveCopy := filepath.Join(targetConfig.BackupRoot, filepath.Base(archive.Archive))
+	archiveBytes, err := os.ReadFile(archive.Archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archiveCopy, archiveBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(targetConfig.DataRoot, "config.yaml"), []byte("new host config"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreBackup(targetConfig, archiveCopy, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(filepath.Join(targetConfig.DataRoot, "workspace", "note.md"))
+	if err != nil || string(contents) != "portable" {
+		t.Fatalf("portable workspace restore = %q, err=%v", contents, err)
+	}
+	configContents, err := os.ReadFile(filepath.Join(targetConfig.DataRoot, "config.yaml"))
+	if err != nil || string(configContents) != "new host config" {
+		t.Fatalf("host config was restored over destination config: %q, err=%v", configContents, err)
+	}
+	var runtime RuntimeMetadata
+	runtimeData, err := os.ReadFile(filepath.Join(targetConfig.MetaRoot, "runtime.json"))
+	if err != nil || json.Unmarshal(runtimeData, &runtime) != nil || runtime.InstallRoot != targetConfig.InstallRoot {
+		t.Fatalf("runtime metadata was not rebased: %s", runtimeData)
+	}
+}
+
 func TestRestoreRejectsUnsafeArchiveBeforeChangingState(t *testing.T) {
 	config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
 	for _, directory := range []string{config.DataRoot, config.MetaRoot, config.BackupRoot, config.LochoRoot} {
