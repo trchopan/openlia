@@ -18,7 +18,7 @@ Discovered services can be assigned roles using `openlia attachments map`:
 
 ```bash
 openlia attachments list
-openlia attachments map <host> <service> --role browser-tools
+openlia attachments map <host> <service> --role openlia-browser
 openlia attachments map <host> <service> --role openai-gateway
 ```
 
@@ -28,7 +28,7 @@ host:
 ```toml
 [[services]]
 name = "<host>"
-"<service>" = "browser-tools"
+"<service>" = "openlia-browser"
 
 [[services]]
 name = "<another-host>"
@@ -36,7 +36,7 @@ name = "<another-host>"
 ```
 
 Supported roles:
-- `browser-tools`: Host-local browser job queue and Playwright MCP proxy. Wires `OPENLIA_BROWSER_MCP_URL` and `OPENLIA_BROWSER_JOBS_URL`, registers the attached proxy's Streamable HTTP `/mcp` endpoint directly with Hermes, and disables Hermes' native browser toolset. Legacy `/sse` and `/messages` requests are rejected.
+- `openlia-browser`: Host-local Playwright supervisor and MCP proxy. Wires `OPENLIA_BROWSER_MCP_URL`, registers the attached proxy's Streamable HTTP `/mcp` endpoint directly with Hermes, and disables Hermes' native browser toolset. Legacy `/sse` and `/messages` requests are rejected.
 - `openai-gateway`: OpenAI-compatible local model/gateway (e.g. Ollama, vLLM, GenAI). Declare its explicit `/v1` URL in the matching `fallback_providers` entry.
 
 All attached services are automatically published into the runtime service registry at `/opt/data/services.json` for Hermes and associated tools.

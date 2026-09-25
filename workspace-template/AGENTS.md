@@ -32,7 +32,8 @@ records and preserve them unless the user explicitly asks for a change.
 - Prefer Markdown and small structured files with stable, descriptive names.
 - Treat a claim as a statement to be supported, not as truth merely because an
   assistant generated it. Keep inferred claims as candidates until approved.
-- Do not overwrite an existing record when a dated or versioned note is safer.
+- Prefer a dated or versioned note when replacing an existing record could lose
+  useful history.
 - Keep generated reports separate from source notes and label their source.
 - Never place credentials, OAuth files, private keys, or raw service exports here.
 

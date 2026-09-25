@@ -24,7 +24,7 @@ func TestEmbeddedWorkspaceIncludesControlFiles(t *testing.T) {
 
 func TestEmbeddedBunRuntimeAssets(t *testing.T) {
 	for _, path := range []string{
-		"packages/browser-tools/dist/server.js",
+		"packages/openlia-browser/dist/server.js",
 		"packages/workspace-ui/dist/server.js",
 		"packages/workspace-ui/dist/public/index.html",
 		"docker/workspace-ui.Dockerfile",

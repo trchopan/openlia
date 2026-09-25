@@ -30,7 +30,7 @@ project or goal when that context is known. Prefer small Markdown files with
 clear dates and titles over opaque databases. Use `knowledge/claims/` for
 reusable personal statements in Markdown files with YAML front matter, and
 distinguish direct reports from observations and inferences. Move inactive
-material to `archive/`; do not delete it as part of a routine review.
+material to `archive/` and retain it during routine reviews.
 
 Claims are the authoritative workspace memory. Hermes runtime memory may cache
 claims for retrieval, but an unreferenced Hermes memory is not a durable fact.

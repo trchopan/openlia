@@ -202,14 +202,14 @@ func generateAttachmentsFile(config Config) error {
 	}
 	var allServices []LochoService
 	browserURL := ""
-	hasBrowserToolsRole := false
+	hasOpenLIABrowserRole := false
 	for _, host := range hosts.Hosts {
 		for _, svc := range host.Services {
 			allServices = append(allServices, svc)
-			if svc.Role == "browser-tools" {
-				hasBrowserToolsRole = true
+			if svc.Role == "openlia-browser" {
+				hasOpenLIABrowserRole = true
 				if browserURL != "" && browserURL != svc.Endpoint {
-					return fmt.Errorf("multiple browser-tools attachment endpoints are configured")
+					return fmt.Errorf("multiple openlia-browser attachment endpoints are configured")
 				}
 				browserURL = svc.Endpoint
 			}
@@ -249,7 +249,6 @@ func generateAttachmentsFile(config Config) error {
 			}
 			if browserURL != "" {
 				fmt.Fprintf(&builder, "      OPENLIA_BROWSER_MCP_URL: %q\n", browserURL)
-				fmt.Fprintf(&builder, "      OPENLIA_BROWSER_JOBS_URL: %q\n", browserURL)
 			}
 			for _, svc := range allServices {
 				if svc.Role != "unassigned" {
@@ -335,7 +334,7 @@ func generateAttachmentsFile(config Config) error {
 	if err := AtomicWriteFile(config.GeneratedCompose, []byte(builder.String()), 0o600); err != nil {
 		return err
 	}
-	if err := ReconcileBrowserPolicy(config, hasBrowserToolsRole, browserURL); err != nil {
+	if err := ReconcileBrowserPolicy(config, hasOpenLIABrowserRole, browserURL); err != nil {
 		return err
 	}
 	return nil
@@ -557,7 +556,7 @@ func serviceInventory(host, path string, roles map[string]string) ([]LochoServic
 			role = assigned
 		}
 		endpoint := fmt.Sprintf("http://locho-%s:%d", host, listenPort)
-		if proto == "tcp" && role != "browser-tools" {
+		if proto == "tcp" && role != "openlia-browser" {
 			endpoint = fmt.Sprintf("locho-%s:%d", host, listenPort)
 		}
 		services = append(services, LochoService{

@@ -100,6 +100,13 @@ func TestRunDispatchesSkillSources(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesBrowser(t *testing.T) {
+	t.Setenv("OPENLIA_CONFIG", filepath.Join(t.TempDir(), "missing.toml"))
+	if code := Run([]string{"browser", "status"}, fstest.MapFS{}); code != ExitPrereq {
+		t.Fatalf("browser dispatch exit code = %d, want %d", code, ExitPrereq)
+	}
+}
+
 func TestSkillSourceAddDoesNotPersistEnvironmentToken(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	t.Setenv("OPENLIA_CONFIG", path)

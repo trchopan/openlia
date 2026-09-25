@@ -16,7 +16,7 @@ help:
 		'test               Run Go, Python, skill, and operator tests' \
 		'venv               Create local virtualenv and install dependencies from requirements-dev.txt' \
 		'skills-test        Run offline skill self-tests' \
-		'skills-verify      Run live browser verifications against Playwright MCP' \
+		'skills-verify      Run bundled skill and browser relay tests' \
 		'clean-logs         Purge local .playwright-mcp and verification test logs' \
 		'deploy-dev         Verify skills and deploy to local dev stack' \
 		'deploy-prod        Verify skills and promote to production stack' \
@@ -84,7 +84,8 @@ skills-test:
 	$(PYTHON) tests/verify_skills.py --offline
 
 skills-verify:
-	$(PYTHON) tests/verify_skills.py --live
+	$(PYTHON) tests/verify_skills.py --offline
+	bun test packages/openlia-browser
 
 clean-logs:
 	rm -rf .playwright-mcp/ /tmp/openlia_verify/

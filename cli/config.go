@@ -37,24 +37,21 @@ var defaultSkills = []string{
 	"personal-finance",
 	"workspace-git",
 	"claim-review",
-	"browser-pilot",
-	"chatgpt-chat",
-	"gemini-chat",
 }
 
 const (
-	RoleBrowserTools  = "browser-tools"
-	RoleOpenAIGateway = "openai-gateway"
+	RoleOpenLIABrowser = "openlia-browser"
+	RoleOpenAIGateway  = "openai-gateway"
 )
 
 var allowedServiceRoles = map[string]bool{
-	RoleBrowserTools:  true,
-	RoleOpenAIGateway: true,
+	RoleOpenLIABrowser: true,
+	RoleOpenAIGateway:  true,
 }
 
 func ValidateServiceRole(role string) error {
 	if !allowedServiceRoles[role] {
-		return fmt.Errorf("invalid service role %q; must be one of: %s, %s", role, RoleBrowserTools, RoleOpenAIGateway)
+		return fmt.Errorf("invalid service role %q; must be one of: %s, %s", role, RoleOpenLIABrowser, RoleOpenAIGateway)
 	}
 	return nil
 }
@@ -93,7 +90,7 @@ type Config struct {
 	WorkspaceGit            WorkspaceGitConfig
 	SkillSources            []SkillSourceConfig
 	Services                []ServiceHostConfig
-	BrowserTools            BrowserToolsConfig
+	OpenLIABrowser          OpenLIABrowserConfig
 }
 
 type SkillSourceConfig struct {
@@ -125,7 +122,7 @@ type WorkspaceGitConfig struct {
 	AuthorEmail string
 }
 
-type BrowserToolsConfig struct {
+type OpenLIABrowserConfig struct {
 	Configured         bool
 	Mode               string
 	Target             string
@@ -165,8 +162,8 @@ func defaultConfig() Config {
 			AuthorName:  "OpenLia Agent",
 			AuthorEmail: "openlia@localhost",
 		},
-		BrowserTools: BrowserToolsConfig{Mode: "local", SSHPort: 22},
-		Services:     nil,
+		OpenLIABrowser: OpenLIABrowserConfig{Mode: "local", SSHPort: 22},
+		Services:       nil,
 	}
 }
 
@@ -258,8 +255,8 @@ func parseConfigUnchecked(data string) (Config, error) {
 			if section == "services" && len(config.Services) == 0 {
 				config.Services = append(config.Services, ServiceHostConfig{Roles: make(map[string]string)})
 			}
-			if section == "browser-tools" {
-				config.BrowserTools.Configured = true
+			if section == "openlia-browser" {
+				config.OpenLIABrowser.Configured = true
 			}
 			continue
 		}
@@ -373,16 +370,16 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.OpenWebUIImage, err = parseString(value)
 			case "open-webui.auth":
 				config.OpenWebUIAuth, err = parseBool(value)
-			case "browser-tools.mode":
-				config.BrowserTools.Mode, err = parseString(value)
-			case "browser-tools.target":
-				config.BrowserTools.Target, err = parseString(value)
-			case "browser-tools.ssh_port":
-				config.BrowserTools.SSHPort, err = parseInt(value)
-			case "browser-tools.root":
-				config.BrowserTools.Root, err = parseString(value)
-			case "browser-tools.extension_token_file":
-				config.BrowserTools.ExtensionTokenFile, err = parseString(value)
+			case "openlia-browser.mode":
+				config.OpenLIABrowser.Mode, err = parseString(value)
+			case "openlia-browser.target":
+				config.OpenLIABrowser.Target, err = parseString(value)
+			case "openlia-browser.ssh_port":
+				config.OpenLIABrowser.SSHPort, err = parseInt(value)
+			case "openlia-browser.root":
+				config.OpenLIABrowser.Root, err = parseString(value)
+			case "openlia-browser.extension_token_file":
+				config.OpenLIABrowser.ExtensionTokenFile, err = parseString(value)
 			case "components.open_webui_image":
 				config.OpenWebUIImage, err = parseString(value)
 			case "release.source":
@@ -535,8 +532,8 @@ func validateConfig(config Config) error {
 			return err
 		}
 	}
-	if config.BrowserTools.Configured {
-		if err := validateBrowserTools(config.BrowserTools); err != nil {
+	if config.OpenLIABrowser.Configured {
+		if err := validateOpenLIABrowser(config.OpenLIABrowser); err != nil {
 			return err
 		}
 	}
@@ -650,39 +647,39 @@ func validateOpenWebUI(host string, port int) error {
 	return nil
 }
 
-func validateBrowserTools(config BrowserToolsConfig) error {
+func validateOpenLIABrowser(config OpenLIABrowserConfig) error {
 	if config.Mode != "local" && config.Mode != "ssh" {
-		return errors.New("browser-tools.mode must be local or ssh")
+		return errors.New("openlia-browser.mode must be local or ssh")
 	}
 	if config.Root == "" {
-		return errors.New("browser-tools.root is required")
+		return errors.New("openlia-browser.root is required")
 	}
 	if config.ExtensionTokenFile == "" {
-		return errors.New("browser-tools.extension_token_file is required")
+		return errors.New("openlia-browser.extension_token_file is required")
 	}
-	if err := validateAbsoluteRoot(config.ExtensionTokenFile, "browser-tools.extension_token_file"); err != nil {
+	if err := validateAbsoluteRoot(config.ExtensionTokenFile, "openlia-browser.extension_token_file"); err != nil {
 		return err
 	}
-	if err := validateAbsoluteRoot(config.Root, "browser-tools.root"); err != nil {
+	if err := validateAbsoluteRoot(config.Root, "openlia-browser.root"); err != nil {
 		return err
 	}
 	if config.SSHPort < 1 || config.SSHPort > 65535 {
-		return errors.New("browser-tools.ssh_port must be between 1 and 65535")
+		return errors.New("openlia-browser.ssh_port must be between 1 and 65535")
 	}
 	if config.Mode == "local" {
 		if config.Target != "" {
-			return errors.New("browser-tools.target must be empty in local mode")
+			return errors.New("openlia-browser.target must be empty in local mode")
 		}
 		return nil
 	}
 	if config.Target == "" {
-		return errors.New("browser-tools.target is required in ssh mode")
+		return errors.New("openlia-browser.target is required in ssh mode")
 	}
 	if err := validateTarget(config.Target); err != nil {
-		return fmt.Errorf("browser-tools.target: %w", err)
+		return fmt.Errorf("openlia-browser.target: %w", err)
 	}
 	if !strings.Contains(config.Target, "@") || strings.HasPrefix(config.Target, "@") || strings.HasSuffix(config.Target, "@") {
-		return errors.New("browser-tools.target must use user@host syntax")
+		return errors.New("openlia-browser.target must use user@host syntax")
 	}
 	return nil
 }
@@ -952,8 +949,8 @@ func saveConfig(config Config) error {
 func renderConfig(config Config) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "[openlia]\nschema = %d\nversion = %q\nmode = %q\ntarget = %q\nroot = %q\nproject = %q\nmodel = %q\noutput_language = %q\ntimezone = %q\nprovider = %q\nexternal_network = %q\n\n", config.Schema, config.Version, config.Mode, config.Target, config.InstallRoot, config.Project, config.Model, config.OutputLanguage, config.Timezone, config.Provider, config.ExternalNetwork)
-	if config.BrowserTools.Configured {
-		fmt.Fprintf(&builder, "[browser-tools]\nmode = %q\ntarget = %q\nssh_port = %d\nroot = %q\nextension_token_file = %q\n\n", config.BrowserTools.Mode, config.BrowserTools.Target, config.BrowserTools.SSHPort, config.BrowserTools.Root, config.BrowserTools.ExtensionTokenFile)
+	if config.OpenLIABrowser.Configured {
+		fmt.Fprintf(&builder, "[openlia-browser]\nmode = %q\ntarget = %q\nssh_port = %d\nroot = %q\nextension_token_file = %q\n\n", config.OpenLIABrowser.Mode, config.OpenLIABrowser.Target, config.OpenLIABrowser.SSHPort, config.OpenLIABrowser.Root, config.OpenLIABrowser.ExtensionTokenFile)
 	}
 	if config.WorkspaceUIHost != "" {
 		fmt.Fprintf(&builder, "[workspace-ui]\nhost = %q\nport = %d\n", config.WorkspaceUIHost, config.WorkspaceUIPort)

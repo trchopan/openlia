@@ -25,5 +25,5 @@ hermes cron list
 hermes cron resume <job-id>
 ```
 
-Do not place credentials, personal destinations, or generated runtime state in
-this directory. Do not edit Hermes' generated `jobs.json` directly.
+Keep credentials, personal destinations, and generated runtime state outside
+this directory. Manage generated cron state through the Hermes cron interface.
