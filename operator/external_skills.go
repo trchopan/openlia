@@ -651,7 +651,7 @@ func (m *ExternalSkillManager) Install(ctx context.Context, sourceID, name strin
 	if err := EnsureDir(filepath.Dir(destination), 0o700); err != nil {
 		return ExternalSkillResult{}, err
 	}
-	backup, err := CreateBackup(m.Config, "external-skill", m.now(), m.Compose)
+	backup, err := CreateRollback(m.Config, "external-skill", m.now(), runtimeRelativePath(m.Config, destination), runtimeRelativePath(m.Config, metadataPath), runtimeRelativePath(m.Config, filepath.Join(m.Config.MetaRoot, "external-skills", item.Name)))
 	if err != nil {
 		return ExternalSkillResult{}, err
 	}
@@ -737,7 +737,7 @@ func (m *ExternalSkillManager) Uninstall(ctx context.Context, name string) (Exte
 	if err != nil || "sha256:"+hash != externalExpectedHash(metadata) {
 		return ExternalSkillResult{}, fmt.Errorf("external skill has local modifications: %s", name)
 	}
-	backup, err := CreateBackup(m.Config, "external-skill", m.now(), m.Compose)
+	backup, err := CreateRollback(m.Config, "external-skill", m.now(), runtimeRelativePath(m.Config, destination), runtimeRelativePath(m.Config, metadataPath), runtimeRelativePath(m.Config, filepath.Join(m.Config.MetaRoot, "external-skills", name)))
 	if err != nil {
 		return ExternalSkillResult{}, err
 	}
@@ -873,7 +873,7 @@ func (m *ExternalSkillManager) updateForkMetadata(_ context.Context, name string
 	if refresh {
 		action = "fork-refresh"
 	}
-	backup, err := CreateBackup(m.Config, "external-skill-"+action, m.now(), m.Compose)
+	backup, err := CreateRollback(m.Config, "external-skill-"+action, m.now(), runtimeRelativePath(m.Config, destination), runtimeRelativePath(m.Config, metadataPath), runtimeRelativePath(m.Config, base), runtimeRelativePath(m.Config, filepath.Join(m.Config.MetaRoot, filepath.FromSlash(metadata.PatchPath))))
 	if err != nil {
 		return ExternalSkillResult{}, err
 	}
@@ -923,7 +923,7 @@ func (m *ExternalSkillManager) Reset(ctx context.Context, name string) (External
 		return ExternalSkillResult{}, fmt.Errorf("locate external skill %s: %w", name, err)
 	}
 	base := filepath.Join(m.Config.MetaRoot, filepath.FromSlash(metadata.BaseSnapshot))
-	backup, err := CreateBackup(m.Config, "external-skill-reset", m.now(), m.Compose)
+	backup, err := CreateRollback(m.Config, "external-skill-reset", m.now(), runtimeRelativePath(m.Config, destination), runtimeRelativePath(m.Config, metadataPath), runtimeRelativePath(m.Config, base))
 	if err != nil {
 		return ExternalSkillResult{}, err
 	}

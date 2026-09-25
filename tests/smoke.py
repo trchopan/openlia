@@ -22,6 +22,14 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 workspace_ui_port = 8089
+COMPOSE_RUNTIME_KEYS = (
+    "OPENLIA_DATA_ROOT",
+    "OPENLIA_SYSTEM_SKILLS_ROOT",
+    "OPENLIA_SKILLS_CACHE_ROOT",
+    "OPENLIA_SKILLS_ENV_ROOT",
+    "OPENLIA_SECRET_DIR",
+    "OPENLIA_NETWORK_NAME",
+)
 SECRET_PATTERNS = (
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+"),
     re.compile(r"\b(?:sk|ghp|gho|ghu|github_pat)_[A-Za-z0-9_-]+"),
@@ -76,6 +84,34 @@ def run_case(
             "evidence": [redact(str(exc))],
             "error": "command could not start",
         }
+
+
+def run_expected_failure(
+    case_id: str,
+    command: list[str],
+    timeout: int = 120,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    result = run_case(case_id, command, timeout=timeout, env=env)
+    if result["status"] == "FAIL":
+        result["status"] = "PASS"
+        result["error"] = None
+    else:
+        result["status"] = "FAIL"
+        result["error"] = "command unexpectedly succeeded"
+    return result
+
+
+def compose_environment(root: str, project: str) -> dict[str, str]:
+    runtime = f"{root.rstrip('/')}/runtime"
+    return {
+        "OPENLIA_DATA_ROOT": f"{runtime}/hermes",
+        "OPENLIA_SYSTEM_SKILLS_ROOT": f"{runtime}/system-skills",
+        "OPENLIA_SKILLS_CACHE_ROOT": f"{runtime}/skill-cache",
+        "OPENLIA_SKILLS_ENV_ROOT": f"{runtime}/skill-envs",
+        "OPENLIA_SECRET_DIR": f"{runtime}/secrets",
+        "OPENLIA_NETWORK_NAME": f"{project}-private",
+    }
 
 
 def not_applicable(case_id: str, reason: str) -> dict[str, Any]:
@@ -156,8 +192,11 @@ def remote_skill_check(target: str, project: str, remote_root: str, skill: str) 
     compose_file = f"{compose_directory}/compose.yaml"
     generated_compose = f"{compose_directory}/compose.generated.yaml"
     check = f"test -s /opt/data/skills/{skill}/SKILL.md"
+    environment = compose_environment(remote_root, project)
     command = " ".join(
         [
+            "env",
+            *(f"{key}={shlex.quote(value)}" for key, value in environment.items()),
             "docker",
             "compose",
             "--project-name",
@@ -181,7 +220,10 @@ def remote_skill_check(target: str, project: str, remote_root: str, skill: str) 
 
 def local_skill_check(root: str, project: str, skill: str) -> list[str]:
     compose_directory = f"{root}/current/docker"
+    environment = compose_environment(root, project)
     command = [
+        "env",
+        *(f"{key}={value}" for key, value in environment.items()),
         "docker",
         "compose",
         "--project-name",
@@ -488,7 +530,10 @@ def run(mode: str, args: argparse.Namespace) -> list[dict[str, Any]]:
             "claim-review",
         ):
             results.append(run_case(f"SKILL-{skill}", ["go", "run", ".", "skills", "test", skill]))
-        results.append(run_case("DEP-001", ["docker", "compose", "-f", "docker/compose.yaml", "config", "--quiet"]))
+        compose_env = {**os.environ, **compose_environment("/tmp/openlia-compose-check", "openlia-compose-check")}
+        results.append(run_case("DEP-001", ["docker", "compose", "-f", "docker/compose.yaml", "config", "--quiet"], env=compose_env))
+        missing_compose_env = {key: value for key, value in os.environ.items() if key not in COMPOSE_RUNTIME_KEYS}
+        results.append(run_expected_failure("DEP-002", ["docker", "compose", "-f", "docker/compose.yaml", "config", "--quiet"], env=missing_compose_env))
         scripts = [
             *map(str, sorted((ROOT / "docker").glob("*.sh"))),
             *map(str, sorted((ROOT / "profile/cron/scripts").glob("*.sh"))),

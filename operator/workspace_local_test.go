@@ -22,6 +22,11 @@ func (runner *localWorkspaceGitRunner) Run(ctx context.Context, name string, arg
 		return CommandResult{ExitCode: 1}, fmt.Errorf("unexpected command %s", name)
 	}
 	for index, arg := range args {
+		if arg == "config" && index+1 < len(args) && args[index+1] == "--services" {
+			return CommandResult{Stdout: []byte("hermes\n")}, nil
+		}
+	}
+	for index, arg := range args {
 		if arg == "ps" {
 			return CommandResult{Stdout: []byte("hermes\n")}, nil
 		}

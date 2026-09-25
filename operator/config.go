@@ -128,7 +128,11 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		return Config{}, fmt.Errorf("resolve repository root: %w", err)
 	}
 
-	runtimeRoot := strings.TrimRight(getOr(values, "OPENLIA_RUNTIME_ROOT", "/srv/openlia/runtime"), "/")
+	runtimeValue, runtimeConfigured := values["OPENLIA_RUNTIME_ROOT"]
+	if !runtimeConfigured || strings.TrimSpace(runtimeValue) == "" {
+		return Config{}, fmt.Errorf("OPENLIA_RUNTIME_ROOT is required")
+	}
+	runtimeRoot := strings.TrimRight(runtimeValue, "/")
 	if runtimeRoot == "" {
 		runtimeRoot = "/"
 	}

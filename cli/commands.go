@@ -1426,7 +1426,7 @@ func commandAttachments(options Options, args []string) int {
 
 func commandBackup(options Options, args []string) int {
 	if len(args) == 0 {
-		return fail(options, ExitUsage, "backup requires create or restore", nil)
+		return fail(options, ExitUsage, "backup requires create, restore, or rollback-restore", nil)
 	}
 	action := args[0]
 	args = args[1:]
@@ -1448,43 +1448,53 @@ func commandBackup(options Options, args []string) int {
 		}
 		return renderRemote(options, raw, redact(string(raw)))
 	case "restore":
-		archive, err := backupArchiveArgument(args)
-		if err != nil {
-			return fail(options, ExitUsage, err.Error(), nil)
+		return commandRemoteBackupRestore(options, args, deployment, ctx, "restore")
+	case "rollback-restore":
+		return commandRemoteBackupRestore(options, args, deployment, ctx, "rollback-restore")
+	default:
+		return fail(options, ExitUsage, "unknown backup action "+action, nil)
+	}
+}
+
+func commandRemoteBackupRestore(options Options, args []string, deployment deployment, ctx context.Context, action string) int {
+	archive, err := backupArchiveArgument(args)
+	if err != nil {
+		return fail(options, ExitUsage, err.Error(), nil)
+	}
+	if !options.NonInteractive {
+		prompt := "Restore the selected OpenLia backup and stop the stack? Type 'yes' to continue: "
+		if action == "rollback-restore" {
+			prompt = "Restore the selected OpenLia operation rollback? Type 'yes' to continue: "
 		}
-		if !options.NonInteractive {
-			fmt.Fprint(os.Stderr, "Restore the selected OpenLia backup and stop the stack? Type 'yes' to continue: ")
-			answer, readErr := bufio.NewReader(os.Stdin).ReadString('\n')
-			if readErr != nil || strings.TrimSpace(strings.ToLower(answer)) != "yes" {
-				return fail(options, ExitFailure, "backup restore cancelled", nil)
-			}
+		fmt.Fprint(os.Stderr, prompt)
+		answer, readErr := bufio.NewReader(os.Stdin).ReadString('\n')
+		if readErr != nil || strings.TrimSpace(strings.ToLower(answer)) != "yes" {
+			return fail(options, ExitFailure, "backup restore cancelled", nil)
 		}
-		if archive == "" {
-			raw, err := deployment.operation(ctx, "backup", nil, "restore", "--json")
-			if err != nil {
-				return fail(options, ExitFailure, err.Error(), nil)
-			}
-			return renderRemote(options, raw, redact(string(raw)))
-		}
-		if !filepath.IsAbs(archive) || filepath.Base(archive) == "." || !strings.HasSuffix(archive, ".tar.gz") {
-			return fail(options, ExitUsage, "backup archive must be an absolute .tar.gz file path", nil)
-		}
-		if isInsideWorkingTree(archive) {
-			return fail(options, ExitUsage, "backup archive must be outside the OpenLia checkout", nil)
-		}
-		remoteArchive := deployment.rootPath("runtime", "backups", filepath.Base(archive))
-		if err := deployment.uploadFile(ctx, archive, remoteArchive, 0o600); err != nil {
-			return fail(options, ExitFailure, err.Error(), nil)
-		}
-		defer deployment.removeFile(context.Background(), remoteArchive)
-		raw, err := deployment.operation(ctx, "backup", nil, "restore", "--archive", remoteArchive, "--json")
+	}
+	if archive == "" {
+		raw, err := deployment.operation(ctx, "backup", nil, action, "--json")
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
 		return renderRemote(options, raw, redact(string(raw)))
-	default:
-		return fail(options, ExitUsage, "unknown backup action "+action, nil)
 	}
+	if !filepath.IsAbs(archive) || filepath.Base(archive) == "." || !strings.HasSuffix(archive, ".tar.gz") {
+		return fail(options, ExitUsage, "backup archive must be an absolute .tar.gz file path", nil)
+	}
+	if isInsideWorkingTree(archive) {
+		return fail(options, ExitUsage, "backup archive must be outside the OpenLia checkout", nil)
+	}
+	remoteArchive := deployment.rootPath("runtime", "backups", filepath.Base(archive))
+	if err := deployment.uploadFile(ctx, archive, remoteArchive, 0o600); err != nil {
+		return fail(options, ExitFailure, err.Error(), nil)
+	}
+	defer deployment.removeFile(context.Background(), remoteArchive)
+	raw, err := deployment.operation(ctx, "backup", nil, action, "--archive", remoteArchive, "--json")
+	if err != nil {
+		return fail(options, ExitFailure, err.Error(), nil)
+	}
+	return renderRemote(options, raw, redact(string(raw)))
 }
 
 func commandWorkspace(options Options, args []string) int {

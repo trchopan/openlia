@@ -154,11 +154,11 @@ func ForkSkill(config Config, name string, now time.Time) (SkillForkResult, erro
 	if err != nil {
 		return SkillForkResult{}, err
 	}
-	backup, err := CreateBackup(config, "skill-fork", now)
+	patchPath := filepath.Join(config.MetaRoot, filepath.FromSlash(metadata.PatchPath))
+	backup, err := CreateRollback(config, "skill-fork", now, runtimeRelativePath(config, destination), runtimeRelativePath(config, metadataPath), runtimeRelativePath(config, basePath), runtimeRelativePath(config, patchPath))
 	if err != nil {
 		return SkillForkResult{}, err
 	}
-	patchPath := filepath.Join(config.MetaRoot, filepath.FromSlash(metadata.PatchPath))
 	patchHash, err := WriteSkillPatch(patchPath, patch)
 	if err != nil {
 		return SkillForkResult{}, err
@@ -415,12 +415,12 @@ func ApplySkillMigration(config Config, proposalID string, now time.Time) (Skill
 	if "sha256:"+proposedHash != proposal.ProposedForkHash {
 		return SkillMigrationResult{}, fmt.Errorf("migration proposal fork hash mismatch")
 	}
-	backup, err := CreateBackup(config, "skill-migration", now)
+	oldBase := filepath.Join(config.MetaRoot, filepath.FromSlash(metadata.BaseSnapshot))
+	oldPatch := filepath.Join(config.MetaRoot, filepath.FromSlash(metadata.PatchPath))
+	backup, err := CreateRollback(config, "skill-migration", now, runtimeRelativePath(config, destination), runtimeRelativePath(config, metadataPath), runtimeRelativePath(config, oldBase), runtimeRelativePath(config, oldPatch))
 	if err != nil {
 		return SkillMigrationResult{}, err
 	}
-	oldBase := filepath.Join(config.MetaRoot, filepath.FromSlash(metadata.BaseSnapshot))
-	oldPatch := filepath.Join(config.MetaRoot, filepath.FromSlash(metadata.PatchPath))
 	oldMetadata, err := os.ReadFile(metadataPath)
 	if err != nil {
 		return SkillMigrationResult{}, err
@@ -553,7 +553,7 @@ func applyExternalSkillMigration(config Config, proposalRoot, proposalPath strin
 	if err != nil {
 		return SkillMigrationResult{}, fmt.Errorf("audit migrated external skill: %w", err)
 	}
-	backup, err := CreateBackup(config, "skill-migration", now, manager.Compose)
+	backup, err := CreateRollback(config, "skill-migration", now, runtimeRelativePath(config, destination), runtimeRelativePath(config, metadataPath), runtimeRelativePath(config, newBase), runtimeRelativePath(config, filepath.Join(config.MetaRoot, filepath.FromSlash(metadata.PatchPath))))
 	if err != nil {
 		return SkillMigrationResult{}, err
 	}

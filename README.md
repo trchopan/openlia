@@ -555,7 +555,7 @@ Key integration details:
 - **Hermes API Server**: Enabling Open WebUI automatically activates Hermes Agent's OpenAI-compatible API server (`API_SERVER_ENABLED=true`, `API_SERVER_HOST=0.0.0.0`) on container port `8642`.
 - **Zero-Config Secret Synchronization**: Secure random API keys (`API_SERVER_KEY` for Hermes and `OPENAI_API_KEY` / `WEBUI_SECRET_KEY` for Open WebUI) are automatically generated and synchronized into mode-`0600` secret files (`hermes.env` and `open-webui.env`). Secrets are never written to `compose.generated.yaml`.
 - **Internal Network**: Open WebUI communicates with Hermes over the private Docker network at `http://hermes:8642/v1`.
-- **Persistent Data**: Open WebUI's database, user profiles, and chat histories persist under `<root>/runtime/open-webui` (mounted to `/app/backend/data`), and are included in `openlia backup create` and `openlia backup restore`.
+- **Persistent Data**: Open WebUI's database, user profiles, and chat histories persist under `<root>/runtime/open-webui` (mounted to `/app/backend/data`). Open WebUI is intentionally excluded from the default OpenLia durable backup.
 - **Authentication**: Built-in authentication is enabled by default (`auth = true`). The first user created in Open WebUI is granted administrator privileges.
 - **Remote Access**: For remote VM deployments, access Open WebUI securely through an SSH tunnel:
   ```sh
@@ -700,9 +700,18 @@ openlia uninstall --local --project NAME --root /path
 openlia uninstall --target user@host --project NAME --root /path
 openlia backup create
 openlia backup restore --non-interactive --archive /path/to/backup.tar.gz
+openlia backup rollback-restore --non-interactive --archive /path/to/rollback.tar.gz
 openlia workspace git status
 openlia workspace git setup
 ```
+
+`openlia backup create` creates a compact durable backup of the workspace,
+workspace Git history, Hermes agent state, profile-managed files, metadata, and
+custom or external skills. It excludes Open WebUI, bundled image skills,
+rebuildable caches and environments, logs, releases, Docker images, secrets,
+and Locho capability files. Mutating operations use smaller rollback snapshots
+of only the files they change; deploy and restart do not archive the whole
+runtime.
 
 `openlia update` is read-only without a component. `openlia update openlia`
 synchronizes the Go operator, profile, templates, and bundled skills.
@@ -827,7 +836,10 @@ between bundled and external development.
   used on a trusted private network.
 - Locho listeners use the private Compose network and are never published.
 - Workspace initialization is copy-once; later deployments preserve user files.
-- Backups exclude secret files, OAuth state, and Locho capabilities.
+- Durable backups exclude Open WebUI, secret files, OAuth state, bundled image
+  skills, rebuildable caches/environments, and Locho capabilities. Protected
+  rollback snapshots contain only the specific files required to undo an
+  approved mutation.
 - Dangerous unattended actions are denied and skill writes are staged for review.
 - Local workspace Git history does not require credentials or a remote.
 - Optional GitHub backup uses a repository-scoped PAT through a mounted askpass
@@ -851,7 +863,7 @@ make smoke-local-live \
   OPENLIA_SMOKE_ENV_FILE="$HOME/.config/openlia/dev/openlia_dev.env" \
   OPENLIA_SMOKE_ATTACHMENTS_FILE="$HOME/.config/openlia/dev/locho-attachments.toml" \
   OPENLIA_SMOKE_LOCHO_HOST=genai
-docker compose -f docker/compose.yaml config --quiet
+make compose-config
 ```
 
 The CLI smoke gate uses synthetic data. The local deployment smoke starts the

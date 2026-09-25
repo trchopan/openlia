@@ -25,15 +25,19 @@ type BackupResult struct {
 }
 
 type backupManifest struct {
-	Schema       int    `json:"schema"`
-	Reason       string `json:"reason"`
-	CreatedAt    string `json:"created_at"`
-	SecretValues string `json:"secret_values"`
-	Capabilities string `json:"capabilities"`
+	Schema       int      `json:"schema"`
+	Kind         string   `json:"kind"`
+	Reason       string   `json:"reason"`
+	CreatedAt    string   `json:"created_at"`
+	SecretValues string   `json:"secret_values"`
+	Capabilities string   `json:"capabilities"`
+	Components   []string `json:"components"`
+	Exclusions   []string `json:"exclusions"`
 }
 
 type backupMetadata struct {
 	Schema    int    `json:"schema"`
+	Kind      string `json:"kind"`
 	Archive   string `json:"archive"`
 	SHA256    string `json:"sha256"`
 	Reason    string `json:"reason"`
@@ -47,6 +51,120 @@ func CreateBackup(config Config, reason string, now time.Time, composers ...Comp
 		compose = &composers[0]
 	}
 	return createBackup(context.Background(), config, reason, now, compose)
+}
+
+// CreateRollback captures only the explicitly named runtime-relative paths for
+// an operation-scoped rollback. It never includes caches, Open WebUI, or
+// unrelated Hermes state; auth rotation may explicitly include a protected
+// secret file.
+func CreateRollback(config Config, reason string, now time.Time, paths ...string) (BackupResult, error) {
+	if err := config.ValidatePaths(); err != nil {
+		return BackupResult{}, err
+	}
+	if err := ValidateSafeComponent(reason, "rollback-reason"); err != nil {
+		return BackupResult{}, err
+	}
+	if len(paths) == 0 {
+		return BackupResult{}, fmt.Errorf("rollback requires at least one path")
+	}
+	if err := EnsureDir(config.BackupRoot, 0o700); err != nil {
+		return BackupResult{}, err
+	}
+	stamp := now.UTC().Format("20060102T150405Z")
+	temporary, err := os.CreateTemp(config.BackupRoot, ".rollback-*.tar.gz")
+	if err != nil {
+		return BackupResult{}, err
+	}
+	temporaryName := temporary.Name()
+	removeTemporary := true
+	defer func() {
+		if removeTemporary {
+			_ = os.Remove(temporaryName)
+		}
+	}()
+	compressor := gzip.NewWriter(temporary)
+	archive := tar.NewWriter(compressor)
+	secretRollback := false
+	for _, path := range paths {
+		if strings.Contains(path, "secrets/") || strings.HasPrefix(path, "secrets") {
+			secretRollback = true
+		}
+	}
+	secretStatus := "excluded"
+	if secretRollback {
+		secretStatus = "protected-rollback"
+	}
+	manifest := backupManifest{Schema: 2, Kind: "rollback", Reason: reason, CreatedAt: utcTimestamp(now), SecretValues: secretStatus, Capabilities: "excluded", Components: append([]string{}, paths...)}
+	manifestData, err := json.Marshal(manifest)
+	if err != nil {
+		return BackupResult{}, err
+	}
+	if err := writeTarFile(archive, "manifest.json", manifestData, 0o600); err != nil {
+		return BackupResult{}, err
+	}
+	for _, relative := range paths {
+		if !safeRuntimeRelativePath(relative) {
+			return BackupResult{}, fmt.Errorf("rollback path is unsafe: %s", relative)
+		}
+		absolute := filepath.Join(config.RuntimeRoot, filepath.FromSlash(relative))
+		if _, err := os.Lstat(absolute); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return BackupResult{}, err
+		}
+		if err := appendDurableTree(archive, filepath.ToSlash(relative), absolute, func(string, fs.DirEntry) bool { return true }); err != nil {
+			return BackupResult{}, err
+		}
+	}
+	if err := archive.Close(); err != nil {
+		return BackupResult{}, err
+	}
+	if err := compressor.Close(); err != nil {
+		return BackupResult{}, err
+	}
+	if err := temporary.Sync(); err != nil {
+		return BackupResult{}, err
+	}
+	if err := temporary.Close(); err != nil {
+		return BackupResult{}, err
+	}
+	if err := validateRestoreArchive(temporaryName); err != nil {
+		return BackupResult{}, fmt.Errorf("rollback archive validation failed")
+	}
+	destination := filepath.Join(config.BackupRoot, fmt.Sprintf("rollback-%s-%d.tar.gz", stamp, os.Getpid()))
+	if err := os.Rename(temporaryName, destination); err != nil {
+		return BackupResult{}, err
+	}
+	removeTemporary = false
+	if err := os.Chmod(destination, 0o600); err != nil {
+		return BackupResult{}, err
+	}
+	digest, err := fileSHA256(destination)
+	if err != nil {
+		return BackupResult{}, err
+	}
+	metadata := backupMetadata{Schema: 2, Kind: "rollback", Archive: destination, SHA256: digest, Reason: reason, CreatedAt: utcTimestamp(now), Secrets: secretStatus}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		return BackupResult{}, err
+	}
+	if err := AtomicWriteFile(destination+".json", append(data, '\n'), 0o600); err != nil {
+		return BackupResult{}, err
+	}
+	_, _ = PruneBackups(config, config.BackupRetention)
+	return BackupResult{OK: true, Archive: destination, Secrets: secretStatus, Action: "rollback"}, nil
+}
+
+func safeRuntimeRelativePath(value string) bool {
+	return value != "" && !filepath.IsAbs(value) && safeArchiveMember(filepath.ToSlash(value))
+}
+
+func runtimeRelativePath(config Config, path string) string {
+	relative, err := filepath.Rel(config.RuntimeRoot, path)
+	if err != nil {
+		return filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(relative)
 }
 
 func createBackup(ctx context.Context, config Config, reason string, now time.Time, compose *Compose) (result BackupResult, err error) {
@@ -65,20 +183,8 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 	if err := EnsureDir(config.MetaRoot, 0o700); err != nil {
 		return BackupResult{}, err
 	}
-	if err := EnsureDir(config.LochoRoot, 0o700); err != nil {
-		return BackupResult{}, err
-	}
-	for _, item := range []struct {
-		path  string
-		label string
-	}{
-		{config.MetaRoot, "metadata directory"},
-		{config.LochoRoot, "Locho directory"},
-	} {
-		info, statErr := os.Lstat(item.path)
-		if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return BackupResult{}, fmt.Errorf("%s is not a directory", item.label)
-		}
+	if info, statErr := os.Lstat(config.MetaRoot); statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return BackupResult{}, fmt.Errorf("metadata directory is missing")
 	}
 	wasRunning := false
 	uiWasRunning := false
@@ -97,21 +203,8 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 		}
 		uiWasRunning = true
 	}
-	openWebUIWasRunning := false
-	if compose != nil && config.OpenWebUIHost != "" && compose.ServiceRunning(ctx, "open-webui") {
-		if _, err := compose.Run(ctx, "stop", "open-webui"); err != nil {
-			if wasRunning {
-				_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "hermes")
-			}
-			if uiWasRunning {
-				_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "workspace-ui")
-			}
-			return BackupResult{}, fmt.Errorf("cannot stop open-webui for a consistent backup")
-		}
-		openWebUIWasRunning = true
-	}
 	defer func() {
-		if !wasRunning && !uiWasRunning && !openWebUIWasRunning {
+		if !wasRunning && !uiWasRunning {
 			return
 		}
 		if wasRunning {
@@ -142,20 +235,6 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 				}
 			}
 		}
-		if openWebUIWasRunning {
-			if res, restartErr := compose.Run(ctx, "up", "-d", "--no-deps", "open-webui"); restartErr != nil {
-				msg := strings.TrimSpace(string(res.Stderr))
-				if msg == "" {
-					msg = strings.TrimSpace(string(res.Stdout))
-				}
-				failure := fmt.Errorf("open-webui could not be restarted (%s): %w", msg, restartErr)
-				if err == nil {
-					err = fmt.Errorf("backup completed but %w", failure)
-				} else {
-					err = fmt.Errorf("%v; %w", err, failure)
-				}
-			}
-		}
 	}()
 	stamp := now.UTC().Format("20060102T150405Z")
 	temporary, err := os.CreateTemp(config.BackupRoot, ".archive-*.tar.gz")
@@ -171,29 +250,39 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 	}()
 	compressor := gzip.NewWriter(temporary)
 	archive := tar.NewWriter(compressor)
-	manifest := backupManifest{Schema: 1, Reason: reason, CreatedAt: utcTimestamp(now), SecretValues: "excluded", Capabilities: "excluded"}
+	manifest := backupManifest{
+		Schema:       2,
+		Kind:         "durable",
+		Reason:       reason,
+		CreatedAt:    utcTimestamp(now),
+		SecretValues: "excluded",
+		Capabilities: "excluded",
+		Components:   []string{"hermes", "meta"},
+		Exclusions:   []string{"open-webui", "skill-envs", "secrets", "caches", "bundled-skills", "logs"},
+	}
 	manifestData, err := json.Marshal(manifest)
 	if err != nil {
 		_ = temporary.Close()
 		return BackupResult{}, err
 	}
-	backupRoots := []string{"hermes", "meta", "locho", "skill-envs"}
-	if config.OpenWebUIHost != "" {
-		backupRoots = append(backupRoots, "open-webui")
-	}
-	for _, root := range backupRoots {
-		path := filepath.Join(config.RuntimeRoot, root)
-		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err := appendArchiveTree(archive, config.RuntimeRoot, path); err != nil {
-			_ = archive.Close()
-			_ = compressor.Close()
-			_ = temporary.Close()
-			return BackupResult{}, err
-		}
-	}
 	if err := writeTarFile(archive, "manifest.json", manifestData, 0o600); err != nil {
+		_ = archive.Close()
+		_ = compressor.Close()
+		_ = temporary.Close()
+		return BackupResult{}, err
+	}
+	bundledGroups := bundledSkillGroups(config.DataRoot)
+	if err := appendDurableTree(archive, "hermes", config.DataRoot, func(relative string, entry fs.DirEntry) bool {
+		return durableHermesPath(relative, entry, bundledGroups)
+	}); err != nil {
+		_ = archive.Close()
+		_ = compressor.Close()
+		_ = temporary.Close()
+		return BackupResult{}, err
+	}
+	if err := appendDurableTree(archive, "meta", config.MetaRoot, func(relative string, entry fs.DirEntry) bool {
+		return durableMetaPath(relative, entry)
+	}); err != nil {
 		_ = archive.Close()
 		_ = compressor.Close()
 		_ = temporary.Close()
@@ -238,7 +327,7 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 	if err := os.Chmod(destination, 0o600); err != nil {
 		return BackupResult{}, err
 	}
-	metadata := backupMetadata{Schema: 1, Archive: destination, SHA256: digest, Reason: reason, CreatedAt: utcTimestamp(now), Secrets: "excluded"}
+	metadata := backupMetadata{Schema: 2, Kind: "durable", Archive: destination, SHA256: digest, Reason: reason, CreatedAt: utcTimestamp(now), Secrets: "excluded"}
 	metadataData, err := json.Marshal(metadata)
 	if err != nil {
 		return BackupResult{}, err
@@ -246,16 +335,18 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 	if err := AtomicWriteFile(destination+".json", append(metadataData, '\n'), 0o600); err != nil {
 		return BackupResult{}, err
 	}
-	retention := config.BackupRetention
-	if retention <= 0 {
-		retention = 5
+	if reason != "restore-preflight" {
+		retention := config.BackupRetention
+		if retention <= 0 {
+			retention = 5
+		}
+		_, _ = PruneBackups(config, retention)
 	}
-	_, _ = PruneBackups(config, retention)
 	return BackupResult{OK: true, Archive: destination, Secrets: "excluded"}, nil
 }
 
-// PruneBackups retains the most recent keepCount backup archives and auxiliary
-// backup files in config.BackupRoot, removing older ones.
+// PruneBackups retains the most recent keepCount durable and rollback archives
+// plus auxiliary backup files in config.BackupRoot, removing older ones.
 func PruneBackups(config Config, keepCount int) ([]string, error) {
 	if keepCount <= 0 {
 		keepCount = 5
@@ -279,7 +370,9 @@ func PruneBackups(config Config, keepCount int) ([]string, error) {
 	}
 
 	var archives []fileItem
+	var rollbacks []fileItem
 	var composeFiles []fileItem
+	var auxiliary []fileItem
 	var preRestores []fileItem
 
 	for _, entry := range entries {
@@ -292,8 +385,12 @@ func PruneBackups(config Config, keepCount int) ([]string, error) {
 
 		if entry.Type().IsRegular() && strings.HasPrefix(name, "openlia-") && strings.HasSuffix(name, ".tar.gz") {
 			archives = append(archives, fileItem{name: name, path: fullPath, modTime: info.ModTime()})
+		} else if entry.Type().IsRegular() && strings.HasPrefix(name, "rollback-") && strings.HasSuffix(name, ".tar.gz") {
+			rollbacks = append(rollbacks, fileItem{name: name, path: fullPath, modTime: info.ModTime()})
 		} else if entry.Type().IsRegular() && strings.HasPrefix(name, "compose-generated-") {
 			composeFiles = append(composeFiles, fileItem{name: name, path: fullPath, modTime: info.ModTime()})
+		} else if entry.Type().IsRegular() && (strings.HasPrefix(name, "auth-secret-") || strings.HasPrefix(name, "locho-")) {
+			auxiliary = append(auxiliary, fileItem{name: name, path: fullPath, modTime: info.ModTime()})
 		} else if strings.HasPrefix(name, "pre-restore-") {
 			preRestores = append(preRestores, fileItem{name: name, path: fullPath, modTime: info.ModTime()})
 		}
@@ -309,7 +406,9 @@ func PruneBackups(config Config, keepCount int) ([]string, error) {
 	}
 
 	sortByNewest(archives)
+	sortByNewest(rollbacks)
 	sortByNewest(composeFiles)
+	sortByNewest(auxiliary)
 	sortByNewest(preRestores)
 
 	var removed []string
@@ -325,9 +424,26 @@ func PruneBackups(config Config, keepCount int) ([]string, error) {
 			}
 		}
 	}
+	if len(rollbacks) > keepCount {
+		for _, item := range rollbacks[keepCount:] {
+			if err := os.Remove(item.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return removed, err
+			}
+			removed = append(removed, item.name)
+			_ = os.Remove(item.path + ".json")
+		}
+	}
 
 	if len(composeFiles) > keepCount {
 		for _, item := range composeFiles[keepCount:] {
+			if err := os.Remove(item.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return removed, err
+			}
+			removed = append(removed, item.name)
+		}
+	}
+	if len(auxiliary) > keepCount {
+		for _, item := range auxiliary[keepCount:] {
 			if err := os.Remove(item.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return removed, err
 			}
@@ -385,8 +501,12 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 	if info, err := os.Lstat(archivePath); err != nil || info.Mode()&os.ModeSymlink != 0 {
 		return BackupResult{}, fmt.Errorf("restore archive must be a regular file")
 	}
-	if err := validateRestoreArchive(archivePath); err != nil {
+	manifest, err := inspectRestoreArchive(archivePath)
+	if err != nil {
 		return BackupResult{}, err
+	}
+	if manifest.Schema >= 2 && manifest.Kind == "rollback" {
+		return BackupResult{}, fmt.Errorf("rollback archives require an operation-specific restore")
 	}
 	if err := EnsureDir(config.DataRoot, 0o700); err != nil {
 		return BackupResult{}, err
@@ -424,9 +544,12 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 		return BackupResult{}, err
 	}
 	defer os.RemoveAll(staging)
-	if err := extractRestoreArchive(archivePath, staging); err != nil {
+	if err := extractRestoreArchive(archivePath, staging, manifest); err != nil {
 		_ = RecordChange(config, "restore", "failed", preRestore.Archive, "restore extraction failed", now)
 		return BackupResult{}, err
+	}
+	if manifest.Schema >= 2 && manifest.Kind == "durable" {
+		return restoreDurableBackup(config, archivePath, staging, preRestore, now)
 	}
 	for _, root := range []string{"hermes", "meta", "locho"} {
 		info, rootErr := os.Stat(filepath.Join(staging, root))
@@ -496,8 +619,206 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 	return BackupResult{OK: true, Action: "restore", Archive: archivePath, State: stateStopped, Secrets: "supplied_out_of_band"}, nil
 }
 
-func appendArchiveTree(archive *tar.Writer, root, path string) error {
-	return filepath.WalkDir(path, func(current string, entry fs.DirEntry, err error) error {
+func restoreDurableBackup(config Config, archivePath, staging string, preRestore BackupResult, now time.Time) (BackupResult, error) {
+	hermesStage := filepath.Join(staging, "hermes")
+	metaStage := filepath.Join(staging, "meta")
+	if info, err := os.Stat(hermesStage); err != nil || !info.IsDir() {
+		return BackupResult{}, fmt.Errorf("durable restore is missing hermes data")
+	}
+	if info, err := os.Stat(metaStage); err != nil || !info.IsDir() {
+		return BackupResult{}, fmt.Errorf("durable restore is missing metadata")
+	}
+	workspaceStage := filepath.Join(hermesStage, "workspace")
+	workspaceTarget := filepath.Join(config.DataRoot, "workspace")
+	oldWorkspace := filepath.Join(config.BackupRoot, fmt.Sprintf("pre-restore-workspace-%s-%d", now.UTC().Format("20060102T150405Z"), os.Getpid()))
+	restoreWorkspace := func() {
+		if _, err := os.Lstat(oldWorkspace); err == nil {
+			_ = os.RemoveAll(workspaceTarget)
+			_ = os.Rename(oldWorkspace, workspaceTarget)
+		}
+	}
+	if _, err := os.Stat(workspaceStage); err == nil {
+		if err := os.Rename(workspaceTarget, oldWorkspace); err != nil {
+			return BackupResult{}, fmt.Errorf("current workspace move failed; restore was not applied")
+		}
+		if err := os.Rename(workspaceStage, workspaceTarget); err != nil {
+			_ = os.Rename(oldWorkspace, workspaceTarget)
+			return BackupResult{}, fmt.Errorf("workspace restore failed; current state was restored")
+		}
+	}
+	if err := restoreDurableTree(hermesStage, config.DataRoot); err != nil {
+		restoreWorkspace()
+		_ = RecordChange(config, "restore", "failed", preRestore.Archive, "durable restore failed", now)
+		return BackupResult{}, err
+	}
+	if err := restoreDurableTree(metaStage, config.MetaRoot); err != nil {
+		restoreWorkspace()
+		_ = RecordChange(config, "restore", "failed", preRestore.Archive, "durable metadata restore failed", now)
+		return BackupResult{}, err
+	}
+	if err := WriteState(config, stateStopped); err != nil {
+		restoreWorkspace()
+		return BackupResult{}, err
+	}
+	if err := RecordChange(config, "restore", "ok", preRestore.Archive, "durable archive="+archivePath, now); err != nil {
+		return BackupResult{}, err
+	}
+	return BackupResult{OK: true, Action: "restore", Archive: archivePath, State: stateStopped, Secrets: "supplied_out_of_band"}, nil
+}
+
+func restoreDurableTree(source, destination string) error {
+	return filepath.WalkDir(source, func(current string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, current)
+		if err != nil {
+			return err
+		}
+		if relative == "." {
+			return nil
+		}
+		target := filepath.Join(destination, relative)
+		if entry.Type()&os.ModeSymlink != 0 {
+			link, readErr := os.Readlink(current)
+			if readErr != nil || !safeRelativeSymlink(filepath.ToSlash(filepath.Join("root", relative)), link) {
+				return fmt.Errorf("durable restore contains unsafe symlink: %s", relative)
+			}
+			_ = os.RemoveAll(target)
+			return os.Symlink(link, target)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if err := os.MkdirAll(target, info.Mode().Perm()); err != nil {
+				return err
+			}
+			return os.Chmod(target, info.Mode().Perm())
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(current)
+		if err != nil {
+			return err
+		}
+		if err := AtomicWriteFile(target, data, info.Mode().Perm()); err != nil {
+			return err
+		}
+		return os.Chmod(target, info.Mode().Perm())
+	})
+}
+
+// RestoreRollback applies only the components declared by a rollback archive.
+// A missing component is intentional and removes that path from the target.
+func RestoreRollback(config Config, archivePath string, now time.Time, composers ...Compose) (BackupResult, error) {
+	if err := config.ValidatePaths(); err != nil {
+		return BackupResult{}, err
+	}
+	if err := ValidateAbsolutePath(archivePath, "rollback-archive"); err != nil || !within(archivePath, config.BackupRoot) {
+		return BackupResult{}, fmt.Errorf("rollback archive must be inside the backup directory")
+	}
+	if info, err := os.Lstat(archivePath); err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return BackupResult{}, fmt.Errorf("rollback archive must be a regular file")
+	}
+	manifest, err := inspectRestoreArchive(archivePath)
+	if err != nil {
+		return BackupResult{}, err
+	}
+	if manifest.Kind != "rollback" {
+		return BackupResult{}, fmt.Errorf("archive is not an operation rollback")
+	}
+	parent := filepath.Dir(config.DataRoot)
+	staging, err := os.MkdirTemp(parent, ".rollback-restore-*")
+	if err != nil {
+		return BackupResult{}, err
+	}
+	defer os.RemoveAll(staging)
+	if err := extractRestoreArchive(archivePath, staging, manifest); err != nil {
+		return BackupResult{}, err
+	}
+	var compose *Compose
+	if len(composers) > 0 {
+		compose = &composers[0]
+	}
+	wasRunning := false
+	uiWasRunning := false
+	if compose != nil && compose.ServiceRunning(context.Background(), "hermes") {
+		if _, err := compose.Run(context.Background(), "stop", "hermes"); err != nil {
+			return BackupResult{}, fmt.Errorf("cannot stop Hermes before rollback")
+		}
+		wasRunning = true
+	}
+	if compose != nil && config.WorkspaceUIHost != "" && compose.ServiceRunning(context.Background(), "workspace-ui") {
+		if _, err := compose.Run(context.Background(), "stop", "workspace-ui"); err != nil {
+			if wasRunning {
+				_, _ = compose.Run(context.Background(), "up", "-d", "--no-deps", "hermes")
+			}
+			return BackupResult{}, fmt.Errorf("cannot stop workspace UI before rollback")
+		}
+		uiWasRunning = true
+	}
+	defer func() {
+		if wasRunning {
+			_, _ = compose.Run(context.Background(), "up", "-d", "--no-deps", "hermes")
+		}
+		if uiWasRunning {
+			_, _ = compose.Run(context.Background(), "up", "-d", "--no-deps", "workspace-ui")
+		}
+	}()
+	old := make(map[string]string)
+	restoreOld := func() {
+		for _, relative := range manifest.Components {
+			if oldPath := old[relative]; oldPath != "" {
+				_ = os.RemoveAll(filepath.Join(config.RuntimeRoot, filepath.FromSlash(relative)))
+				_ = os.Rename(oldPath, filepath.Join(config.RuntimeRoot, filepath.FromSlash(relative)))
+			}
+		}
+	}
+	for _, relative := range manifest.Components {
+		if !safeRuntimeRelativePath(relative) {
+			restoreOld()
+			return BackupResult{}, fmt.Errorf("rollback component is unsafe: %s", relative)
+		}
+		target := filepath.Join(config.RuntimeRoot, filepath.FromSlash(relative))
+		oldPath := target + fmt.Sprintf(".rollback-old-%d", os.Getpid())
+		if _, err := os.Lstat(target); err == nil {
+			if err := os.Rename(target, oldPath); err != nil {
+				restoreOld()
+				return BackupResult{}, err
+			}
+			old[relative] = oldPath
+		}
+		source := filepath.Join(staging, filepath.FromSlash(relative))
+		if _, err := os.Lstat(source); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			restoreOld()
+			return BackupResult{}, err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			restoreOld()
+			return BackupResult{}, err
+		}
+		if err := os.Rename(source, target); err != nil {
+			restoreOld()
+			return BackupResult{}, err
+		}
+	}
+	for _, oldPath := range old {
+		_ = os.RemoveAll(oldPath)
+	}
+	_ = RecordChange(config, "rollback-restore", "ok", archivePath, "operation rollback restored", now)
+	return BackupResult{OK: true, Action: "rollback-restore", Archive: archivePath, State: stateRunning, Secrets: manifest.SecretValues}, nil
+}
+
+func appendDurableTree(archive *tar.Writer, label, root string, include func(string, fs.DirEntry) bool) error {
+	return filepath.WalkDir(root, func(current string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -505,22 +826,30 @@ func appendArchiveTree(archive *tar.Writer, root, path string) error {
 		if err != nil {
 			return err
 		}
-		relative = filepath.ToSlash(relative)
-		if excludedBackupPath(relative) {
+		if relative != "." && !include(filepath.ToSlash(relative), entry) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
+		}
+		relative = filepath.ToSlash(relative)
+		name := label
+		if relative != "." {
+			name += "/" + relative
 		}
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return nil
+			target, readErr := os.Readlink(current)
+			if readErr != nil || !safeRelativeSymlink(name, target) {
+				return fmt.Errorf("durable backup contains unsafe symlink: %s", name)
+			}
+			return archive.WriteHeader(&tar.Header{Name: name, Mode: int64(info.Mode().Perm()), Typeflag: tar.TypeSymlink, Linkname: target})
 		}
 		if entry.IsDir() {
-			return archive.WriteHeader(&tar.Header{Name: relative + "/", Mode: int64(info.Mode().Perm()), Typeflag: tar.TypeDir})
+			return archive.WriteHeader(&tar.Header{Name: name + "/", Mode: int64(info.Mode().Perm()), Typeflag: tar.TypeDir})
 		}
 		if !info.Mode().IsRegular() {
 			return nil
@@ -529,7 +858,7 @@ func appendArchiveTree(archive *tar.Writer, root, path string) error {
 		if err != nil {
 			return err
 		}
-		if err := archive.WriteHeader(&tar.Header{Name: relative, Mode: int64(info.Mode().Perm()), Size: info.Size(), Typeflag: tar.TypeReg}); err != nil {
+		if err := archive.WriteHeader(&tar.Header{Name: name, Mode: int64(info.Mode().Perm()), Size: info.Size(), Typeflag: tar.TypeReg}); err != nil {
 			_ = input.Close()
 			return err
 		}
@@ -540,6 +869,86 @@ func appendArchiveTree(archive *tar.Writer, root, path string) error {
 		}
 		return closeErr
 	})
+}
+
+func durableHermesPath(relative string, entry fs.DirEntry, bundledGroups map[string]bool) bool {
+	parts := strings.Split(relative, "/")
+	base := parts[len(parts)-1]
+	for _, part := range parts {
+		switch part {
+		case "logs", "cache", "audio_cache", "image_cache", "lazy-packages", "bin", "home", ".local", ".npm":
+			return false
+		}
+	}
+	if base == ".bundled_manifest" || base == ".openlia-disabled" || base == "auth.json" || strings.HasPrefix(base, "models_dev_cache") {
+		return false
+	}
+	if strings.HasSuffix(base, ".sock") || strings.HasSuffix(base, ".pid") || strings.HasSuffix(base, ".lock") || strings.HasSuffix(base, ".env") {
+		return false
+	}
+	if len(parts) >= 2 && parts[0] == "skills" && bundledGroups[parts[1]] {
+		return false
+	}
+	return true
+}
+
+func durableMetaPath(relative string, entry fs.DirEntry) bool {
+	parts := strings.Split(relative, "/")
+	for _, part := range parts {
+		if part == "locks" || strings.HasSuffix(part, ".lock") {
+			return false
+		}
+	}
+	return true
+}
+
+func bundledSkillGroups(dataRoot string) map[string]bool {
+	result := make(map[string]bool)
+	manifestPath := filepath.Join(dataRoot, "skills", ".bundled_manifest")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return result
+	}
+	bundled := make(map[string]bool)
+	for _, line := range strings.Split(string(data), "\n") {
+		name, _, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if ok && name != "" {
+			bundled[name] = true
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(dataRoot, "skills"))
+	if err != nil {
+		return result
+	}
+	for _, group := range entries {
+		if !group.IsDir() {
+			continue
+		}
+		children, err := os.ReadDir(filepath.Join(dataRoot, "skills", group.Name()))
+		if err != nil || len(children) == 0 {
+			continue
+		}
+		allBundled := true
+		for _, child := range children {
+			if !child.IsDir() || !bundled[child.Name()] {
+				allBundled = false
+				break
+			}
+		}
+		if allBundled {
+			result[group.Name()] = true
+		}
+	}
+	return result
+}
+
+func safeRelativeSymlink(name, target string) bool {
+	if target == "" || filepath.IsAbs(target) || strings.ContainsAny(target, "\x00\r\n") {
+		return false
+	}
+	joined := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(name), target)))
+	root := strings.Split(name, "/")[0]
+	return joined == root || strings.HasPrefix(joined, root+"/")
 }
 
 func writeTarFile(archive *tar.Writer, name string, data []byte, mode os.FileMode) error {
@@ -583,16 +992,24 @@ func allowedArchiveMember(name string) bool {
 }
 
 func validateRestoreArchive(path string) error {
+	_, err := inspectRestoreArchive(path)
+	return err
+}
+
+func inspectRestoreArchive(path string) (backupManifest, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return err
+		return backupManifest{}, err
 	}
 	decompressor, err := gzip.NewReader(file)
 	if err != nil {
 		_ = file.Close()
-		return fmt.Errorf("restore archive is not a readable tar archive")
+		return backupManifest{}, fmt.Errorf("restore archive is not a readable tar archive")
 	}
 	reader := tar.NewReader(decompressor)
+	manifest := backupManifest{}
+	manifestFound := false
+	dataBeforeManifest := false
 	for {
 		header, readErr := reader.Next()
 		if errors.Is(readErr, io.EOF) {
@@ -601,34 +1018,85 @@ func validateRestoreArchive(path string) error {
 		if readErr != nil {
 			_ = decompressor.Close()
 			_ = file.Close()
-			return fmt.Errorf("restore archive is not a readable tar archive")
+			return backupManifest{}, fmt.Errorf("restore archive is not a readable tar archive")
 		}
 		name := strings.TrimSuffix(header.Name, "/")
-		if name == "" || name == "manifest.json" {
+		if name == "" {
 			continue
 		}
-		if !allowedArchiveMember(name) {
-			_ = decompressor.Close()
-			_ = file.Close()
-			return fmt.Errorf("restore archive contains an unsupported or unsafe member")
+		if name == "manifest.json" {
+			if header.Typeflag != tar.TypeReg || header.Size < 0 || header.Size > 64*1024 {
+				_ = decompressor.Close()
+				_ = file.Close()
+				return backupManifest{}, fmt.Errorf("restore archive manifest is invalid")
+			}
+			data, readManifestErr := io.ReadAll(io.LimitReader(reader, header.Size))
+			if readManifestErr != nil || int64(len(data)) != header.Size || json.Unmarshal(data, &manifest) != nil {
+				_ = decompressor.Close()
+				_ = file.Close()
+				return backupManifest{}, fmt.Errorf("restore archive manifest is invalid")
+			}
+			manifestFound = true
+			continue
 		}
-		if header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg || header.Size < 0 {
+		if !manifestFound {
+			if !allowedArchiveMember(name) {
+				_ = decompressor.Close()
+				_ = file.Close()
+				return backupManifest{}, fmt.Errorf("restore archive contains an unsupported or unsafe member")
+			}
+			dataBeforeManifest = true
+		} else if !allowedArchiveMemberForManifest(name, manifest) {
 			_ = decompressor.Close()
 			_ = file.Close()
-			return fmt.Errorf("restore archive contains an unsupported or unsafe member")
+			return backupManifest{}, fmt.Errorf("restore archive contains an unsupported or unsafe member")
+		}
+		if header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeSymlink || header.Size < 0 {
+			_ = decompressor.Close()
+			_ = file.Close()
+			return backupManifest{}, fmt.Errorf("restore archive contains an unsupported or unsafe member")
+		}
+		if header.Typeflag == tar.TypeSymlink && !safeRelativeSymlink(name, header.Linkname) {
+			_ = decompressor.Close()
+			_ = file.Close()
+			return backupManifest{}, fmt.Errorf("restore archive contains an unsafe symlink")
 		}
 	}
 	if err := decompressor.Close(); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("restore archive is not a readable tar archive")
+		return backupManifest{}, fmt.Errorf("restore archive is not a readable tar archive")
 	}
 	if err := file.Close(); err != nil {
-		return fmt.Errorf("restore archive is not a readable tar archive")
+		return backupManifest{}, fmt.Errorf("restore archive is not a readable tar archive")
 	}
-	return nil
+	if !manifestFound || (manifest.Schema != 1 && manifest.Schema != 2) {
+		return backupManifest{}, fmt.Errorf("restore archive manifest is unsupported")
+	}
+	if manifest.Schema >= 2 && manifest.Kind != "durable" && manifest.Kind != "rollback" {
+		return backupManifest{}, fmt.Errorf("restore archive kind is unsupported")
+	}
+	if manifest.Schema >= 2 && dataBeforeManifest {
+		return backupManifest{}, fmt.Errorf("restore archive manifest must precede data")
+	}
+	return manifest, nil
 }
 
-func extractRestoreArchive(path, destination string) error {
+func allowedArchiveMemberForManifest(name string, manifest backupManifest) bool {
+	if manifest.Schema == 1 {
+		return allowedArchiveMember(name)
+	}
+	if !safeArchiveMember(name) {
+		return false
+	}
+	for _, root := range manifest.Components {
+		if name == root || strings.HasPrefix(name, root+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func extractRestoreArchive(path, destination string, manifest backupManifest) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return err
@@ -653,12 +1121,21 @@ func extractRestoreArchive(path, destination string) error {
 		if name == "" || name == "manifest.json" {
 			continue
 		}
-		if !allowedArchiveMember(name) || (header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) || header.Size < 0 {
+		if !allowedArchiveMemberForManifest(name, manifest) || (header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeSymlink) || header.Size < 0 || (header.Typeflag == tar.TypeSymlink && !safeRelativeSymlink(name, header.Linkname)) {
 			return fmt.Errorf("restore archive contains an unsupported or unsafe member")
 		}
 		target := filepath.Join(destination, filepath.FromSlash(name))
 		if header.Typeflag == tar.TypeDir {
 			if err := os.MkdirAll(target, 0o700); err != nil {
+				return err
+			}
+			if err := os.Chmod(target, os.FileMode(header.Mode).Perm()); err != nil {
+				return err
+			}
+			continue
+		}
+		if header.Typeflag == tar.TypeSymlink {
+			if err := os.Symlink(header.Linkname, target); err != nil {
 				return err
 			}
 			continue
@@ -674,6 +1151,9 @@ func extractRestoreArchive(path, destination string) error {
 		closeErr := output.Close()
 		if copyErr != nil || closeErr != nil || written != header.Size {
 			return fmt.Errorf("restore extraction failed")
+		}
+		if err := os.Chmod(target, os.FileMode(header.Mode).Perm()); err != nil {
+			return err
 		}
 	}
 }

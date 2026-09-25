@@ -97,6 +97,13 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFromEnvRequiresRuntimeRoot(t *testing.T) {
+	_, err := LoadConfigFromEnv(map[string]string{"OPENLIA_REPO_ROOT": t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "OPENLIA_RUNTIME_ROOT is required") {
+		t.Fatalf("missing runtime root error = %v", err)
+	}
+}
+
 func TestLoadConfigFromEnvRejectsInvalidOutputLanguage(t *testing.T) {
 	_, err := LoadConfigFromEnv(map[string]string{
 		"OPENLIA_REPO_ROOT":       t.TempDir(),

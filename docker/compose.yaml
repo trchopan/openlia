@@ -25,18 +25,18 @@ services:
       - no-new-privileges:true
     volumes:
       - type: bind
-        source: "${OPENLIA_DATA_ROOT:-/srv/openlia/runtime/hermes}"
+        source: "${OPENLIA_DATA_ROOT:?OPENLIA_DATA_ROOT is required}"
         target: /opt/data
       - type: bind
-        source: "${OPENLIA_SYSTEM_SKILLS_ROOT:-/srv/openlia/runtime/system-skills}/openlia-skill-migration"
+        source: "${OPENLIA_SYSTEM_SKILLS_ROOT:?OPENLIA_SYSTEM_SKILLS_ROOT is required}/openlia-skill-migration"
         target: /opt/data/skills/openlia-skill-migration
         read_only: true
       - type: bind
-        source: "${OPENLIA_SKILLS_ENV_ROOT:-/srv/openlia/runtime/skill-envs}"
+        source: "${OPENLIA_SKILLS_ENV_ROOT:?OPENLIA_SKILLS_ENV_ROOT is required}"
         target: /opt/openlia/skill-envs
         read_only: true
       - type: bind
-        source: "${OPENLIA_SECRET_DIR:-/srv/openlia/runtime/secrets}"
+        source: "${OPENLIA_SECRET_DIR:?OPENLIA_SECRET_DIR is required}"
         target: /run/openlia-secrets
         read_only: true
     # bootstrap creates /opt/data/config.yaml with Hermes secrets.command
@@ -84,14 +84,14 @@ services:
     cap_drop: [ALL]
     volumes:
       - type: bind
-        source: "${OPENLIA_SKILLS_CACHE_ROOT:-/srv/openlia/runtime/skill-cache}"
+        source: "${OPENLIA_SKILLS_CACHE_ROOT:?OPENLIA_SKILLS_CACHE_ROOT is required}"
         target: /opt/openlia/skill-cache
         read_only: true
       - type: bind
-        source: "${OPENLIA_SKILLS_ENV_ROOT:-/srv/openlia/runtime/skill-envs}"
+        source: "${OPENLIA_SKILLS_ENV_ROOT:?OPENLIA_SKILLS_ENV_ROOT is required}"
         target: /opt/openlia/skill-envs
       - type: bind
-        source: "${OPENLIA_DATA_ROOT:-/srv/openlia/runtime/hermes}/.openlia/proposals"
+        source: "${OPENLIA_DATA_ROOT:?OPENLIA_DATA_ROOT is required}/.openlia/proposals"
         target: /opt/openlia/migration-source
         read_only: true
     environment:
@@ -118,11 +118,11 @@ services:
     cap_drop: [ALL]
     volumes:
       - type: bind
-        source: "${OPENLIA_SKILLS_CACHE_ROOT:-/srv/openlia/runtime/skill-cache}"
+        source: "${OPENLIA_SKILLS_CACHE_ROOT:?OPENLIA_SKILLS_CACHE_ROOT is required}"
         target: /opt/openlia/skill-cache
         read_only: true
       - type: bind
-        source: "${OPENLIA_SKILLS_ENV_ROOT:-/srv/openlia/runtime/skill-envs}"
+        source: "${OPENLIA_SKILLS_ENV_ROOT:?OPENLIA_SKILLS_ENV_ROOT is required}"
         target: /opt/openlia/skill-envs
         read_only: true
     environment:
@@ -132,5 +132,5 @@ services:
 
 networks:
   openlia-private:
-    name: "${OPENLIA_NETWORK_NAME:-openlia-private}"
+    name: "${OPENLIA_NETWORK_NAME:?OPENLIA_NETWORK_NAME is required}"
     driver: bridge

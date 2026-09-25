@@ -508,7 +508,13 @@ func MutateInstruction(config Config, name, action string, request InstructionMu
 	default:
 		return InstructionMutationResult{}, fmt.Errorf("unsupported instruction action %q", action)
 	}
-	backup, err := CreateBackup(config, "instructions-"+action, now)
+	targetRelative, targetErr := filepath.Rel(config.RuntimeRoot, spec.Target)
+	metadataRelative, metadataErr := filepath.Rel(config.RuntimeRoot, metadataPath)
+	baselineRelative, baselineErr := filepath.Rel(config.RuntimeRoot, baselinePath)
+	if targetErr != nil || metadataErr != nil || baselineErr != nil {
+		return InstructionMutationResult{}, fmt.Errorf("instruction paths are outside the runtime")
+	}
+	backup, err := CreateRollback(config, "instructions-"+action, now, filepath.ToSlash(targetRelative), filepath.ToSlash(metadataRelative), filepath.ToSlash(baselineRelative))
 	if err != nil {
 		return InstructionMutationResult{}, err
 	}

@@ -59,7 +59,7 @@ func RotateAuth(config Config, source string, now time.Time, composers ...Compos
 	if err := EnsureDir(config.SecretDir, 0o700); err != nil {
 		return err
 	}
-	if _, err := CreateBackup(config, "auth-rotate", now); err != nil {
+	if _, err := CreateRollback(config, "auth-rotate", now, runtimeRelativePath(config, config.SecretFile)); err != nil {
 		return err
 	}
 	secretBackup := ""
@@ -94,7 +94,7 @@ func rotateAuthWithCompose(ctx context.Context, config Config, compose Compose, 
 	if err := EnsureDir(config.SecretDir, 0o700); err != nil {
 		return err
 	}
-	if _, err := CreateBackup(config, "auth-rotate", now, compose); err != nil {
+	if _, err := CreateRollback(config, "auth-rotate", now, runtimeRelativePath(config, config.SecretFile)); err != nil {
 		return err
 	}
 	secretBackup := ""

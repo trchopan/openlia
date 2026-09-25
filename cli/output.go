@@ -96,7 +96,7 @@ Usage:
   openlia attachments list
   openlia attachments map <host> <service> --role <role>
   openlia attachments rotate <host> --source PATH
-  openlia backup create|restore
+  openlia backup create|restore|rollback-restore
   openlia workspace git setup|status
   openlia workspace migrate [<path>|upload <path>|status [id]|merge [id]|list] [--dry-run]
   openlia instructions status [NAME]

@@ -36,6 +36,16 @@ func TestFilesystemOperatorWorkflow(t *testing.T) {
 	if err := GenerateAttachments(config); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := NewProfileOperator(config).Sync(); err != nil {
+		t.Fatal(err)
+	}
+	scriptInfo, err := os.Stat(filepath.Join(config.DataRoot, "scripts", "openlia-workspace-git-sync.sh"))
+	if err != nil {
+		t.Fatalf("workspace Git sync script was not installed: %v", err)
+	}
+	if scriptInfo.Mode().Perm() != 0o755 {
+		t.Fatalf("workspace Git sync script mode = %v, want 0755", scriptInfo.Mode().Perm())
+	}
 	if _, err := os.Stat(filepath.Join(config.DataRoot, "workspace", "inbox")); err != nil {
 		t.Fatalf("workspace template was not initialized: %v", err)
 	}

@@ -226,5 +226,11 @@ distributions embedded by the Go CLI. The broader local checks then remain:
 go test ./...
 go vet ./...
 python3 -m py_compile tests/smoke.py
-docker compose -f docker/compose.yaml config --quiet
+make compose-config
 ```
+
+`make compose-config` validates the guarded base Compose file. The default
+`backup create` archive is intentionally durable-state-only: it preserves the
+workspace, agent state, profile metadata, and customized skills while omitting
+Open WebUI, bundled image skills, caches, environments, secrets, and Locho
+capabilities.
