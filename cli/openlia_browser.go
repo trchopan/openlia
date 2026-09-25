@@ -49,7 +49,7 @@ var defaultOpenLIABrowserAllowlist = []string{
 
 func commandOpenLIABrowser(options Options, args []string, assets fs.FS) int {
 	if len(args) == 0 {
-		return fail(options, ExitUsage, "openlia-browser requires configure, install, start, stop, restart, status, logs, or uninstall", nil)
+		return fail(options, ExitUsage, "browser requires configure, install, start, stop, restart, status, logs, or uninstall", nil)
 	}
 	action := args[0]
 	args = args[1:]
@@ -61,7 +61,7 @@ func commandOpenLIABrowser(options Options, args []string, assets fs.FS) int {
 		return code
 	}
 	if !config.OpenLIABrowser.Configured {
-		return fail(options, ExitPrereq, "openlia-browser is not configured; run `openlia openlia-browser configure`", nil)
+		return fail(options, ExitPrereq, "browser is not configured; run `openlia browser configure`", nil)
 	}
 	target := openliaBrowserTarget{Mode: config.OpenLIABrowser.Mode, Target: config.OpenLIABrowser.Target, SSHPort: config.OpenLIABrowser.SSHPort, Root: config.OpenLIABrowser.Root, ExtensionTokenFile: config.OpenLIABrowser.ExtensionTokenFile}
 	if err := validateOpenLIABrowserTarget(target); err != nil {
@@ -81,22 +81,22 @@ func commandOpenLIABrowser(options Options, args []string, assets fs.FS) int {
 	case "uninstall":
 		return uninstallOpenLIABrowser(options, ctx, target)
 	default:
-		return fail(options, ExitUsage, fmt.Sprintf("unknown openlia-browser action %q", action), nil)
+		return fail(options, ExitUsage, fmt.Sprintf("unknown browser action %q", action), nil)
 	}
 }
 
 func configureOpenLIABrowser(options Options, args []string) int {
-	set := newFlagSet("openlia-browser configure")
+	set := newFlagSet("browser configure")
 	local := set.Bool("local", false, "manage openlia-browser on this machine")
 	target := set.String("target", "", "SSH destination such as user@host")
 	root := set.String("root", "", "openlia-browser installation root on the selected machine")
 	sshPort := set.Int("ssh-port", 22, "SSH port")
 	tokenFile := set.String("extension-token-file", "", "Playwright extension token file on the selected machine")
 	if err := set.Parse(args); err != nil || set.NArg() != 0 {
-		return fail(options, ExitUsage, "openlia-browser configure requires --local or --target and --root", nil)
+		return fail(options, ExitUsage, "browser configure requires --local or --target and --root", nil)
 	}
 	if (*local && *target != "") || (!*local && *target == "") {
-		return fail(options, ExitUsage, "openlia-browser configure requires exactly one of --local or --target", nil)
+		return fail(options, ExitUsage, "browser configure requires exactly one of --local or --target", nil)
 	}
 	config, err := loadConfigUnchecked()
 	if err != nil && !errors.Is(err, os.ErrNotExist) {

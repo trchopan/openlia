@@ -76,7 +76,7 @@ root = "<path_to_openlia_browser_root>"
 extension_token_file = "<path_to_extension_token_file>"
 ```
 
-Manage the selected browser host with `openlia openlia-browser configure`,
+Manage the selected browser host with `openlia browser configure`,
 `install`, `start`, `stop`, `restart`, `status`, `logs`, and `uninstall`.
 
 For a browser on the same machine:

@@ -99,8 +99,8 @@ Usage:
   openlia backup create|restore
   openlia workspace git setup|status
   openlia workspace-ui password
-  openlia openlia-browser configure --local|--target user@host --root PATH --extension-token-file PATH [--ssh-port PORT]
-  openlia openlia-browser install|start|stop|restart|status|logs|uninstall
+  openlia browser configure --local|--target user@host --root PATH --extension-token-file PATH [--ssh-port PORT]
+  openlia browser install|start|stop|restart|status|logs|uninstall
 
 Global flags: --json, --non-interactive, --version, --help
 

@@ -82,15 +82,15 @@ ownership for the shared authenticated profile.
 The supported OpenLia lifecycle is configuration-driven:
 
 ```sh
-openlia openlia-browser configure \
+openlia browser configure \
   --target "user@browser-host" \
   --ssh-port 22 \
   --root "<path_to_openlia_browser_root>" \
   --extension-token-file "<path_to_extension_token_file>"
 
-openlia openlia-browser install
-openlia openlia-browser start
-openlia openlia-browser status
+openlia browser install
+openlia browser start
+openlia browser status
 ```
 
 Use `--local` instead of `--target` when the browser host is the same machine.
