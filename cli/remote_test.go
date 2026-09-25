@@ -84,10 +84,10 @@ func TestSkillSourcesTransportAsJSON(t *testing.T) {
 	}
 }
 
-func TestNewSkillOperationsHaveNoLegacyFallback(t *testing.T) {
+func TestOperatorOnlyOperationsHaveNoLegacyFallback(t *testing.T) {
 	config := defaultConfig()
 	config.Target = "operator@example.test"
-	for _, operation := range []string{"skill-sources", "skills"} {
+	for _, operation := range []string{"skill-sources", "skills", "workspace-git"} {
 		command := (Remote{Config: config}).operationCommand(operation, "list", "--json")
 		if strings.Contains(command, "ops/skills") || !strings.Contains(command, "Go operator is required") {
 			t.Fatalf("%s operation has unsafe fallback: %s", operation, command)

@@ -399,6 +399,13 @@ func TestWorkspaceGitAcceptsConfiguredRemote(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGitAcceptsLocalHistoryWithoutRemote(t *testing.T) {
+	config := defaultConfig()
+	if err := validateConfig(config); err != nil {
+		t.Fatalf("local workspace Git config was rejected: %v", err)
+	}
+}
+
 func TestProtectedSourcePathRequiresMode600(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hermes.env")
 	if err := os.WriteFile(path, []byte("OPENAI_API_KEY=test\n"), 0o600); err != nil {

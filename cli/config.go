@@ -702,17 +702,16 @@ func validateWorkspaceGit(gitConfig WorkspaceGitConfig) error {
 	if gitConfig.Provider != "github" {
 		return errors.New("workspace Git provider must be github")
 	}
-	if gitConfig.Remote == "" {
-		if gitConfig.Enabled {
-			return errors.New("workspace Git remote is required when workspace Git is enabled")
-		}
-		return nil
+	if gitConfig.Enabled && gitConfig.Remote == "" {
+		return errors.New("workspace Git remote is required when remote synchronization is enabled")
 	}
-	if !gitConfig.Enabled {
+	if gitConfig.Remote != "" && !gitConfig.Enabled {
 		return errors.New("workspace Git must be enabled when a remote is configured")
 	}
-	if err := validateGitHubRemote(gitConfig.Remote); err != nil {
-		return err
+	if gitConfig.Remote != "" {
+		if err := validateGitHubRemote(gitConfig.Remote); err != nil {
+			return err
+		}
 	}
 	if !safeGitBranch(gitConfig.Branch) {
 		return errors.New("workspace Git branch is invalid")

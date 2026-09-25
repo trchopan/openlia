@@ -8,6 +8,25 @@ import (
 	"testing/fstest"
 )
 
+func TestDeploymentResultRunningGate(t *testing.T) {
+	if !deploymentResultIsRunning([]byte(`{"state":"running"}`)) {
+		t.Fatal("running deployment did not enable workspace Git reconciliation")
+	}
+	for _, raw := range [][]byte{[]byte(`{"state":"stopped"}`), []byte(`{"state":"never-started"}`), []byte(`not-json`)} {
+		if deploymentResultIsRunning(raw) {
+			t.Fatalf("non-running deployment enabled workspace Git reconciliation: %s", raw)
+		}
+	}
+}
+
+func TestDeploymentResultStateRejectsMissingOrInvalidState(t *testing.T) {
+	for _, raw := range [][]byte{[]byte(`{}`), []byte(`not-json`)} {
+		if state, ok := deploymentResultState(raw); ok || state != "" {
+			t.Fatalf("deployment state %q, %t for %s", state, ok, raw)
+		}
+	}
+}
+
 func TestSkillSourceAddAndRemoveDispatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	t.Setenv("OPENLIA_CONFIG", path)

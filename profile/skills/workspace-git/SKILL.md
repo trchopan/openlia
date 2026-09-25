@@ -1,12 +1,9 @@
 ---
 name: workspace-git
-description: Safely synchronize the OpenLia workspace with its configured GitHub backup repository.
+description: Maintain local workspace history and optionally synchronize it with a configured GitHub backup repository.
 version: 0.1.0
 platforms: [linux]
-required_environment_variables:
-  - name: OPENLIA_GIT_TOKEN
-    prompt: A repository-scoped GitHub personal access token is required for GitHub API pull requests.
-    help: Configure OPENLIA_GIT_TOKEN in OpenLia's protected secret source; never paste it into workspace files or commands.
+required_environment_variables: []
 required_credential_files: []
 metadata:
   hermes:
@@ -16,10 +13,10 @@ metadata:
 
 # Workspace Git
 
-The OpenLia workspace is `/opt/data/workspace`. Its Git remote and automatic
-pull schedule are configured by `openlia init`. The automatic pull is a Hermes
-no-agent job; use this skill for requested status checks, routine manual pushes,
-and structural changes.
+The OpenLia workspace is `/opt/data/workspace`. OpenLia maintains it as a local
+Git repository even when no remote is configured. A GitHub remote and automatic
+pull schedule are optional. Use this skill for status checks, coherent local
+history commits, requested pushes, and structural changes.
 
 ## Safety Rules
 
@@ -50,10 +47,10 @@ git remote -v
 Report the branch, clean/dirty state, and any ahead/behind information without
 printing credentials.
 
-## Routine Manual Sync
+## Local History And Manual Sync
 
-Use this for an explicit user-requested backup when the automatic job is not
-appropriate:
+After an approved, coherent workspace update, use this flow to preserve local
+history. Pushing still requires an explicit user request:
 
 ```bash
 cd /opt/data/workspace
@@ -63,10 +60,16 @@ git add --all -- .
 ```
 
 If the index is unchanged, do not create an empty commit. Otherwise commit the
-agreed update with a concise `backup:` message, then synchronize safely:
+agreed update with a concise `backup:` message:
 
 ```bash
 git commit -m "backup: describe the workspace update"
+```
+
+If a remote is configured and the user explicitly requested a backup, then
+synchronize safely:
+
+```bash
 git pull --rebase origin main
 git push origin main
 ```
@@ -114,8 +117,9 @@ verified, stop and ask how to proceed.
 
 ## Automatic Pull
 
-OpenLia runs the bundled no-agent sync script on the configured schedule. It
-only fast-forwards a clean local branch from the remote. It never stages,
+When a remote is configured, OpenLia runs the bundled no-agent sync script on
+the configured schedule. It only fast-forwards a clean local branch from the
+remote. It never stages,
 commits, rebases, or pushes workspace changes. Dirty workspaces are skipped;
 divergent histories and changes to instruction/control files require manual
 review. Do not create a second workspace Git cron job.

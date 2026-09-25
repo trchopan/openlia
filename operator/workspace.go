@@ -47,11 +47,13 @@ func WorkspaceGit(ctx context.Context, compose Compose, options WorkspaceGitOpti
 		if options.AuthorEmail == "" {
 			options.AuthorEmail = "openlia@localhost"
 		}
-		if options.Remote == "" || options.Branch == "" {
-			return WorkspaceGitResult{}, fmt.Errorf("workspace Git setup requires remote and branch")
+		if options.Branch == "" {
+			return WorkspaceGitResult{}, fmt.Errorf("workspace Git setup requires a branch")
 		}
-		if err := validateGitHubRemote(options.Remote); err != nil {
-			return WorkspaceGitResult{}, err
+		if options.Remote != "" {
+			if err := validateGitHubRemote(options.Remote); err != nil {
+				return WorkspaceGitResult{}, err
+			}
 		}
 		if err := validateGitBranch(options.Branch); err != nil {
 			return WorkspaceGitResult{}, err
@@ -86,13 +88,12 @@ func WorkspaceGit(ctx context.Context, compose Compose, options WorkspaceGitOpti
 		return WorkspaceGitResult{OK: true, Workspace: workspacePath, Branch: strings.TrimSpace(string(branch.Stdout)), Remote: strings.TrimSpace(string(remote.Stdout)), Status: strings.TrimSpace(string(status.Stdout))}, nil
 	}
 
-	if _, err := runGit("rev-parse", "--git-dir"); options.Action == "setup" && err != nil {
+	initialized := false
+	if _, err := runGit("rev-parse", "--git-dir"); err != nil {
 		if _, err := runGit("init", "-b", options.Branch); err != nil {
 			return WorkspaceGitResult{}, fmt.Errorf("workspace Git initialization failed")
 		}
-	}
-	if _, err := runGit("rev-parse", "--git-dir"); err != nil {
-		return WorkspaceGitResult{}, fmt.Errorf("workspace is not a Git repository; run workspace Git setup first")
+		initialized = true
 	}
 
 	currentBranch := ""
@@ -103,18 +104,23 @@ func WorkspaceGit(ctx context.Context, compose Compose, options WorkspaceGitOpti
 	if result, err := runGit("rev-parse", "--verify", "HEAD"); err == nil {
 		headCommit = strings.TrimSpace(string(result.Stdout))
 	}
-	if options.Action == "ensure" {
+	if options.Action == "ensure" && !initialized && headCommit != "" {
 		if currentBranch != options.Branch {
 			return WorkspaceGitResult{}, fmt.Errorf("workspace Git is on branch %s, expected %s; refusing to switch it", currentBranch, options.Branch)
 		}
-		existingRemote := gitRemote(runGit)
-		if existingRemote != options.Remote {
-			return WorkspaceGitResult{}, fmt.Errorf("workspace Git origin differs from the configured remote")
+		if options.Remote != "" {
+			existingRemote := gitRemote(runGit)
+			if existingRemote != options.Remote {
+				return WorkspaceGitResult{}, fmt.Errorf("workspace Git origin differs from the configured remote")
+			}
+			if err := configureWorkspaceCron(runHermes, options.Schedule); err != nil {
+				return WorkspaceGitResult{}, err
+			}
 		}
-		if err := configureWorkspaceCron(runHermes, options.Schedule); err != nil {
+		if err := configureWorkspaceRemoteState(runGit, options.Remote != ""); err != nil {
 			return WorkspaceGitResult{}, err
 		}
-		return WorkspaceGitResult{OK: true, Action: options.Action, Remote: options.Remote, Branch: options.Branch, Schedule: options.Schedule, AutomaticPull: true}, nil
+		return WorkspaceGitResult{OK: true, Action: options.Action, Remote: options.Remote, Branch: options.Branch, Schedule: options.Schedule, AutomaticPull: options.Remote != ""}, nil
 	}
 
 	if headCommit == "" {
@@ -127,10 +133,10 @@ func WorkspaceGit(ctx context.Context, compose Compose, options WorkspaceGitOpti
 		return WorkspaceGitResult{}, fmt.Errorf("workspace Git is on branch %s, expected %s; refusing to switch it", currentBranch, options.Branch)
 	}
 	existingRemote := gitRemote(runGit)
-	if existingRemote != "" && existingRemote != options.Remote {
+	if options.Remote != "" && existingRemote != "" && existingRemote != options.Remote {
 		return WorkspaceGitResult{}, fmt.Errorf("workspace Git origin differs from the configured remote; refusing to replace it")
 	}
-	if existingRemote == "" {
+	if options.Remote != "" && existingRemote == "" {
 		if _, err := runGit("remote", "add", "origin", options.Remote); err != nil {
 			return WorkspaceGitResult{}, fmt.Errorf("workspace Git remote setup failed")
 		}
@@ -144,22 +150,36 @@ func WorkspaceGit(ctx context.Context, compose Compose, options WorkspaceGitOpti
 	if _, err := runGit("config", "--local", "openlia.workspace-branch", options.Branch); err != nil {
 		return WorkspaceGitResult{}, fmt.Errorf("workspace Git configuration failed")
 	}
+	if err := configureWorkspaceRemoteState(runGit, false); err != nil {
+		return WorkspaceGitResult{}, err
+	}
+
+	if headCommit == "" {
+		if _, err := runGit("add", "--all", "--", "."); err != nil {
+			return WorkspaceGitResult{}, fmt.Errorf("workspace Git staging failed")
+		}
+		if err := stagedPathsAreSafe(runGit); err != nil {
+			unstageProtectedWorkspacePaths(runGit, headCommit != "")
+			return WorkspaceGitResult{}, err
+		}
+		if _, err := runGit("commit", "--allow-empty", "-m", "chore: initialize OpenLia workspace"); err != nil {
+			return WorkspaceGitResult{}, fmt.Errorf("workspace Git initial commit failed")
+		}
+	} else if options.Action == "setup" && options.Remote != "" {
+		if _, err := runGit("add", "--all", "--", "."); err != nil {
+			return WorkspaceGitResult{}, fmt.Errorf("workspace Git staging failed")
+		}
+		if err := commitStagedChanges(runGit, "backup: synchronize workspace"); err != nil {
+			return WorkspaceGitResult{}, err
+		}
+	}
+
+	if options.Remote == "" {
+		return WorkspaceGitResult{OK: true, Action: options.Action, Workspace: workspacePath, Branch: options.Branch}, nil
+	}
 
 	remoteBranchExists, err := remoteBranchExists(runGit, options.Branch)
 	if err != nil {
-		return WorkspaceGitResult{}, err
-	}
-	if _, err := runGit("add", "--all", "--", "."); err != nil {
-		return WorkspaceGitResult{}, fmt.Errorf("workspace Git staging failed")
-	}
-	if err := stagedPathsAreSafe(runGit); err != nil {
-		return WorkspaceGitResult{}, err
-	}
-	if headCommit == "" {
-		if _, err := runGit("commit", "-m", "chore: initialize OpenLia workspace"); err != nil {
-			return WorkspaceGitResult{}, fmt.Errorf("workspace Git initial commit failed")
-		}
-	} else if err := commitStagedChanges(runGit, "backup: synchronize workspace"); err != nil {
 		return WorkspaceGitResult{}, err
 	}
 
@@ -194,6 +214,9 @@ func WorkspaceGit(ctx context.Context, compose Compose, options WorkspaceGitOpti
 		return WorkspaceGitResult{}, fmt.Errorf("workspace Git initial push failed")
 	}
 	if err := configureWorkspaceCron(runHermes, options.Schedule); err != nil {
+		return WorkspaceGitResult{}, err
+	}
+	if err := configureWorkspaceRemoteState(runGit, true); err != nil {
 		return WorkspaceGitResult{}, err
 	}
 	return WorkspaceGitResult{OK: true, Action: options.Action, Remote: options.Remote, Branch: options.Branch, Schedule: options.Schedule, AutomaticPull: true, InitialPush: true}, nil
@@ -281,12 +304,37 @@ func commitStagedChanges(runGit func(...string) (CommandResult, error), message 
 		return nil
 	}
 	if err := stagedPathsAreSafe(runGit); err != nil {
+		unstageProtectedWorkspacePaths(runGit, true)
 		return err
 	}
 	if _, err := runGit("commit", "-m", message); err != nil {
 		return fmt.Errorf("workspace Git commit failed")
 	}
 	return nil
+}
+
+func configureWorkspaceRemoteState(runGit func(...string) (CommandResult, error), enabled bool) error {
+	if _, err := runGit("config", "--local", "openlia.workspace-remote-enabled", fmt.Sprintf("%t", enabled)); err != nil {
+		return fmt.Errorf("workspace Git configuration failed")
+	}
+	return nil
+}
+
+func unstageProtectedWorkspacePaths(runGit func(...string) (CommandResult, error), hasHead bool) {
+	result, err := runGit("diff", "--cached", "--name-only")
+	if err != nil {
+		return
+	}
+	for _, path := range strings.Split(strings.TrimSpace(string(result.Stdout)), "\n") {
+		if path == "" || !protectedWorkspacePath(path) {
+			continue
+		}
+		if hasHead {
+			_, _ = runGit("reset", "HEAD", "--", path)
+		} else {
+			_, _ = runGit("rm", "--cached", "--ignore-unmatch", "--", path)
+		}
+	}
 }
 
 func stagedPathsAreSafe(runGit func(...string) (CommandResult, error)) error {

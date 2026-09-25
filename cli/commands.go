@@ -235,9 +235,6 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	if *workspaceGitAuthorEmail != "" {
 		config.WorkspaceGit.AuthorEmail = *workspaceGitAuthorEmail
 	}
-	if config.WorkspaceGit.Enabled {
-		config.EnabledSkills = setSkill(config.EnabledSkills, "workspace-git", true)
-	}
 	sourcePath := config.SecretSource
 	if sourcePath != "" {
 		if err := validateProtectedSourcePath(sourcePath, "secret source"); err != nil {
@@ -297,26 +294,25 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
 
-	if config.WorkspaceGit.Enabled {
-		if _, err := deployment.workspaceGit(ctx, "setup", config.WorkspaceGit); err != nil {
-			return fail(options, ExitFailure, "workspace Git setup failed: "+err.Error(), nil)
-		}
+	if _, err := deployment.workspaceGit(ctx, "setup", config.WorkspaceGit); err != nil {
+		return fail(options, ExitFailure, "workspace Git setup failed: "+err.Error(), nil)
 	}
 	if err := saveConfig(config); err != nil {
 		return fail(options, ExitInternal, "deployment succeeded but operator config could not be saved: "+err.Error(), nil)
 	}
 	return writeResult(options, map[string]any{
-		"schema":         1,
-		"ok":             true,
-		"action":         "init",
-		"mode":           config.Mode,
-		"target":         config.Target,
-		"root":           config.InstallRoot,
-		"release":        config.Version,
-		"release_sha256": digest,
-		"workspace":      "initialized_only_when_empty",
-		"workspace_git":  config.WorkspaceGit.Enabled,
-	}, fmt.Sprintf("openlia init: deployed %s in %s mode at %s; workspace preserved when non-empty; workspace_git=%t", config.Version, config.Mode, config.InstallRoot, config.WorkspaceGit.Enabled))
+		"schema":               1,
+		"ok":                   true,
+		"action":               "init",
+		"mode":                 config.Mode,
+		"target":               config.Target,
+		"root":                 config.InstallRoot,
+		"release":              config.Version,
+		"release_sha256":       digest,
+		"workspace":            "initialized_only_when_empty",
+		"workspace_git":        true,
+		"workspace_git_remote": config.WorkspaceGit.Enabled,
+	}, fmt.Sprintf("openlia init: deployed %s in %s mode at %s; workspace preserved when non-empty; local Git history enabled; remote backup=%t", config.Version, config.Mode, config.InstallRoot, config.WorkspaceGit.Enabled))
 }
 
 func commandHealth(options Options, args []string, strict bool) int {
@@ -424,15 +420,32 @@ func commandLifecycle(options Options, action string, args []string) int {
 	if err != nil {
 		return fail(options, ExitFailure, err.Error(), map[string]any{"action": action})
 	}
-	if action == "deploy" && config.WorkspaceGit.Enabled {
+	if action == "deploy" {
 		if _, err := deployment.operation(ctx, "profile", nil, "sync", "--json"); err != nil {
 			return fail(options, ExitFailure, "workspace Git profile synchronization failed: "+err.Error(), map[string]any{"action": action})
 		}
+	}
+	if (action == "deploy" || start) && deploymentResultIsRunning(raw) {
 		if _, err := deployment.workspaceGit(ctx, "ensure", config.WorkspaceGit); err != nil {
 			return fail(options, ExitFailure, "workspace Git reconciliation failed: "+err.Error(), map[string]any{"action": action})
 		}
 	}
 	return renderRemote(options, raw, "openlia "+action+": "+redact(string(raw)))
+}
+
+func deploymentResultIsRunning(raw []byte) bool {
+	state, ok := deploymentResultState(raw)
+	return ok && state == "running"
+}
+
+func deploymentResultState(raw []byte) (string, bool) {
+	var result struct {
+		State string `json:"state"`
+	}
+	if json.Unmarshal(raw, &result) != nil || result.State == "" {
+		return "", false
+	}
+	return result.State, true
 }
 
 func commandUninstall(options Options, args []string) int {
@@ -562,6 +575,19 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 			raw, err = deployment.deploy(ctx, "deploy", false, "all")
 			if err != nil {
 				return fail(options, ExitFailure, "optional runtime reconciliation failed: "+err.Error(), nil)
+			}
+		}
+		healthRaw, healthErr := deployment.health(ctx, true, false)
+		state, stateOK := deploymentResultState(healthRaw)
+		if !stateOK {
+			if healthErr != nil {
+				return fail(options, ExitFailure, "workspace Git reconciliation preflight failed: "+healthErr.Error(), nil)
+			}
+			return fail(options, ExitFailure, "workspace Git reconciliation preflight returned an invalid state", nil)
+		}
+		if state == "running" {
+			if _, err := deployment.workspaceGit(ctx, "ensure", config.WorkspaceGit); err != nil {
+				return fail(options, ExitFailure, "workspace Git reconciliation failed: "+err.Error(), nil)
 			}
 		}
 		return renderRemote(options, raw, "openlia update openlia: profile assets synchronized")
@@ -1377,8 +1403,8 @@ func commandWorkspaceGit(options Options, args []string) int {
 	deployment := newDeployment(config)
 	switch action {
 	case "status":
-		if len(args) != 0 || !config.WorkspaceGit.Enabled {
-			return fail(options, ExitUsage, "workspace Git is not configured", nil)
+		if len(args) != 0 {
+			return fail(options, ExitUsage, "workspace git status does not accept options", nil)
 		}
 		raw, err := deployment.workspaceGit(ctx, "status", config.WorkspaceGit)
 		if err != nil {
@@ -1402,12 +1428,6 @@ func commandWorkspaceGit(options Options, args []string) int {
 		}
 		if *authorEmail != "" {
 			config.WorkspaceGit.AuthorEmail = *authorEmail
-		}
-		if config.WorkspaceGit.Enabled {
-			config.EnabledSkills = setSkill(config.EnabledSkills, "workspace-git", true)
-		}
-		if !config.WorkspaceGit.Enabled {
-			return fail(options, ExitUsage, "workspace git setup requires --remote or an existing workspace_git.remote setting", nil)
 		}
 		if err := validateConfig(config); err != nil {
 			return fail(options, ExitUsage, err.Error(), nil)
