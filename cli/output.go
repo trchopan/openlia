@@ -98,6 +98,7 @@ Usage:
   openlia attachments rotate <host> --source PATH
   openlia backup create|restore
   openlia workspace git setup|status
+  openlia workspace migrate [<path>|upload <path>|status [id]|merge [id]|list] [--auto-approve] [--dry-run]
   openlia workspace-ui password
   openlia browser configure --local|--target user@host --root PATH --extension-token-file PATH [--ssh-port PORT]
   openlia browser install|start|stop|restart|status|logs|uninstall

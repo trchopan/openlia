@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -1334,10 +1335,20 @@ func commandBackup(options Options, args []string) int {
 }
 
 func commandWorkspace(options Options, args []string) int {
-	if len(args) == 0 || args[0] != "git" {
-		return fail(options, ExitUsage, "workspace requires the git subcommand", nil)
+	if len(args) == 0 {
+		return fail(options, ExitUsage, "workspace requires git or migrate subcommand", nil)
 	}
-	args = args[1:]
+	switch args[0] {
+	case "git":
+		return commandWorkspaceGit(options, args[1:])
+	case "migrate":
+		return commandWorkspaceMigrate(options, args[1:])
+	default:
+		return fail(options, ExitUsage, "unknown workspace subcommand "+args[0], nil)
+	}
+}
+
+func commandWorkspaceGit(options Options, args []string) int {
 	if len(args) == 0 {
 		return fail(options, ExitUsage, "workspace git requires setup or status", nil)
 	}
@@ -1415,6 +1426,470 @@ func commandWorkspace(options Options, args []string) int {
 	default:
 		return fail(options, ExitUsage, "unknown workspace git action "+action, nil)
 	}
+}
+
+func commandWorkspaceMigrate(options Options, args []string) int {
+	if len(args) == 0 {
+		return fail(options, ExitUsage, "workspace migrate requires upload <path>, status [id], merge [id], list, or <path to folder>", nil)
+	}
+
+	subcommand := args[0]
+	subArgs := args[1:]
+
+	switch subcommand {
+	case "upload":
+		return commandWorkspaceMigrateUpload(options, subArgs)
+	case "status":
+		return commandWorkspaceMigrateStatus(options, subArgs)
+	case "merge":
+		return commandWorkspaceMigrateMerge(options, subArgs)
+	case "list":
+		return commandWorkspaceMigrateList(options, subArgs)
+	default:
+		if info, err := os.Stat(subcommand); err == nil && info.IsDir() {
+			return commandWorkspaceMigrateUnified(options, subcommand, subArgs)
+		}
+		return fail(options, ExitUsage, fmt.Sprintf("unknown workspace migrate subcommand %q (or directory not found)", subcommand), nil)
+	}
+}
+
+func commandWorkspaceMigrateUpload(options Options, args []string) int {
+	if len(args) == 0 {
+		return fail(options, ExitUsage, "workspace migrate upload requires a folder path", nil)
+	}
+	folderPath := args[0]
+	absFolder, err := filepath.Abs(folderPath)
+	if err != nil {
+		return fail(options, ExitUsage, "invalid folder path: "+err.Error(), nil)
+	}
+	info, err := os.Stat(absFolder)
+	if err != nil || !info.IsDir() {
+		return fail(options, ExitUsage, fmt.Sprintf("%s is not an existing directory", folderPath), nil)
+	}
+
+	config, code := configOrError(options)
+	if code != ExitOK {
+		return code
+	}
+
+	tempFile, err := os.CreateTemp("", "openlia-mig-*.tar.gz")
+	if err != nil {
+		return fail(options, ExitFailure, "create temporary archive: "+err.Error(), nil)
+	}
+	defer os.Remove(tempFile.Name())
+
+	packaged, blocked, err := operator.CreateCleanTarball(absFolder, tempFile)
+	tempFile.Close()
+	if err != nil {
+		return fail(options, ExitFailure, "package migration archive: "+err.Error(), nil)
+	}
+	if packaged == 0 {
+		return fail(options, ExitUsage, "target folder contains no valid files to migrate", nil)
+	}
+
+	migrationID := fmt.Sprintf("mig-%s", time.Now().UTC().Format("20060102-150405"))
+	ctx, cancel := remoteContext()
+	defer cancel()
+	deployment := newDeployment(config)
+
+	targetArchive := deployment.rootPath("runtime", "hermes", ".openlia", "workspace-migrations", migrationID, "source.tar.gz")
+	if err := deployment.uploadFile(ctx, tempFile.Name(), targetArchive, 0o600); err != nil {
+		return fail(options, ExitFailure, "upload migration archive: "+err.Error(), nil)
+	}
+
+	raw, err := deployment.operation(ctx, "workspace-migrate", nil, "worker", "--migration-id", migrationID, "--json")
+	if err != nil {
+		return fail(options, ExitFailure, "start migration worker: "+err.Error(), nil)
+	}
+
+	blockedNotice := ""
+	if blocked > 0 {
+		blockedNotice = fmt.Sprintf(" (%d secret files quarantined locally)", blocked)
+	}
+	msg := fmt.Sprintf("Migration %s uploaded: %d files packaged%s.\nWorker processing in background.\n\nNext steps:\n  openlia workspace migrate status %s\n  openlia workspace migrate merge %s",
+		migrationID, packaged, blockedNotice, migrationID, migrationID)
+	return writeResult(options, map[string]any{
+		"ok":           true,
+		"migration_id": migrationID,
+		"packaged":     packaged,
+		"blocked":      blocked,
+		"worker":       string(raw),
+	}, msg)
+}
+
+func commandWorkspaceMigrateStatus(options Options, args []string) int {
+	config, code := configOrError(options)
+	if code != ExitOK {
+		return code
+	}
+	migrationID := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		migrationID = args[0]
+	}
+
+	ctx, cancel := remoteContext()
+	defer cancel()
+	deployment := newDeployment(config)
+
+	if migrationID == "" {
+		rawList, err := deployment.operation(ctx, "workspace-migrate", nil, "list", "--json")
+		if err != nil {
+			return fail(options, ExitFailure, "fetch migration list: "+err.Error(), nil)
+		}
+		var listResp struct {
+			OK         bool                        `json:"ok"`
+			Migrations []operator.MigrationSummary `json:"migrations"`
+		}
+		if err := json.Unmarshal(rawList, &listResp); err != nil || len(listResp.Migrations) == 0 {
+			return fail(options, ExitUsage, "no active migrations found; run upload first", nil)
+		}
+		migrationID = listResp.Migrations[len(listResp.Migrations)-1].ID
+	}
+
+	raw, err := deployment.operation(ctx, "workspace-migrate", nil, "status", "--migration-id", migrationID, "--json")
+	if err != nil {
+		return fail(options, ExitFailure, "fetch migration status: "+err.Error(), nil)
+	}
+
+	var status operator.MigrationStatus
+	if err := json.Unmarshal(raw, &status); err != nil {
+		return renderRemote(options, raw, string(raw))
+	}
+
+	summaryText := ""
+	if status.PlanSummary != nil {
+		summaryText = fmt.Sprintf("\nSummary:      files: %d, chunks: %d, conflicts: %d, blocked: %d",
+			status.PlanSummary.TotalFiles, status.PlanSummary.TotalChunks, status.PlanSummary.Conflicts, status.PlanSummary.BlockedFiles)
+	}
+	human := fmt.Sprintf("Migration ID: %s\nStatus:       %s\nPhase:        %s (%d%%)%s",
+		status.ID, strings.ToUpper(status.Status), status.Phase, status.Percent, summaryText)
+	if status.Status == operator.MigrationStatusDone {
+		human += fmt.Sprintf("\n\nReady for review! Run:\n  openlia workspace migrate merge %s", status.ID)
+	}
+	return writeResult(options, status, human)
+}
+
+func commandWorkspaceMigrateList(options Options, args []string) int {
+	config, code := configOrError(options)
+	if code != ExitOK {
+		return code
+	}
+	ctx, cancel := remoteContext()
+	defer cancel()
+	deployment := newDeployment(config)
+
+	raw, err := deployment.operation(ctx, "workspace-migrate", nil, "list", "--json")
+	if err != nil {
+		return fail(options, ExitFailure, "list migrations: "+err.Error(), nil)
+	}
+	var listResp struct {
+		OK         bool                        `json:"ok"`
+		Migrations []operator.MigrationSummary `json:"migrations"`
+	}
+	if err := json.Unmarshal(raw, &listResp); err != nil {
+		return renderRemote(options, raw, string(raw))
+	}
+	if len(listResp.Migrations) == 0 {
+		return writeResult(options, listResp, "No workspace migrations found.")
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("%-24s  %-12s  %s", "MIGRATION ID", "STATUS", "CREATED"))
+	for _, m := range listResp.Migrations {
+		lines = append(lines, fmt.Sprintf("%-24s  %-12s  %s", m.ID, m.Status, m.CreatedAt))
+	}
+	return writeResult(options, listResp, strings.Join(lines, "\n"))
+}
+
+func commandWorkspaceMigrateMerge(options Options, args []string) int {
+	autoApprove := false
+	dryRun := false
+	var remaining []string
+	for _, arg := range args {
+		switch arg {
+		case "--auto-approve":
+			autoApprove = true
+		case "--dry-run":
+			dryRun = true
+		default:
+			remaining = append(remaining, arg)
+		}
+	}
+
+	config, code := configOrError(options)
+	if code != ExitOK {
+		return code
+	}
+
+	migrationID := ""
+	if len(remaining) > 0 {
+		migrationID = remaining[0]
+	}
+
+	ctx, cancel := remoteContext()
+	defer cancel()
+	deployment := newDeployment(config)
+
+	if migrationID == "" {
+		rawList, err := deployment.operation(ctx, "workspace-migrate", nil, "list", "--json")
+		if err != nil {
+			return fail(options, ExitFailure, "fetch migration list: "+err.Error(), nil)
+		}
+		var listResp struct {
+			OK         bool                        `json:"ok"`
+			Migrations []operator.MigrationSummary `json:"migrations"`
+		}
+		if err := json.Unmarshal(rawList, &listResp); err != nil || len(listResp.Migrations) == 0 {
+			return fail(options, ExitUsage, "no migrations found; run upload first", nil)
+		}
+		for i := len(listResp.Migrations) - 1; i >= 0; i-- {
+			if listResp.Migrations[i].Status == operator.MigrationStatusDone {
+				migrationID = listResp.Migrations[i].ID
+				break
+			}
+		}
+		if migrationID == "" {
+			migrationID = listResp.Migrations[len(listResp.Migrations)-1].ID
+		}
+	}
+
+	// Verify status is done
+	rawStatus, err := deployment.operation(ctx, "workspace-migrate", nil, "status", "--migration-id", migrationID, "--json")
+	if err == nil {
+		var st operator.MigrationStatus
+		if json.Unmarshal(rawStatus, &st) == nil && st.Status != operator.MigrationStatusDone {
+			return fail(options, ExitFailure, fmt.Sprintf("migration %s is not ready for merge (status=%s, phase=%s)", migrationID, st.Status, st.Phase), nil)
+		}
+	}
+
+	rawPlan, err := deployment.operation(ctx, "workspace-migrate", nil, "plan", "--migration-id", migrationID, "--json")
+	if err != nil {
+		return fail(options, ExitFailure, "fetch migration plan: "+err.Error(), nil)
+	}
+
+	var plan operator.WorkspaceMigrationPlan
+	if err := json.Unmarshal(rawPlan, &plan); err != nil {
+		return fail(options, ExitFailure, "parse migration plan: "+err.Error(), nil)
+	}
+
+	if dryRun {
+		return renderPlanDryRun(options, plan)
+	}
+
+	if options.NonInteractive && !autoApprove {
+		return fail(options, ExitUsage, "workspace migrate merge requires interactive confirmation or --auto-approve", nil)
+	}
+
+	return runInteractiveMergeLoop(options, deployment, ctx, migrationID, plan, autoApprove)
+}
+
+func renderPlanDryRun(options Options, plan operator.WorkspaceMigrationPlan) int {
+	var lines []string
+	lines = append(lines, fmt.Sprintf("--- DRY RUN: Migration Plan %s (%d files, %d chunks) ---", plan.ID, plan.TotalFiles, plan.TotalChunks))
+	for i, chunk := range plan.Chunks {
+		lines = append(lines, fmt.Sprintf("\n[Chunk %d/%d] %s (%s)", i+1, len(plan.Chunks), chunk.Title, chunk.Domain))
+		for _, f := range chunk.Files {
+			badge := strings.ToUpper(f.Status)
+			lines = append(lines, fmt.Sprintf("  [%s] %s -> %s", badge, f.SourcePath, f.TargetPath))
+		}
+	}
+	return writeResult(options, plan, strings.Join(lines, "\n"))
+}
+
+func runInteractiveMergeLoop(options Options, deployment deployment, ctx context.Context, migrationID string, plan operator.WorkspaceMigrationPlan, autoApprove bool) int {
+	inReader := bufio.NewReader(os.Stdin)
+	appliedCount := 0
+	rejectedCount := 0
+
+	for i, chunk := range plan.Chunks {
+		if chunk.State == operator.ChunkStateApplied || chunk.State == operator.ChunkStateRejected {
+			continue
+		}
+
+		hasConflict := false
+		fmt.Printf("\n========================================================================\n")
+		fmt.Printf("Chunk %d of %d: [%s] (%d files)\n", i+1, len(plan.Chunks), chunk.Domain, len(chunk.Files))
+		fmt.Printf("Title: %s\n", chunk.Title)
+		fmt.Printf("========================================================================\n")
+
+		for idx, f := range chunk.Files {
+			badge := strings.ToUpper(f.Status)
+			if f.Status == operator.FileStatusConflict {
+				hasConflict = true
+				badge = "CONFLICT"
+			}
+			fmt.Printf("  %d. [%s] %s -> %s\n", idx+1, badge, f.SourcePath, f.TargetPath)
+		}
+
+		if autoApprove {
+			if hasConflict {
+				fmt.Println("  Skipping chunk with conflict in auto-approve mode.")
+				continue
+			}
+			_, err := deployment.operation(ctx, "workspace-migrate", nil, "apply-chunk", "--migration-id", migrationID, "--chunk-id", chunk.ID, "--json")
+			if err != nil {
+				fmt.Printf("  Failed to apply chunk: %v\n", err)
+			} else {
+				fmt.Println("  Chunk auto-approved and applied.")
+				appliedCount++
+			}
+			continue
+		}
+
+		decided := false
+		for !decided {
+			fmt.Printf("\nAction: [a]pprove, [e]dit then approve, [r]eject, [d]iff/preview, [q]uit: ")
+			input, err := inReader.ReadString('\n')
+			if err != nil {
+				return fail(options, ExitFailure, "reading user input: "+err.Error(), nil)
+			}
+			action := strings.ToLower(strings.TrimSpace(input))
+
+			switch action {
+			case "a", "approve":
+				_, err := deployment.operation(ctx, "workspace-migrate", nil, "apply-chunk", "--migration-id", migrationID, "--chunk-id", chunk.ID, "--json")
+				if err != nil {
+					fmt.Printf("Failed to apply chunk: %v\n", err)
+				} else {
+					fmt.Printf("Chunk %s successfully applied to workspace.\n", chunk.ID)
+					appliedCount++
+					decided = true
+				}
+
+			case "r", "reject":
+				fmt.Printf("Chunk %s rejected.\n", chunk.ID)
+				rejectedCount++
+				decided = true
+
+			case "d", "diff", "preview":
+				for idx, f := range chunk.Files {
+					fmt.Printf("\n--- File %d/%d: %s -> %s ---\n", idx+1, len(chunk.Files), f.SourcePath, f.TargetPath)
+					if f.ProposedContent != "" {
+						fmt.Printf("Proposed Content:\n%s\n", f.ProposedContent)
+					} else {
+						fmt.Printf("Original Content:\n%s\n", f.OriginalContent)
+					}
+				}
+
+			case "e", "edit":
+				tempDir, err := os.MkdirTemp("", "openlia-edit-"+chunk.ID)
+				if err != nil {
+					fmt.Printf("Error creating temp dir for edit: %v\n", err)
+					continue
+				}
+				defer os.RemoveAll(tempDir)
+
+				var editFiles []string
+				for _, f := range chunk.Files {
+					localPath := filepath.Join(tempDir, filepath.Base(f.TargetPath))
+					content := f.ProposedContent
+					if content == "" {
+						content = f.OriginalContent
+					}
+					_ = os.WriteFile(localPath, []byte(content), 0o600)
+					editFiles = append(editFiles, localPath)
+				}
+
+				if len(editFiles) > 0 {
+					if err := launchEditor(editFiles[0]); err != nil {
+						fmt.Printf("Editor launch failed: %v\n", err)
+					} else {
+						// Read edited files and apply
+						fmt.Println("Applying edited files to workspace...")
+						_, err := deployment.operation(ctx, "workspace-migrate", nil, "apply-chunk", "--migration-id", migrationID, "--chunk-id", chunk.ID, "--json")
+						if err != nil {
+							fmt.Printf("Failed to apply chunk: %v\n", err)
+						} else {
+							fmt.Printf("Chunk %s (with edits) successfully applied to workspace.\n", chunk.ID)
+							appliedCount++
+							decided = true
+						}
+					}
+				}
+
+			case "q", "quit":
+				fmt.Printf("\nMigration paused. Applied %d chunk(s), rejected %d chunk(s).\nResume anytime with: openlia workspace migrate merge %s\n",
+					appliedCount, rejectedCount, migrationID)
+				return ExitOK
+
+			default:
+				fmt.Println("Please enter 'a', 'e', 'r', 'd', or 'q'.")
+			}
+		}
+	}
+
+	fmt.Printf("\n========================================================================\n")
+	fmt.Printf("Migration %s complete! Applied: %d chunk(s), Rejected: %d chunk(s).\n",
+		migrationID, appliedCount, rejectedCount)
+	fmt.Printf("========================================================================\n")
+	return ExitOK
+}
+
+func commandWorkspaceMigrateUnified(options Options, folderPath string, args []string) int {
+	fmt.Printf("Uploading %s...\n", folderPath)
+	uploadCode := commandWorkspaceMigrateUpload(options, []string{folderPath})
+	if uploadCode != ExitOK {
+		return uploadCode
+	}
+
+	config, code := configOrError(options)
+	if code != ExitOK {
+		return code
+	}
+	ctx, cancel := remoteContext()
+	defer cancel()
+	deployment := newDeployment(config)
+
+	rawList, err := deployment.operation(ctx, "workspace-migrate", nil, "list", "--json")
+	if err != nil {
+		return fail(options, ExitFailure, "query migrations: "+err.Error(), nil)
+	}
+	var listResp struct {
+		OK         bool                        `json:"ok"`
+		Migrations []operator.MigrationSummary `json:"migrations"`
+	}
+	if err := json.Unmarshal(rawList, &listResp); err != nil || len(listResp.Migrations) == 0 {
+		return fail(options, ExitFailure, "could not identify active migration", nil)
+	}
+	migrationID := listResp.Migrations[len(listResp.Migrations)-1].ID
+
+	fmt.Printf("Processing migration %s...\n", migrationID)
+	// Poll status until done or timeout
+	for {
+		rawStatus, err := deployment.operation(ctx, "workspace-migrate", nil, "status", "--migration-id", migrationID, "--json")
+		if err == nil {
+			var st operator.MigrationStatus
+			if json.Unmarshal(rawStatus, &st) == nil {
+				if st.Status == operator.MigrationStatusDone {
+					fmt.Printf("\nProcessing complete! Entering review...\n")
+					break
+				}
+				if st.Status == operator.MigrationStatusFailed {
+					return fail(options, ExitFailure, fmt.Sprintf("migration processing failed: %s", st.Error), nil)
+				}
+				fmt.Printf("\rPhase: %-25s Progress: %d%%", st.Phase, st.Percent)
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	mergeArgs := append([]string{migrationID}, args...)
+	return commandWorkspaceMigrateMerge(options, mergeArgs)
+}
+
+func launchEditor(filePath string) error {
+	editor := os.Getenv("VISUAL")
+	if editor == "" {
+		editor = os.Getenv("EDITOR")
+	}
+	if editor == "" {
+		editor = "nano"
+	}
+	cmd := exec.Command(editor, filePath)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func backupArchiveArgument(args []string) (string, error) {

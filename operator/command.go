@@ -101,6 +101,8 @@ func RunContext(ctx context.Context, args []string, input io.Reader, output, err
 		return runHealthcheck(ctx, config, args, output, errorOutput, jsonOutput)
 	case "workspace-git":
 		return runWorkspaceGit(ctx, config, args, output, errorOutput, jsonOutput)
+	case "workspace-migrate":
+		return runWorkspaceMigrate(ctx, config, args, output, errorOutput, jsonOutput)
 	case "uninstall":
 		if len(args) != 0 {
 			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("uninstall accepts no arguments"))
@@ -450,7 +452,67 @@ Usage:
 
 Subcommands:
 	  bootstrap profile skill-status skill-fork skill-migration skill-sources skills backup attachments auth deploy
-	  healthcheck workspace-git uninstall`)
+	  healthcheck workspace-git workspace-migrate uninstall`)
+}
+
+func runWorkspaceMigrate(ctx context.Context, config Config, args []string, output, errorOutput io.Writer, jsonOutput bool) int {
+	if len(args) == 0 {
+		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("workspace-migrate requires action: worker, status, plan, apply-chunk, or list"))
+	}
+	action := args[0]
+	args = args[1:]
+	migrationID, args, _ := stringFlag(args, "--migration-id")
+	chunkID, args, _ := stringFlag(args, "--chunk-id")
+
+	switch action {
+	case "worker":
+		if migrationID == "" {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("worker requires --migration-id"))
+		}
+		if err := RunMigrationWorker(ctx, config, migrationID); err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, map[string]any{"ok": true, "migration_id": migrationID, "status": "completed"}, jsonOutput, "openlia workspace-migrate: worker finished")
+
+	case "status":
+		if migrationID == "" {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("status requires --migration-id"))
+		}
+		status, err := GetMigrationStatus(config, migrationID)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, status, jsonOutput, fmt.Sprintf("openlia workspace-migrate: status=%s phase=%s", status.Status, status.Phase))
+
+	case "plan":
+		if migrationID == "" {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("plan requires --migration-id"))
+		}
+		plan, err := GetMigrationPlan(config, migrationID)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, plan, jsonOutput, fmt.Sprintf("openlia workspace-migrate: plan contains %d chunks, %d files", plan.TotalChunks, plan.TotalFiles))
+
+	case "apply-chunk":
+		if migrationID == "" || chunkID == "" {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("apply-chunk requires --migration-id and --chunk-id"))
+		}
+		if err := ApplyMigrationChunk(config, migrationID, chunkID, nil); err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, map[string]any{"ok": true, "migration_id": migrationID, "chunk_id": chunkID, "state": "applied"}, jsonOutput, fmt.Sprintf("openlia workspace-migrate: chunk %s applied", chunkID))
+
+	case "list":
+		items, err := ListMigrations(config)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, map[string]any{"ok": true, "migrations": items}, jsonOutput, fmt.Sprintf("openlia workspace-migrate: %d migration(s) found", len(items)))
+
+	default:
+		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("unknown workspace-migrate action %s", action))
+	}
 }
 
 func runSkillSources(ctx context.Context, config Config, args []string, output, errorOutput io.Writer, jsonOutput bool) int {

@@ -62,6 +62,7 @@ func TestOperatorArgumentsMapAllOperationScripts(t *testing.T) {
 		"ops/uninstall.sh",
 		"skill-sources",
 		"skills",
+		"workspace-migrate",
 	} {
 		if _, ok := operatorArguments(script, []string{"--json"}); !ok {
 			t.Fatalf("script %s was not mapped to the Go operator", script)
