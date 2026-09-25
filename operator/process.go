@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // CommandResult keeps stdout and stderr separate so JSON output can remain
@@ -22,11 +23,24 @@ type CommandRunner interface {
 	Run(context.Context, string, ...string) (CommandResult, error)
 }
 
+// EnvironmentCommandRunner lets the operator pass resolved non-secret
+// Compose paths even when it was launched outside the top-level CLI.
+type EnvironmentCommandRunner interface {
+	RunWithEnv(context.Context, []string, string, ...string) (CommandResult, error)
+}
+
 // ExecRunner runs a host process without invoking a shell.
 type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) (CommandResult, error) {
+	return ExecRunner{}.RunWithEnv(ctx, nil, name, args...)
+}
+
+func (ExecRunner) RunWithEnv(ctx context.Context, overrides []string, name string, args ...string) (CommandResult, error) {
 	command := exec.CommandContext(ctx, name, args...)
+	if len(overrides) > 0 {
+		command.Env = mergedEnvironment(overrides)
+	}
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
@@ -40,6 +54,36 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) (Command
 		result.ExitCode = exitError.ExitCode()
 	}
 	return result, fmt.Errorf("run %s: %w", name, err)
+}
+
+func mergedEnvironment(overrides []string) []string {
+	values := make(map[string]string)
+	order := make([]string, 0)
+	for _, item := range os.Environ() {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok {
+			continue
+		}
+		if _, exists := values[key]; !exists {
+			order = append(order, key)
+		}
+		values[key] = value
+	}
+	for _, item := range overrides {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok || key == "" {
+			continue
+		}
+		if _, exists := values[key]; !exists {
+			order = append(order, key)
+		}
+		values[key] = value
+	}
+	result := make([]string, 0, len(order))
+	for _, key := range order {
+		result = append(result, key+"="+values[key])
+	}
+	return result
 }
 
 type Compose struct {
@@ -68,7 +112,21 @@ func (c Compose) Run(ctx context.Context, args ...string) (CommandResult, error)
 	if c.Runner == nil {
 		c.Runner = ExecRunner{}
 	}
+	if runner, ok := c.Runner.(EnvironmentCommandRunner); ok {
+		return runner.RunWithEnv(ctx, c.composeEnvironment(), "docker", arguments...)
+	}
 	return c.Runner.Run(ctx, "docker", arguments...)
+}
+
+func (c Compose) composeEnvironment() []string {
+	return []string{
+		"OPENLIA_DATA_ROOT=" + c.Config.DataRoot,
+		"OPENLIA_SYSTEM_SKILLS_ROOT=" + c.Config.SystemSkillsRoot,
+		"OPENLIA_SKILLS_CACHE_ROOT=" + c.Config.SkillsCacheRoot,
+		"OPENLIA_SKILLS_ENV_ROOT=" + c.Config.SkillsEnvRoot,
+		"OPENLIA_SECRET_DIR=" + c.Config.SecretDir,
+		"OPENLIA_NETWORK_NAME=" + c.Config.NetworkName,
+	}
 }
 
 func (c Compose) Quiet(ctx context.Context, args ...string) error {
@@ -77,11 +135,19 @@ func (c Compose) Quiet(ctx context.Context, args ...string) error {
 }
 
 func (c Compose) ServiceRunning(ctx context.Context, service string) bool {
+	configured, err := c.Run(ctx, "config", "--services")
+	if err != nil || !containsService(configured.Stdout, service) {
+		return false
+	}
 	result, err := c.Run(ctx, "ps", "--services", "--filter", "status=running")
 	if err != nil {
 		return false
 	}
-	for _, line := range bytes.Split(result.Stdout, []byte{'\n'}) {
+	return containsService(result.Stdout, service)
+}
+
+func containsService(output []byte, service string) bool {
+	for _, line := range bytes.Split(output, []byte{'\n'}) {
 		if string(line) == service {
 			return true
 		}

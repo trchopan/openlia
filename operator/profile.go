@@ -190,7 +190,9 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 	if err := EnsureDir(filepath.Join(p.Config.DataRoot, "skills"), 0o700); err != nil {
 		return ProfileSyncResult{}, err
 	}
-	if err := EnsureDir(filepath.Join(p.Config.DataRoot, "scripts"), 0o700); err != nil {
+	// Hermes executes the managed sync script as UID 10000 inside the
+	// container, while the operator may run as root on remote hosts.
+	if err := EnsureDir(filepath.Join(p.Config.DataRoot, "scripts"), 0o755); err != nil {
 		return ProfileSyncResult{}, err
 	}
 	if err := EnsureDir(p.Config.SystemSkillsRoot, 0o700); err != nil {
@@ -209,7 +211,7 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 		mode   fs.FileMode
 	}{
 		{filepath.Join(p.Config.RepositoryRoot, "profile", "config.yaml"), filepath.Join(p.Config.DataRoot, "config.yaml"), filepath.Join(managedRoot, "config.yaml.sha256"), 0o600},
-		{filepath.Join(p.Config.RepositoryRoot, "profile", "cron", "scripts", "openlia-workspace-git-sync.sh"), filepath.Join(p.Config.DataRoot, "scripts", "openlia-workspace-git-sync.sh"), filepath.Join(managedRoot, "openlia-workspace-git-sync.sh.sha256"), 0o700},
+		{filepath.Join(p.Config.RepositoryRoot, "profile", "cron", "scripts", "openlia-workspace-git-sync.sh"), filepath.Join(p.Config.DataRoot, "scripts", "openlia-workspace-git-sync.sh"), filepath.Join(managedRoot, "openlia-workspace-git-sync.sh.sha256"), 0o755},
 	} {
 		var err error
 		if filepath.Base(item.dest) == "config.yaml" {
@@ -365,7 +367,17 @@ func (p *ProfileOperator) syncSoul(source, destination, marker string, mode fs.F
 	if err := AtomicWriteFile(destination, updated, mode); err != nil {
 		return err
 	}
-	return os.Chmod(destination, mode)
+	if err := os.Chmod(destination, mode); err != nil {
+		return err
+	}
+	return ensureHermesReadable(destination)
+}
+
+func ensureHermesReadable(path string) error {
+	if os.Geteuid() != 0 {
+		return nil
+	}
+	return os.Chown(path, 10000, 10000)
 }
 
 func hashSoulWithoutOutputLanguage(data []byte) string {

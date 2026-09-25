@@ -69,14 +69,6 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 		return DeployResult{OK: true, Action: "stop", State: stateStopped, Backup: ""}, nil
 	}
 	backup := ""
-	if options.Action == "deploy" || options.Action == "restart" {
-		if result, err := createBackup(ctx, config, options.Action, now, &compose); err == nil {
-			backup = result.Archive
-		} else {
-			_ = RecordChange(config, options.Action, "failed", "", "backup creation failed", now)
-			return DeployResult{}, err
-		}
-	}
 	if _, err := compose.Run(ctx, "config", "--quiet"); err != nil {
 		_ = RecordChange(config, options.Action, "failed", backup, "Compose configuration validation failed", now)
 		return DeployResult{}, fmt.Errorf("Compose configuration validation failed")
@@ -491,6 +483,29 @@ func Healthcheck(ctx context.Context, config Config, compose Compose, allowStopp
 			add("docker_socket", false, "mounted")
 		} else {
 			add("docker_socket", true, "absent")
+		}
+		for _, mount := range []struct {
+			name, destination, expected string
+		}{
+			{"data_mount", "/opt/data", config.DataRoot},
+			{"secret_mount", "/run/openlia-secrets", config.SecretDir},
+		} {
+			result, mountErr := compose.Docker(ctx, "inspect", id, "--format", fmt.Sprintf("{{range .Mounts}}{{if eq .Destination %q}}{{.Source}}{{end}}{{end}}", mount.destination))
+			if mountErr != nil {
+				add(mount.name, false, "inspect_failed")
+			} else if strings.TrimSpace(string(result.Stdout)) != mount.expected {
+				add(mount.name, false, "unexpected_source")
+			} else {
+				add(mount.name, true, "configured")
+			}
+		}
+		networks, networksErr := compose.Docker(ctx, "inspect", id, "--format", "{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}")
+		if networksErr != nil {
+			add("network", false, "inspect_failed")
+		} else if !strings.Contains(" "+string(networks.Stdout), " "+config.NetworkName+" ") {
+			add("network", false, "unexpected_network")
+		} else {
+			add("network", true, "configured")
 		}
 	} else if state == stateStopped && allowStopped {
 		add("container_privileged", true, "stopped")

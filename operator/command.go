@@ -173,19 +173,24 @@ func runBackup(ctx context.Context, config Config, args []string, _ io.Reader, o
 		result := map[string]any{"ok": true, "action": "prune", "kept": keep, "removed": removed}
 		return emit(output, result, jsonOutput, fmt.Sprintf("openlia backup: pruned %d archives, keeping %d", len(removed), keep))
 	}
-	if action != "restore" {
-		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup requires create, restore, or prune"))
+	if action != "restore" && action != "rollback-restore" {
+		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup requires create, restore, rollback-restore, or prune"))
 	}
 	archive, remaining, err := stringFlag(args, "--archive")
 	if err != nil || len(remaining) != 0 {
 		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup restore accepts --archive PATH"))
 	}
 	compose := NewCompose(config, nil)
-	result, err := restoreBackup(ctx, config, archive, now, &compose)
+	var result BackupResult
+	if action == "rollback-restore" {
+		result, err = RestoreRollback(config, archive, now, compose)
+	} else {
+		result, err = restoreBackup(ctx, config, archive, now, &compose)
+	}
 	if err != nil {
 		return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 	}
-	return emit(output, result, jsonOutput, "openlia backup: restored "+result.Archive+"; stack remains stopped")
+	return emit(output, result, jsonOutput, "openlia backup: restored "+result.Archive)
 }
 
 func runAttachments(ctx context.Context, config Config, args []string, output, errorOutput io.Writer, jsonOutput bool, now time.Time) int {
@@ -285,7 +290,17 @@ func runDeploy(ctx context.Context, config Config, args []string, output, errorO
 		}
 	}
 	if action == "profile" {
-		backup, err := CreateBackup(config, "profile-update", now, NewCompose(config, nil))
+		rollbackPaths := []string{
+			runtimeRelativePath(config, filepath.Join(config.DataRoot, "config.yaml")),
+			runtimeRelativePath(config, filepath.Join(config.DataRoot, "AGENTS.md")),
+			runtimeRelativePath(config, filepath.Join(config.DataRoot, "SOUL.md")),
+			runtimeRelativePath(config, filepath.Join(config.DataRoot, "scripts", "openlia-workspace-git-sync.sh")),
+			runtimeRelativePath(config, config.MetaRoot),
+		}
+		for _, skill := range config.EnabledSkills {
+			rollbackPaths = append(rollbackPaths, runtimeRelativePath(config, filepath.Join(config.DataRoot, "skills", skill)))
+		}
+		backup, err := CreateRollback(config, "profile-update", now, rollbackPaths...)
 		if err != nil {
 			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 		}

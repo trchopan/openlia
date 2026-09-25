@@ -18,7 +18,10 @@ type recordedRunner struct {
 }
 
 type restartRunner struct {
-	calls []string
+	calls     []string
+	dataRoot  string
+	secretDir string
+	network   string
 }
 
 type workspaceUIRunner struct {
@@ -28,6 +31,9 @@ type workspaceUIRunner struct {
 func (r *workspaceUIRunner) Run(_ context.Context, name string, args ...string) (CommandResult, error) {
 	call := strings.Join(append([]string{name}, args...), " ")
 	r.calls = append(r.calls, call)
+	if strings.Contains(call, "config --services") {
+		return CommandResult{Stdout: []byte("workspace-ui\n")}, nil
+	}
 	if strings.Contains(call, "ps --services --filter status=running") {
 		return CommandResult{Stdout: []byte("workspace-ui\n")}, nil
 	}
@@ -44,6 +50,9 @@ type openWebUIRunner struct {
 func (r *openWebUIRunner) Run(_ context.Context, name string, args ...string) (CommandResult, error) {
 	call := strings.Join(append([]string{name}, args...), " ")
 	r.calls = append(r.calls, call)
+	if strings.Contains(call, "config --services") {
+		return CommandResult{Stdout: []byte("open-webui\n")}, nil
+	}
 	if strings.Contains(call, "ps --services --filter status=running") {
 		return CommandResult{Stdout: []byte("open-webui\n")}, nil
 	}
@@ -75,6 +84,15 @@ func (r *restartRunner) Run(_ context.Context, name string, args ...string) (Com
 	}
 	if name == "docker" && strings.Contains(call, "HostConfig.Privileged") {
 		return CommandResult{Stdout: []byte("false\n")}, nil
+	}
+	if name == "docker" && strings.Contains(call, `.Destination "/opt/data"`) {
+		return CommandResult{Stdout: []byte(r.dataRoot)}, nil
+	}
+	if name == "docker" && strings.Contains(call, `.Destination "/run/openlia-secrets"`) {
+		return CommandResult{Stdout: []byte(r.secretDir)}, nil
+	}
+	if name == "docker" && strings.Contains(call, "NetworkSettings.Networks") {
+		return CommandResult{Stdout: []byte(r.network + " \n")}, nil
 	}
 	return CommandResult{}, nil
 }
@@ -131,7 +149,7 @@ func TestDeployRestartRecreatesFullStack(t *testing.T) {
 	if err := WriteState(config, stateNeverStarted); err != nil {
 		t.Fatal(err)
 	}
-	runner := &restartRunner{}
+	runner := &restartRunner{dataRoot: config.DataRoot, secretDir: config.SecretDir, network: config.NetworkName}
 	if _, err := Deploy(context.Background(), config, NewCompose(config, runner), DeployOptions{Action: "restart", Component: "all", HealthAttempts: 1}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -246,13 +264,185 @@ func TestBackupExcludesSecretsAndAttachmentCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := archiveNames(t, result.Archive)
-	if !names["hermes/keep.txt"] || !names["locho/laptop/runtime.txt"] {
+	if !names["hermes/keep.txt"] || names["locho/laptop/runtime.txt"] {
 		t.Fatalf("ordinary runtime files missing from archive: %v", names)
 	}
 	for _, forbidden := range []string{"hermes/auth.json", "hermes/session.env", "locho/laptop/attachments.toml", "secrets/hermes.env", "hermes/logs/hermes.log"} {
 		if names[forbidden] {
 			t.Fatalf("sensitive archive member present: %s", forbidden)
 		}
+	}
+}
+
+func TestDurableBackupExcludesRebuildableSkillsAndCaches(t *testing.T) {
+	config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+	for _, directory := range []string{config.DataRoot, config.MetaRoot, config.BackupRoot, config.LochoRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]string{
+		filepath.Join(config.DataRoot, "workspace", "keep.md"):                          "workspace",
+		filepath.Join(config.DataRoot, "cache", "model.bin"):                            "cache",
+		filepath.Join(config.DataRoot, "home", "package.bin"):                           "package",
+		filepath.Join(config.DataRoot, "skills", "creative", "DESCRIPTION.md"):          "bundled metadata",
+		filepath.Join(config.DataRoot, "skills", "creative", "ascii-video", "SKILL.md"): "bundled",
+		filepath.Join(config.DataRoot, "skills", "claim-review", "SKILL.md"):            "managed",
+		filepath.Join(config.DataRoot, "skills", ".bundled_manifest"):                   "ascii-video:hash\n",
+		filepath.Join(config.RuntimeRoot, "open-webui", "webui.db"):                     "open-webui",
+	}
+	for path, contents := range files {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := CreateBackup(config, "durable-scope", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := archiveNames(t, result.Archive)
+	for _, expected := range []string{"hermes/workspace/keep.md", "hermes/skills/claim-review/SKILL.md"} {
+		if !names[expected] {
+			t.Fatalf("durable member missing %s: %v", expected, names)
+		}
+	}
+	for _, excluded := range []string{"hermes/cache/model.bin", "hermes/home/package.bin", "hermes/skills/creative/ascii-video/SKILL.md", "open-webui/webui.db", "locho"} {
+		if names[excluded] {
+			t.Fatalf("rebuildable or excluded member present %s: %v", excluded, names)
+		}
+	}
+}
+
+func TestRollbackBackupContainsOnlyDeclaredPaths(t *testing.T) {
+	config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+	for _, directory := range []string{config.DataRoot, config.MetaRoot, config.BackupRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, contents := range map[string]string{
+		filepath.Join(config.DataRoot, "config.yaml"):          "config",
+		filepath.Join(config.DataRoot, "workspace", "keep.md"): "workspace",
+		filepath.Join(config.DataRoot, "unrelated.db"):         "unrelated",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := CreateRollback(config, "test-rollback", time.Now(), "hermes/config.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := archiveNames(t, result.Archive)
+	if !names["manifest.json"] || !names["hermes/config.yaml"] {
+		t.Fatalf("declared rollback member missing: %v", names)
+	}
+	if names["hermes/workspace/keep.md"] || names["hermes/unrelated.db"] {
+		t.Fatalf("rollback captured undeclared state: %v", names)
+	}
+}
+
+func TestRestoreRollbackAppliesOnlyDeclaredPaths(t *testing.T) {
+	config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+	for _, directory := range []string{config.DataRoot, config.MetaRoot, config.BackupRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	configPath := filepath.Join(config.DataRoot, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("before"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	archive, err := CreateRollback(config, "restore-test", time.Now(), "hermes/config.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("after"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config.DataRoot, "unrelated.txt"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreRollback(config, archive.Archive, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(configPath)
+	if err != nil || string(contents) != "before" {
+		t.Fatalf("rollback restored config = %q, err=%v", contents, err)
+	}
+	if _, err := os.Stat(filepath.Join(config.DataRoot, "unrelated.txt")); err != nil {
+		t.Fatalf("rollback touched unrelated state: %v", err)
+	}
+}
+
+func TestDurableBackupRestoresAcrossRuntimeRoots(t *testing.T) {
+	sourceConfig := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "source-runtime"))
+	for _, directory := range []string{sourceConfig.DataRoot, sourceConfig.MetaRoot, sourceConfig.BackupRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, contents := range map[string]string{
+		filepath.Join(sourceConfig.DataRoot, "workspace", "note.md"):  "portable",
+		filepath.Join(sourceConfig.DataRoot, "config.yaml"):           "old host config",
+		filepath.Join(sourceConfig.DataRoot, "services.json"):         "old services",
+		filepath.Join(sourceConfig.MetaRoot, "runtime.json"):          `{"install_root":"/old/root"}`,
+		filepath.Join(sourceConfig.MetaRoot, "managed", "state.json"): "managed state",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archive, err := CreateBackup(sourceConfig, "portable", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata backupMetadata
+	metadataData, err := os.ReadFile(archive.Archive + ".json")
+	if err != nil || json.Unmarshal(metadataData, &metadata) != nil || metadata.Archive != filepath.Base(archive.Archive) {
+		t.Fatalf("backup metadata is not portable: %s", metadataData)
+	}
+	targetConfig := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "new-runtime"))
+	for _, directory := range []string{targetConfig.DataRoot, targetConfig.MetaRoot, targetConfig.BackupRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archiveCopy := filepath.Join(targetConfig.BackupRoot, filepath.Base(archive.Archive))
+	archiveBytes, err := os.ReadFile(archive.Archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archiveCopy, archiveBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(targetConfig.DataRoot, "config.yaml"), []byte("new host config"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreBackup(targetConfig, archiveCopy, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(filepath.Join(targetConfig.DataRoot, "workspace", "note.md"))
+	if err != nil || string(contents) != "portable" {
+		t.Fatalf("portable workspace restore = %q, err=%v", contents, err)
+	}
+	configContents, err := os.ReadFile(filepath.Join(targetConfig.DataRoot, "config.yaml"))
+	if err != nil || string(configContents) != "new host config" {
+		t.Fatalf("host config was restored over destination config: %q, err=%v", configContents, err)
+	}
+	var runtime RuntimeMetadata
+	runtimeData, err := os.ReadFile(filepath.Join(targetConfig.MetaRoot, "runtime.json"))
+	if err != nil || json.Unmarshal(runtimeData, &runtime) != nil || runtime.InstallRoot != targetConfig.InstallRoot {
+		t.Fatalf("runtime metadata was not rebased: %s", runtimeData)
 	}
 }
 
@@ -328,6 +518,14 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
 	config := testConfig(repo, runtimeRoot)
 	config.ServiceRoles = map[string]string{"laptop.openlia-browser": "openlia-browser"}
+	config.OpenWebUIHost = "127.0.0.1"
+	config.OpenWebUIPort = 8090
+	if err := os.MkdirAll(config.SecretDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.SecretFile, []byte("COPILOT_GITHUB_TOKEN=gho_testtoken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(repo, "docker"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -350,6 +548,9 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("generated Compose missing %q:\n%s", expected, text)
 		}
+	}
+	if strings.Index(text, "env_file:") < strings.Index(text, "OPENLIA_BROWSER_MCP_URL:") {
+		t.Fatal("Hermes env_file interrupts its generated environment mapping")
 	}
 }
 

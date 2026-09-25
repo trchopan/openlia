@@ -89,6 +89,18 @@ func (remote Remote) operationCommand(operation string, args ...string) string {
 	return remote.operationCommandForRoot(remote.releasePath(), operation, args...)
 }
 
+func (remote Remote) composeEnvironment() string {
+	values := []string{
+		"OPENLIA_DATA_ROOT=" + shellQuote(remote.rootPath("runtime", "hermes")),
+		"OPENLIA_SYSTEM_SKILLS_ROOT=" + shellQuote(remote.rootPath("runtime", "system-skills")),
+		"OPENLIA_SKILLS_CACHE_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-cache")),
+		"OPENLIA_SKILLS_ENV_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-envs")),
+		"OPENLIA_SECRET_DIR=" + shellQuote(remote.rootPath("runtime", "secrets")),
+		"OPENLIA_NETWORK_NAME=" + shellQuote(remote.Config.Project+"-private"),
+	}
+	return strings.Join(values, " ")
+}
+
 func (remote Remote) operationCommandForRoot(operationRoot, operation string, args ...string) string {
 	environment := []string{
 		"OPENLIA_LOCAL_MODE='false'",
@@ -144,9 +156,9 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 			"arm64": filepath.Join(operationRoot, "operator", "linux-arm64", "openlia-operator"),
 		}
 		if operatorOnlyOperation(operation) {
-			return "operator_path=''; case \"$(uname -m)\" in x86_64|amd64) operator_path=" + shellQuote(operatorPaths["amd64"]) + ";; aarch64|arm64) operator_path=" + shellQuote(operatorPaths["arm64"]) + ";; esac; if [ -n \"$operator_path\" ] && [ -x \"$operator_path\" ]; then " + privilegedEnvironmentCommand(environment, "\"$operator_path\"", operatorArgs...) + "; else printf '%s\\n' 'OpenLia Go operator is required for this operation' >&2; exit 3; fi"
+			return "operator_path=''; case \"$(uname -m)\" in x86_64|amd64) operator_path=" + shellQuote(operatorPaths["amd64"]) + ";; aarch64|arm64) operator_path=" + shellQuote(operatorPaths["arm64"]) + ";; esac; if [ -n \"$operator_path\" ] && { [ -x \"$operator_path\" ] || (command -v sudo >/dev/null 2>&1 && sudo -n test -x \"$operator_path\"); }; then " + privilegedEnvironmentCommand(environment, "\"$operator_path\"", operatorArgs...) + "; else printf '%s\\n' 'OpenLia Go operator is required for this operation' >&2; exit 3; fi"
 		}
-		return "operator_path=''; case \"$(uname -m)\" in x86_64|amd64) operator_path=" + shellQuote(operatorPaths["amd64"]) + ";; aarch64|arm64) operator_path=" + shellQuote(operatorPaths["arm64"]) + ";; esac; if [ -n \"$operator_path\" ] && [ -x \"$operator_path\" ]; then " + privilegedEnvironmentCommand(environment, "\"$operator_path\"", operatorArgs...) + "; else " + privilegedEnvironmentCommand(environment, scriptCommand, args...) + "; fi"
+		return "operator_path=''; case \"$(uname -m)\" in x86_64|amd64) operator_path=" + shellQuote(operatorPaths["amd64"]) + ";; aarch64|arm64) operator_path=" + shellQuote(operatorPaths["arm64"]) + ";; esac; if [ -n \"$operator_path\" ] && { [ -x \"$operator_path\" ] || (command -v sudo >/dev/null 2>&1 && sudo -n test -x \"$operator_path\"); }; then " + privilegedEnvironmentCommand(environment, "\"$operator_path\"", operatorArgs...) + "; else " + privilegedEnvironmentCommand(environment, scriptCommand, args...) + "; fi"
 	}
 	return privilegedEnvironmentCommand(environment, scriptCommand, args...)
 }
@@ -304,7 +316,7 @@ func (remote Remote) legacyUninstallCommand(current string) string {
 	project := shellQuote(remote.Config.Project)
 	network := shellQuote(remote.Config.Project + "-private")
 	marker := shellQuote(remote.rootPath("runtime", "meta", "runtime.json"))
-	composeBase := "docker compose --project-name " + project + " --project-directory " + composeDirectory + " -f " + composeFile
+	composeBase := remote.composeEnvironment() + " docker compose --project-name " + project + " --project-directory " + composeDirectory + " -f " + composeFile
 	return "set -eu; " +
 		"if [ ! -e " + installRoot + " ]; then printf '%s\\n' '{\"ok\":true,\"action\":\"uninstall\",\"state\":\"absent\",\"images\":\"preserved\"}'; exit 0; fi; " +
 		"test -d " + installRoot + "; test ! -L " + installRoot + "; test -f " + marker + "; " +
@@ -363,7 +375,8 @@ func (remote Remote) health(ctx context.Context, allowStopped, providerCheck boo
 func (remote Remote) composeLogs(ctx context.Context, follow bool) ([]byte, error) {
 	base := filepath.Join(remote.releasePath(), "docker", "compose.yaml")
 	generated := filepath.Join(remote.releasePath(), "docker", "compose.generated.yaml")
-	command := "set -eu; compose='docker compose --project-name " + shellQuote(remote.Config.Project) + " --project-directory " + shellQuote(filepath.Join(remote.releasePath(), "docker")) + " -f " + shellQuote(base) + "'; if [ -f " + shellQuote(generated) + " ]; then compose=\"$compose -f " + shellQuote(generated) + "\"; fi; $compose logs --tail 200"
+	compose := remote.composeEnvironment() + " docker compose --project-name " + shellQuote(remote.Config.Project) + " --project-directory " + shellQuote(filepath.Join(remote.releasePath(), "docker")) + " -f " + shellQuote(base)
+	command := "set -eu; if [ -f " + shellQuote(generated) + " ]; then " + compose + " -f " + shellQuote(generated) + " logs --tail 200; else " + compose + " logs --tail 200; fi"
 	if follow {
 		command += " --follow"
 	}

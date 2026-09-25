@@ -78,6 +78,12 @@ lint:
 	shellcheck docker/*.sh profile/cron/scripts/*.sh
 
 compose-config:
+	OPENLIA_DATA_ROOT=/tmp/openlia-compose-check/runtime/hermes \
+	OPENLIA_SYSTEM_SKILLS_ROOT=/tmp/openlia-compose-check/runtime/system-skills \
+	OPENLIA_SKILLS_CACHE_ROOT=/tmp/openlia-compose-check/runtime/skill-cache \
+	OPENLIA_SKILLS_ENV_ROOT=/tmp/openlia-compose-check/runtime/skill-envs \
+	OPENLIA_SECRET_DIR=/tmp/openlia-compose-check/runtime/secrets \
+	OPENLIA_NETWORK_NAME=openlia-compose-check-private \
 	docker compose -f docker/compose.yaml config --quiet
 
 skills-test:

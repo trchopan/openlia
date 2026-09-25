@@ -136,7 +136,7 @@ func generateAttachmentsWithCompose(ctx context.Context, config Config, compose 
 	configPresent := configErr == nil
 	if info, err := os.Stat(config.GeneratedCompose); err == nil && info.Mode().IsRegular() {
 		wasPresent = true
-		if _, err := CreateBackup(config, "attachments-generate", time.Now().UTC(), compose); err != nil {
+		if _, err := CreateRollback(config, "attachments-generate", time.Now().UTC(), runtimeRelativePath(config, filepath.Join(config.DataRoot, "config.yaml")), runtimeRelativePath(config, filepath.Join(config.DataRoot, "services.json")), runtimeRelativePath(config, filepath.Join(config.MetaRoot, "services.json"))); err != nil {
 			return err
 		}
 		generatedBackup, err = backupFile(config, config.GeneratedCompose, "compose-generated", 0o600, time.Now().UTC())
@@ -162,9 +162,16 @@ func generateAttachmentsWithCompose(ctx context.Context, config Config, compose 
 		_ = RecordChange(config, "attachments-generate", "failed", generatedBackup, "Compose sidecar generation failed", time.Now().UTC())
 		return err
 	}
-	if _, err := compose.Run(ctx, "config", "--quiet"); err != nil {
+	if result, err := compose.Run(ctx, "config", "--quiet"); err != nil {
 		restore()
 		_ = RecordChange(config, "attachments-generate", "failed", generatedBackup, "generated Compose validation failed", time.Now().UTC())
+		detail := strings.TrimSpace(string(result.Stderr))
+		if detail == "" {
+			detail = strings.TrimSpace(string(result.Stdout))
+		}
+		if detail != "" {
+			return fmt.Errorf("generated Compose validation failed: %s", detail)
+		}
 		return fmt.Errorf("generated Compose validation failed")
 	}
 	currentConfig, currentConfigErr := os.ReadFile(filepath.Join(config.DataRoot, "config.yaml"))
@@ -257,10 +264,6 @@ func generateAttachmentsFile(config Config) error {
 			builder.WriteString("    environment:\n")
 			if config.APIEnabled || config.OpenWebUIHost != "" {
 				builder.WriteString("      API_SERVER_ENABLED: \"true\"\n      API_SERVER_HOST: \"0.0.0.0\"\n")
-				quotedAPIEnvPath, _ := json.Marshal(apiEnvPath)
-				builder.WriteString("    env_file:\n      - ")
-				builder.Write(quotedAPIEnvPath)
-				builder.WriteString("\n")
 			}
 			if browserURL != "" {
 				fmt.Fprintf(&builder, "      OPENLIA_BROWSER_MCP_URL: %q\n", browserURL)
@@ -270,6 +273,12 @@ func generateAttachmentsFile(config Config) error {
 					envKey := fmt.Sprintf("OPENLIA_SERVICE_%s_%s_URL", sanitizeEnvKey(svc.Host), sanitizeEnvKey(svc.Name))
 					fmt.Fprintf(&builder, "      %s: %q\n", envKey, svc.Endpoint)
 				}
+			}
+			if config.APIEnabled || config.OpenWebUIHost != "" {
+				quotedAPIEnvPath, _ := json.Marshal(apiEnvPath)
+				builder.WriteString("    env_file:\n      - ")
+				builder.Write(quotedAPIEnvPath)
+				builder.WriteString("\n")
 			}
 			if config.ExternalNetwork != "" {
 				builder.WriteString("    networks:\n      - openlia-private\n      - openlia-external\n")
@@ -395,7 +404,7 @@ func RotateAttachmentContext(ctx context.Context, config Config, host, source st
 			return err
 		}
 	}
-	if _, err := CreateBackup(config, "locho-"+host+"-rotate", now); err != nil {
+	if _, err := CreateRollback(config, "locho-"+host+"-rotate", now, runtimeRelativePath(config, filepath.Join(config.LochoRoot, host, "attachments.toml")), runtimeRelativePath(config, filepath.Join(config.DataRoot, "services.json")), runtimeRelativePath(config, filepath.Join(config.MetaRoot, "services.json"))); err != nil {
 		return err
 	}
 	if err := AtomicCopyFile(source, targetFile, 0o600); err != nil {
@@ -443,7 +452,7 @@ func rotateAttachmentWithCompose(ctx context.Context, config Config, compose Com
 			return err
 		}
 	}
-	if _, err := CreateBackup(config, "locho-"+host+"-rotate", now, compose); err != nil {
+	if _, err := CreateRollback(config, "locho-"+host+"-rotate", now, runtimeRelativePath(config, filepath.Join(config.LochoRoot, host, "attachments.toml")), runtimeRelativePath(config, filepath.Join(config.DataRoot, "services.json")), runtimeRelativePath(config, filepath.Join(config.MetaRoot, "services.json"))); err != nil {
 		return err
 	}
 	generatedBackup := ""
@@ -465,6 +474,7 @@ func rotateAttachmentWithCompose(ctx context.Context, config Config, compose Com
 	restore := func() {
 		if configBackup != "" {
 			_ = AtomicCopyFile(configBackup, targetFile, 0o600)
+			_ = ensureLochoReadable(targetFile)
 		} else {
 			_ = os.Remove(targetFile)
 		}
@@ -484,6 +494,14 @@ func rotateAttachmentWithCompose(ctx context.Context, config Config, compose Com
 		}
 		_ = RecordChange(config, "locho-"+host+"-rotate", "failed", configBackup, "attachment replacement failed", now)
 		return fmt.Errorf("attachment replacement failed")
+	}
+	if err := ensureLochoReadable(targetFile); err != nil {
+		restore()
+		if previousState == stateRunning {
+			_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "locho-"+host)
+		}
+		_ = RecordChange(config, "locho-"+host+"-rotate", "failed", configBackup, "attachment permissions could not be prepared", now)
+		return fmt.Errorf("attachment permissions could not be prepared")
 	}
 	if err := generateAttachmentsFile(config); err != nil {
 		restore()
@@ -516,6 +534,16 @@ func rotateAttachmentWithCompose(ctx context.Context, config Config, compose Com
 	return RecordChange(config, "locho-"+host+"-rotate", "ok", configBackup, "single host sidecar replaced", now)
 }
 
+func ensureLochoReadable(path string) error {
+	if os.Geteuid() != 0 {
+		return nil
+	}
+	if err := os.Chown(path, 10000, 999); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
+}
+
 func backupFile(config Config, source, label string, mode os.FileMode, now time.Time) (string, error) {
 	if err := ValidateSafeComponent(label, "backup-label"); err != nil {
 		return "", err
@@ -539,6 +567,7 @@ func backupFile(config Config, source, label string, mode os.FileMode, now time.
 	if err := AtomicCopyFile(source, destination, mode); err != nil {
 		return "", err
 	}
+	_, _ = PruneBackups(config, config.BackupRetention)
 	return destination, nil
 }
 
