@@ -14,10 +14,36 @@ const (
 	managedBrowserPolicyEnd   = "# END OPENLIA MANAGED BROWSER TOOLSET"
 )
 
+var managedBrowserToolAllowlist = []string{
+	"openlia_browser_session_request",
+	"openlia_browser_session_status",
+	"openlia_browser_session_touch",
+	"openlia_browser_session_release",
+	"openlia_browser_session_cancel",
+	"browser_navigate",
+	"browser_navigate_back",
+	"browser_snapshot",
+	"browser_find",
+	"browser_click",
+	"browser_type",
+	"browser_fill_form",
+	"browser_press_key",
+	"browser_select_option",
+	"browser_hover",
+	"browser_tabs",
+	"browser_wait_for",
+	"browser_take_screenshot",
+	"browser_handle_dialog",
+	"browser_close",
+}
+
 func managedBrowserPolicy(endpoint string) []string {
 	mcpEndpoint := strings.TrimRight(endpoint, "/") + "/mcp"
-	return []string{
+	lines := []string{
 		managedBrowserPolicyStart,
+		"tools:",
+		"  tool_search:",
+		"    enabled: off",
 		"agent:",
 		"  disabled_toolsets:",
 		"    - browser",
@@ -26,12 +52,16 @@ func managedBrowserPolicy(endpoint string) []string {
 		"    url: " + strconv.Quote(mcpEndpoint),
 		"    connect_timeout: 30",
 		"    timeout: 120",
-		managedBrowserPolicyEnd,
 	}
+	lines = append(lines, "    tools:", "      include:")
+	for _, tool := range managedBrowserToolAllowlist {
+		lines = append(lines, "        - "+tool)
+	}
+	return append(lines, managedBrowserPolicyEnd)
 }
 
 // ReconcileBrowserPolicy removes Hermes' native browser toolset when OpenLia
-// owns an explicit browser-tools attachment. The policy is deliberately separate
+// owns an explicit openlia-browser attachment. The policy is deliberately separate
 // from browser endpoint discovery so an unassigned legacy endpoint cannot
 // silently change the model's tool surface.
 func ReconcileBrowserPolicy(config Config, playwrightRole bool, browserEndpoint string) error {
@@ -55,7 +85,7 @@ func ReconcileBrowserPolicy(config Config, playwrightRole bool, browserEndpoint 
 
 func renderBrowserPolicy(data []byte, playwrightRole bool, browserEndpoint string) ([]byte, bool, error) {
 	if playwrightRole && browserEndpoint == "" {
-		return nil, false, fmt.Errorf("browser-tools policy requires a browser MCP endpoint")
+		return nil, false, fmt.Errorf("openlia-browser policy requires a browser MCP endpoint")
 	}
 	lines := strings.Split(string(data), "\n")
 	start, end := -1, -1
@@ -92,7 +122,7 @@ func renderBrowserPolicy(data []byte, playwrightRole bool, browserEndpoint strin
 	}
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if (trimmed == "agent:" || trimmed == "mcp_servers:") && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+		if (trimmed == "agent:" || trimmed == "mcp_servers:" || trimmed == "tools:") && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
 			return nil, false, fmt.Errorf("Hermes config already contains a user-owned %s mapping; refusing to overwrite it while enabling the Playwright browser policy", strings.TrimSuffix(trimmed, ":"))
 		}
 	}

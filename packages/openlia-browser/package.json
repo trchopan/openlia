@@ -1,5 +1,5 @@
 {
-  "name": "@openlia/browser-tools",
+  "name": "@openlia/openlia-browser",
   "private": true,
   "type": "module",
   "dependencies": {

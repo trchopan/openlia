@@ -59,8 +59,8 @@ OpenLia itself is the operator control plane, not a long-running Compose
 service. The `openlia` CLI runs on the operator machine and either invokes local
 operations directly or uses SSH for a remote target. The default Compose stack
 contains only the Hermes and Locho runtime services. When a browser attachment
-is configured, Hermes connects to the host-local `browser-tools` service for
-browser jobs and the Playwright MCP proxy. The optional Workspace UI is disabled unless a
+is configured, Hermes connects to the host-local `openlia-browser` service for
+the supervised Playwright MCP proxy. The optional Workspace UI is disabled unless a
 `[workspace-ui]` section is present in `config.toml`. The optional Open WebUI
 chat interface is disabled unless an `[open-webui]` section is present in
 `config.toml` or `--open-webui` is provided during `openlia init`.
@@ -68,35 +68,43 @@ chat interface is disabled unless an `[open-webui]` section is present in
 Browser tools are configured independently from the Hermes deployment target:
 
 ```toml
-[browser-tools]
+[openlia-browser]
 mode = "ssh"
 target = "user@browser-host"
 ssh_port = 22
-root = "<path_to_browser_tools_root>"
+root = "<path_to_openlia_browser_root>"
 extension_token_file = "<path_to_extension_token_file>"
 ```
 
-Manage the selected browser host with `openlia browser-tools configure`,
+Manage the selected browser host with `openlia openlia-browser configure`,
 `install`, `start`, `stop`, `restart`, `status`, `logs`, and `uninstall`.
 
 For a browser on the same machine:
 
 ```toml
-[browser-tools]
+[openlia-browser]
 mode = "local"
 target = ""
-root = "<path_to_browser_tools_root>"
+root = "<path_to_openlia_browser_root>"
 extension_token_file = "<path_to_extension_token_file>"
 ```
 
 The token file must be owned by the browser user and protected with mode `0600`.
-Raw Playwright MCP uses port `8931` on loopback; `browser-tools` uses port
+Raw Playwright MCP uses port `8931` on loopback; `openlia-browser` uses port
 `8932` and is the only endpoint that should be attached to OpenLia through
-Locho.
+Locho. OpenLia provides no browser workflows or crawler jobs. External skills
+and MCP clients explicitly given this attachment control the browser and are
+responsible for their own actions. The shared authenticated profile is
+single-owner: external workflows must acquire and carry a browser session lease
+for their complete multi-call workflow. Hermes receives direct eager tools from
+the conservative relay allowlist; excluded Playwright tools remain unavailable
+through the OpenLia relay. Mutating browser tools require a string
+`operation_id`, which the relay strips before forwarding. These checks do not
+secure raw Playwright for external clients that bypass the relay.
 
-Local mode changes where OpenLia manages the browser-tools process; it does not
-bypass Locho. Configure a Locho browser-tools attachment for both local and
-remote browser hosts. See [`packages/browser-tools/README.md`](packages/browser-tools/README.md)
+Local mode changes where OpenLia manages the openlia-browser process; it does not
+bypass Locho. Configure an openlia-browser Locho attachment for both local and
+remote browser hosts. See [`packages/openlia-browser/README.md`](packages/openlia-browser/README.md)
 for the short connection guide.
 
 The target repository layout is:
@@ -513,11 +521,12 @@ encrypt passwords, sessions, or workspace contents; use HTTPS through a reverse
 proxy when the network is not fully trusted. `/health` remains public for
 container health checks, while workspace APIs require authentication.
 
-When a service is mapped to the `browser-tools` role, OpenLia registers its
+When a service is mapped to the `openlia-browser` role, OpenLia registers its
 Streamable HTTP MCP endpoint at `/mcp` directly with Hermes and disables Hermes'
-native `agent-browser` toolset. Legacy `/sse` and `/messages` requests are
-rejected. This prevents two browser runtimes from competing for the same
-session.
+native `agent-browser` toolset, disables tool search for that server, and
+exposes only the managed eager allowlist. Legacy `/sse` and `/messages` requests
+are rejected. This prevents two browser runtimes from competing for the same
+session; it is not a security boundary for clients that bypass the relay.
 
 ### Open WebUI Chat Interface
 
@@ -671,10 +680,8 @@ output_language = "vi"
 The default is `en`. Run `openlia restart` after changing this value; OpenLia
 updates the managed Hermes language instruction before restarting while
 preserving the stored conversation history. An explicit language request in a
-user message takes precedence for that response. ChatGPT and Gemini jobs use
-the same configured language, unless the current request supplies an explicit
-`--language <BCP47-tag>` override. CLI, Workspace UI, and raw tool output are
-not localized by this setting.
+user message takes precedence for that response. CLI, Workspace UI, and raw
+tool output are not localized by this setting.
 
 ## Operations
 

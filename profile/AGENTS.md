@@ -2,7 +2,8 @@
 
 This profile contains distribution-owned instructions and workflow skills. The
 Personal OS workspace is a separate runtime directory at
-`/opt/data/workspace`; do not assume it contains real data in a fresh install.
+`/opt/data/workspace`. Inspect it before relying on its contents; a fresh
+installation may contain only starter data.
 
 ## Safe defaults
 
@@ -23,7 +24,8 @@ Personal OS workspace is a separate runtime directory at
 
 Credentials belong in Hermes' runtime secret source or environment, never in
 this profile, the workspace template, prompts, helper input, or reports.
-Bundled skills are distribution-owned and read-only; never attempt autonomous background curation or patching (`skill_manage`) on them.
+Treat bundled skills as distribution-owned and read-only. Customize them only
+through the supported OpenLia fork and migration workflows.
 Skill writes are staged for review. Customize bundled skills through
 `openlia skills fork`; normal OpenLia updates preserve forked skills. The
 protected `openlia-skill-migration` system skill may propose a migration but
@@ -46,21 +48,17 @@ rather than editing its generated state files directly.
 - Do not use hard resets, force-pushes, destructive conflict resolution, or
   pulls over dirty files. Stop and report the exact Git state instead.
 
-## External AI Research & Mandatory Temporary Chat Gatekeeper
+## Browser Boundary
 
-- Whenever the user asks to query, research, or converse with **ChatGPT** (`chatgpt.com`) or **Google Gemini** (`gemini.google.com`):
-  - **MANDATORY**: You MUST execute through the dedicated automated scripts. NEVER attempt manual, low-level browser tool loops (`browser_type`, `browser_click`).
-  - **For ChatGPT**: Submit `bun /opt/data/skills/browser-pilot/scripts/openlia_job.ts submit chatgpt-chat --prompt "<prompt>" --topic "<topic>"`, then poll the returned job ID with `status` and fetch it with `result`.
-  - **For Gemini**: Submit `bun /opt/data/skills/browser-pilot/scripts/openlia_job.ts submit gemini-chat --prompt "<prompt>" --topic "<topic>"`, then poll the returned job ID with `status` and fetch it with `result`.
-  - **Output language**: The browser-job client uses the configured `OPENLIA_OUTPUT_LANGUAGE` by default. If the current user request explicitly asks for another language, add `--language <BCP47-tag>` to the submission command. Do not add an override when no explicit request was made.
-  - **Zero-Tolerance Temporary Chat**: Both scripts automatically enforce the zero-retention Temporary Chat gatekeeper before submitting prompts, and halt immediately if unverified.
-  - **Authentic Markdown & Export**: Both scripts automatically intercept authentic Markdown, sanitize citations, and save standardized YAML files with timestamp prefixes to `workspace/knowledge/<platform>/YYYYMMDD_HHMMSS_<slug>.yaml`.
-
-## Attached Playwright MCP
-
-When a `browser-tools` attachment is configured, Hermes' native browser
-toolset is disabled and the attached MCP tools are the only generic browser
-surface. Use the registered `mcp__openlia_playwright__browser_*` tools for Maps,
-shopping, and ordinary web navigation. Do not invent terminal scripts such as
-`maps_client.py`, and do not use the queued OpenLia job client for generic web
-navigation; that client is only for the ChatGPT/Gemini workflows above.
+Bundled browser support is limited to supervising and relaying a
+user-configured Playwright MCP endpoint. External browser workflows remain the
+operator's responsibility. A multi-call external browser workflow must first acquire
+`openlia_browser_session_request`, pass its returned `lease` value to every
+Playwright tool call, renew it with `openlia_browser_session_touch` when needed,
+and release it with `openlia_browser_session_release` when finished. Browser
+tool calls without a current lease are rejected. Hermes receives direct eager
+tools from the managed conservative allowlist; excluded Playwright tools remain
+unavailable through the OpenLia relay. Mutating browser tools require a unique
+string `operation_id` per lease workflow, and the relay removes it before
+forwarding. These relay checks are not a security boundary for clients that
+bypass OpenLia and connect to raw Playwright.

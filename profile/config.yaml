@@ -6,7 +6,7 @@ model:
   default: ${OPENLIA_MODEL}
 
 # OpenLia renders this managed block from config.toml in declaration order.
-# Keep the markers intact; do not edit this block in the profile template.
+# Preserve its markers and managed contents in the profile template.
 # BEGIN OPENLIA MANAGED FALLBACK PROVIDERS
 fallback_providers: []
 # END OPENLIA MANAGED FALLBACK PROVIDERS

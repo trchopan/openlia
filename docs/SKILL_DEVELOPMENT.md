@@ -30,67 +30,30 @@ make skills-test
 go run . skills test SKILL_NAME
 ```
 
-### Browser Skill Verification
+### Browser Boundary
 
-Browser-backed bundled skills use the host-local `browser-tools` service. It
-supervises Playwright MCP and exposes the only browser endpoint that OpenLia
-should attach through Locho. Configure it with a browser-tools root and a
-protected extension-token file before running live canaries.
-
-```sh
-openlia browser-tools configure \
-  --local \
-  --root "<path_to_browser_tools_root>" \
-  --extension-token-file "<path_to_extension_token_file>"
-openlia browser-tools install
-openlia browser-tools start
-openlia browser-tools doctor
-```
-
-For a separate browser host, replace `--local` with `--target
-user@browser-host --ssh-port 22`. Raw Playwright MCP remains on
-loopback port `8931`; browser-tools is exposed on port `8932`.
-
-Hermes reaches browser-tools through a Locho attachment in both local and
-remote deployments. Do not attach the raw Playwright MCP port directly.
-
-Direct `npx @playwright/mcp` startup is reserved for disposable development
-only and must use the pinned version documented by the browser-tools release.
-
-Run the live canaries only when an authenticated disposable browser session is
-available:
-
-```sh
-bun profile/skills/browser-pilot/scripts/openlia_job.ts --self-test
-bun run typecheck
-bun run test
-make skills-verify
-```
-
-Live browser output belongs under `/tmp/openlia_verify/`; it must not write to
-the real workspace. The runners prune `.playwright-mcp/` files older than 24
-hours and cap retained files. Browser jobs use isolated Temporary Chat flows
-and fail closed when the temporary mode or browser transport cannot be
-verified.
-
-For custom local browser queries, write output to a temporary path:
-
-```sh
-bun profile/skills/browser-pilot/scripts/openlia_job.ts submit chatgpt-chat \
-  --prompt "Compare Python dataclasses and Pydantic." \
-  --topic "Python data models"
-```
-
-Browser-backed helpers can also be checked with `make skills-verify` when the
-documented local Playwright MCP prerequisites and authenticated browser session
-are available. Keep live verification separate from offline self-tests and do
-not use personal workspace data as test fixtures.
+OpenLia does not ship browser-backed skills or live browser canaries. The
+optional `openlia-browser` package is only a Playwright supervisor and MCP relay;
+its lifecycle is tested as part of the runtime package rather than as a skill.
+External skills may use an explicitly attached Playwright endpoint, but their
+browser behavior is outside the bundled OpenLia skill set and must be reviewed
+by the operator. Because the attached browser uses one shared authenticated
+profile, an external multi-call workflow must reserve the browser lease through
+`openlia_browser_session_request`, pass its lease to every Playwright call,
+renew it during long reasoning or human handoff, and release it when finished.
+Browser tools are exposed directly and eagerly from the relay's conservative
+allowlist rather than through model tool search. Mutating tools require a string
+`operation_id`; the relay strips it before forwarding and handles exact
+duplicates or uncertain failures per active lease. Evaluation/code execution,
+upload/drop, network request or inspection, console, and other opt-in or
+dangerous tools remain unavailable through the OpenLia relay by default. The
+relay is not a security boundary for an external client that bypasses it and
+reaches raw Playwright.
 
 ### Bundled Dependencies
 
 `make venv` installs the remaining Python development requirements for local
-tests. The browser-job service, MCP clients, serializers, and job client are
-Bun/TypeScript artifacts. The derived Hermes image installs only the claim
+tests. The MCP relay and supervisor are Bun/TypeScript artifacts. The derived Hermes image installs only the claim
 validation requirement explicitly listed in `docker/Dockerfile`; adding an
 arbitrary `requirements.txt` below `profile/skills/` does not cause Docker or
 deployment to discover and install it automatically.

@@ -13,11 +13,10 @@ listen_port = 18765
 # For example, if host is "<host>" and listen_port is 8088:
 # Configure this explicit endpoint in config.toml:
 #   base_url = "http://locho-<host>:8088/v1"
-# And for browser-tools on port 8932:
+# And for openlia-browser on port 8932:
 #   OPENLIA_BROWSER_MCP_URL="http://locho-<host>:8932"
-#   OPENLIA_BROWSER_JOBS_URL="http://locho-<host>:8932"
 
-# Host-local browser-tools service (job queue + Playwright MCP proxy):
+# Host-local openlia-browser service (Playwright supervisor + MCP proxy):
 # [[services]]
-# capability = "browser-tools:http:<capability>"
+# capability = "openlia-browser:http:<capability>"
 # listen_port = 8932

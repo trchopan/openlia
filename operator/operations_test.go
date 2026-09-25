@@ -327,7 +327,7 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 	repo := t.TempDir()
 	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
 	config := testConfig(repo, runtimeRoot)
-	config.ServiceRoles = map[string]string{"laptop.browser-tools": "browser-tools"}
+	config.ServiceRoles = map[string]string{"laptop.openlia-browser": "openlia-browser"}
 	if err := os.MkdirAll(filepath.Join(repo, "docker"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(attachment), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(attachment, []byte("host_id = \"laptop\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"genai:http:capability\"\nlisten_port = 8088\n[[services]]\ncapability = \"browser-tools:http:capability\"\nlisten_port = 8932\n"), 0o600); err != nil {
+	if err := os.WriteFile(attachment, []byte("host_id = \"laptop\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"genai:http:capability\"\nlisten_port = 8088\n[[services]]\ncapability = \"openlia-browser:http:capability\"\nlisten_port = 8932\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := GenerateAttachments(config); err != nil {
@@ -346,7 +346,7 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, expected := range []string{"locho-laptop:", "build:", "docker/locho.Dockerfile", "cap_drop: [ALL]", "no-new-privileges:true", "OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8932\"", "OPENLIA_BROWSER_JOBS_URL: \"http://locho-laptop:8932\""} {
+	for _, expected := range []string{"locho-laptop:", "build:", "docker/locho.Dockerfile", "cap_drop: [ALL]", "no-new-privileges:true", "OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8932\""} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("generated Compose missing %q:\n%s", expected, text)
 		}
@@ -471,11 +471,11 @@ func TestGeneratedAttachmentsContainOpenWebUI(t *testing.T) {
 	}
 }
 
-func TestGeneratedAttachmentsDisableHermesBrowserToolsetForPlaywrightRole(t *testing.T) {
+func TestGeneratedAttachmentsDisableHermesOpenLIABrowserToolset(t *testing.T) {
 	repo := t.TempDir()
 	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
 	config := testConfig(repo, runtimeRoot)
-	config.ServiceRoles = map[string]string{"laptop.browser-tools": "browser-tools"}
+	config.ServiceRoles = map[string]string{"laptop.openlia-browser": "openlia-browser"}
 	if err := os.MkdirAll(filepath.Join(repo, "docker"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +483,7 @@ func TestGeneratedAttachmentsDisableHermesBrowserToolsetForPlaywrightRole(t *tes
 	if err := os.MkdirAll(filepath.Dir(attachment), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(attachment, []byte("host_id = \"laptop\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"browser-tools:http:capability\"\nlisten_port = 8932\n"), 0o600); err != nil {
+	if err := os.WriteFile(attachment, []byte("host_id = \"laptop\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"openlia-browser:http:capability\"\nlisten_port = 8932\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(config.DataRoot, 0o700); err != nil {
@@ -500,10 +500,33 @@ func TestGeneratedAttachmentsDisableHermesBrowserToolsetForPlaywrightRole(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "disabled_toolsets:\n    - browser") || !strings.Contains(string(data), "url: \"http://locho-laptop:8932/mcp\"") || strings.Contains(string(data), "transport: \"sse\"") {
+	text := string(data)
+	for _, expected := range []string{
+		"tools:\n  tool_search:\n    enabled: off",
+		"agent:\n  disabled_toolsets:\n    - browser",
+		"url: \"http://locho-laptop:8932/mcp\"",
+		"connect_timeout: 30",
+		"timeout: 120",
+		"tools:\n      include:",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("browser toolset policy is missing %q:\n%s", expected, data)
+		}
+	}
+	for _, tool := range managedBrowserToolAllowlist {
+		if !strings.Contains(text, "        - "+tool) {
+			t.Fatalf("browser toolset policy is missing allowlisted tool %q:\n%s", tool, data)
+		}
+	}
+	for _, excluded := range []string{"browser_evaluate", "browser_run_code_unsafe", "browser_request", "browser_console_messages"} {
+		if strings.Contains(text, excluded) {
+			t.Fatalf("browser toolset policy unexpectedly includes excluded tool %q:\n%s", excluded, data)
+		}
+	}
+	if strings.Contains(text, "transport: \"sse\"") || strings.Contains(text, "OPENLIA_BROWSER_JOB") || strings.Contains(text, "OPENLIA_BROWSER_JOBS") {
 		t.Fatalf("browser toolset was not disabled:\n%s", data)
 	}
-	config.ServiceRoles["laptop.browser-tools"] = "unassigned"
+	config.ServiceRoles["laptop.openlia-browser"] = "unassigned"
 	if err := GenerateAttachments(config); err != nil {
 		t.Fatal(err)
 	}
@@ -701,8 +724,8 @@ func TestLochoServiceRegistryAndRoleMapping(t *testing.T) {
 		t.Fatal(err)
 	}
 	config.ServiceRoles = map[string]string{
-		"laptop.browser-tools": "browser-tools",
-		"laptop.ollama":        "openai-gateway",
+		"laptop.openlia-browser": "openlia-browser",
+		"laptop.ollama":          "openai-gateway",
 	}
 	attachmentDir := filepath.Join(config.LochoRoot, "laptop")
 	if err := os.MkdirAll(attachmentDir, 0o700); err != nil {
@@ -712,7 +735,7 @@ func TestLochoServiceRegistryAndRoleMapping(t *testing.T) {
 listen_host = "0.0.0.0"
 
 [[services]]
- capability = "browser-tools:http:supersecrettoken1"
+ capability = "openlia-browser:http:supersecrettoken1"
  listen_port = 8932
 
 [[services]]
@@ -749,8 +772,8 @@ listen_port = 2222
 		roleMap[svc.Name] = svc.Role
 		endpointMap[svc.Name] = svc.Endpoint
 	}
-	if roleMap["browser-tools"] != "browser-tools" {
-		t.Errorf("browser-tools role = %q, want 'browser-tools'", roleMap["browser-tools"])
+	if roleMap["openlia-browser"] != "openlia-browser" {
+		t.Errorf("openlia-browser role = %q, want 'openlia-browser'", roleMap["openlia-browser"])
 	}
 	if roleMap["ollama"] != "openai-gateway" {
 		t.Errorf("ollama role = %q, want 'openai-gateway'", roleMap["ollama"])
@@ -762,8 +785,8 @@ listen_port = 2222
 		t.Errorf("ssh role = %q, want 'unassigned'", roleMap["ssh"])
 	}
 
-	if endpointMap["browser-tools"] != "http://locho-laptop:8932" {
-		t.Errorf("browser-tools endpoint = %q, want 'http://locho-laptop:8932'", endpointMap["browser-tools"])
+	if endpointMap["openlia-browser"] != "http://locho-laptop:8932" {
+		t.Errorf("openlia-browser endpoint = %q, want 'http://locho-laptop:8932'", endpointMap["openlia-browser"])
 	}
 	if endpointMap["ollama"] != "http://locho-laptop:11434" {
 		t.Errorf("ollama endpoint = %q, want 'http://locho-laptop:11434'", endpointMap["ollama"])
@@ -811,8 +834,7 @@ listen_port = 2222
 
 	for _, expected := range []string{
 		"OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8932\"",
-		"OPENLIA_BROWSER_JOBS_URL: \"http://locho-laptop:8932\"",
-		"OPENLIA_SERVICE_LAPTOP_BROWSER_TOOLS_URL: \"http://locho-laptop:8932\"",
+		"OPENLIA_SERVICE_LAPTOP_OPENLIA_BROWSER_URL: \"http://locho-laptop:8932\"",
 		"OPENLIA_SERVICE_LAPTOP_OLLAMA_URL: \"http://locho-laptop:11434\"",
 	} {
 		if !strings.Contains(composeText, expected) {
