@@ -285,6 +285,7 @@ func TestDurableBackupExcludesRebuildableSkillsAndCaches(t *testing.T) {
 		filepath.Join(config.DataRoot, "workspace", "keep.md"):                          "workspace",
 		filepath.Join(config.DataRoot, "cache", "model.bin"):                            "cache",
 		filepath.Join(config.DataRoot, "home", "package.bin"):                           "package",
+		filepath.Join(config.DataRoot, "skills", "creative", "DESCRIPTION.md"):          "bundled metadata",
 		filepath.Join(config.DataRoot, "skills", "creative", "ascii-video", "SKILL.md"): "bundled",
 		filepath.Join(config.DataRoot, "skills", "claim-review", "SKILL.md"):            "managed",
 		filepath.Join(config.DataRoot, "skills", ".bundled_manifest"):                   "ascii-video:hash\n",

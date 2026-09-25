@@ -930,6 +930,9 @@ func bundledSkillGroups(dataRoot string) map[string]bool {
 		}
 		allBundled := true
 		for _, child := range children {
+			if !child.IsDir() && child.Name() == "DESCRIPTION.md" {
+				continue
+			}
 			if !child.IsDir() || !bundled[child.Name()] {
 				allBundled = false
 				break
