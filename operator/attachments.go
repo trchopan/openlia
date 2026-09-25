@@ -195,6 +195,17 @@ func generateAttachmentsFile(config Config) error {
 	if err := validateOpenWebUI(config.OpenWebUIHost, config.OpenWebUIPort); err != nil {
 		return err
 	}
+	apiEnvPath := filepath.Join(config.SecretDir, "api-server.env")
+	if config.OpenWebUIHost != "" {
+		if err := EnsureOpenWebUISecrets(config); err != nil {
+			return err
+		}
+	}
+	if config.APIEnabled || config.OpenWebUIHost != "" {
+		if err := ensureAPIServerEnv(config, apiEnvPath); err != nil {
+			return err
+		}
+	}
 	workspaceUIHost, workspaceUIPort := config.WorkspaceUIHost, config.WorkspaceUIPort
 	hosts, err := ListAttachments(config)
 	if err != nil {
@@ -246,6 +257,10 @@ func generateAttachmentsFile(config Config) error {
 			builder.WriteString("    environment:\n")
 			if config.APIEnabled || config.OpenWebUIHost != "" {
 				builder.WriteString("      API_SERVER_ENABLED: \"true\"\n      API_SERVER_HOST: \"0.0.0.0\"\n")
+				quotedAPIEnvPath, _ := json.Marshal(apiEnvPath)
+				builder.WriteString("    env_file:\n      - ")
+				builder.Write(quotedAPIEnvPath)
+				builder.WriteString("\n")
 			}
 			if browserURL != "" {
 				fmt.Fprintf(&builder, "      OPENLIA_BROWSER_MCP_URL: %q\n", browserURL)
@@ -285,9 +300,6 @@ func generateAttachmentsFile(config Config) error {
 		builder.WriteString(fmt.Sprintf("\n    ports:\n      - %q\n    networks:\n      - openlia-private\n    healthcheck:\n      test: [\"CMD\", \"bun\", \"-e\", \"fetch('http://127.0.0.1:%d/health').then(r => { if (!r.ok) process.exit(1) })\"]\n      interval: 10s\n      timeout: 3s\n      retries: 5\n    deploy:\n      resources:\n        limits:\n          cpus: \"0.5\"\n          memory: 256M\n    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n", fmt.Sprintf("%s:%d:%d", workspaceUIHost, workspaceUIPort, workspaceUIPort), workspaceUIPort))
 	}
 	if config.OpenWebUIHost != "" {
-		if err := EnsureOpenWebUISecrets(config); err != nil {
-			return err
-		}
 		dataRoot, _ := json.Marshal(config.OpenWebUIDataRoot)
 		envFilePath, _ := json.Marshal(filepath.Join(config.SecretDir, "open-webui.env"))
 		image := config.OpenWebUIImage
@@ -338,6 +350,17 @@ func generateAttachmentsFile(config Config) error {
 		return err
 	}
 	return nil
+}
+
+func ensureAPIServerEnv(config Config, path string) error {
+	apiKey, err := readSecretValue(config.SecretFile, "API_SERVER_KEY")
+	if err != nil || apiKey == "" {
+		return fmt.Errorf("API_SERVER_KEY is required for the Hermes API server")
+	}
+	if err := EnsureDir(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return AtomicWriteFile(path, []byte("API_SERVER_KEY="+apiKey+"\n"), 0o600)
 }
 
 func RotateAttachment(config Config, host, source string, now time.Time, composers ...Compose) error {
