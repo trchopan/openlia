@@ -469,6 +469,17 @@ func TestGeneratedAttachmentsContainOpenWebUI(t *testing.T) {
 	if strings.Contains(text, apiKey) {
 		t.Fatalf("API key %q leaked into generated Compose file:\n%s", apiKey, text)
 	}
+	apiEnvPath := filepath.Join(config.SecretDir, "api-server.env")
+	apiEnv, err := os.ReadFile(apiEnvPath)
+	if err != nil {
+		t.Fatalf("api-server.env missing: %v", err)
+	}
+	if string(apiEnv) != "API_SERVER_KEY="+apiKey+"\n" {
+		t.Fatalf("api-server.env has unexpected contents: %q", apiEnv)
+	}
+	if info, err := os.Stat(apiEnvPath); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("api-server.env has unsafe mode: %v", err)
+	}
 }
 
 func TestGeneratedAttachmentsDisableHermesOpenLIABrowserToolset(t *testing.T) {
