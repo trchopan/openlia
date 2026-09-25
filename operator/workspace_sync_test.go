@@ -40,6 +40,12 @@ func TestWorkspaceGitSyncHelper(t *testing.T) {
 		t.Fatalf("dirty sync output = %s", dirtyOutput)
 	}
 	os.Remove(filepath.Join(workspace, "local.md"))
+	runGit(t, "-C", workspace, "config", "openlia.workspace-remote-enabled", "false")
+	disabledOutput := runSync(t, script, workspace)
+	if !bytes.Contains(disabledOutput, []byte(`"status":"disabled"`)) {
+		t.Fatalf("disabled sync output = %s", disabledOutput)
+	}
+	runGit(t, "-C", workspace, "config", "openlia.workspace-remote-enabled", "true")
 
 	writeFile(t, filepath.Join(publisher, "remote.md"), "remote\n")
 	runGit(t, "-C", publisher, "add", "--all", "--", ".")

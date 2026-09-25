@@ -629,7 +629,12 @@ Do not set `OPENAI_BASE_URL` for this provider chain. Assign the Locho service
 the `openai-gateway` role and declare its explicit `/v1` URL in the matching
 `fallback_providers` entry. Hermes keeps `openai-api` pointed at official OpenAI.
 
-To enable the workspace Git backup, add a repository-scoped GitHub personal
+OpenLia initializes the workspace as a local Git repository even when no remote
+is configured. It creates an initial commit and preserves subsequent approved
+workspace updates as local history. Local commits use concise `backup:` subjects
+and do not authorize a remote push.
+
+To additionally enable GitHub backup, add a repository-scoped GitHub personal
 access token to the same protected source. The token must be limited to the
 target repository and use a supported GitHub PAT format:
 
@@ -646,12 +651,11 @@ Configure the non-secret repository settings during initialization:
 
 The remote URL, branch, schedule, and commit identity are stored in the
 operator `config.toml`; the PAT remains only in the protected secret source.
-OpenLia initializes the workspace Git repository, safely reconciles an existing
-remote `main` history, performs the initial push, and enables a no-agent Hermes
-pull job. The default schedule is every five minutes. Conflicting histories
-stop without discarding either side.
+OpenLia safely reconciles an existing remote `main` history, performs the
+initial push, and enables a no-agent Hermes pull job. The default schedule is
+every five minutes. Conflicting histories stop without discarding either side.
 
-The automatic job only fast-forwards a clean local branch from the remote. It
+When configured, the automatic job only fast-forwards a clean local branch from the remote. It
 does not stage, commit, rebase, or push workspace changes, and does not invoke a
 model. Use the bundled `workspace-git` skill for status checks, requested
 pushes, structural branches, and GitHub pull requests.
@@ -804,9 +808,10 @@ between bundled and external development.
 - Workspace initialization is copy-once; later deployments preserve user files.
 - Backups exclude secret files, OAuth state, and Locho capabilities.
 - Dangerous unattended actions are denied and skill writes are staged for review.
-- Workspace Git uses a repository-scoped GitHub PAT through a mounted askpass
+- Local workspace Git history does not require credentials or a remote.
+- Optional GitHub backup uses a repository-scoped PAT through a mounted askpass
   helper; credentials are not stored in Git remotes or workspace files.
-- Automatic workspace pulls are handled by a static no-agent cron script and
+- Configured automatic workspace pulls use a static no-agent cron script and
   refuse dirty-branch conflicts, instruction-file changes, hard resets, and
   force-pushes.
 

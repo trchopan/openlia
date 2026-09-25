@@ -36,15 +36,19 @@ prompt; other cron jobs remain opt-in and must fail closed when a human
 approval is unavailable. Manage cron jobs through Hermes' cron interface
 rather than editing its generated state files directly.
 
-## Workspace Git backup
+## Workspace Git history
 
-- The workspace Git remote is configured by OpenLia during `init`; non-secret
-  settings belong in the operator `config.toml`.
+- OpenLia maintains local Git history whether or not a remote is configured.
+- After an approved, coherent workspace update, stage only the intended files
+  and commit them with `backup: <concise description>`. Do not create empty
+  commits, and do not treat a local commit as approval to push.
+- An optional workspace Git remote is configured by OpenLia; non-secret settings
+  belong in the operator `config.toml`.
 - The repository PAT belongs only in the protected secret source as
   `OPENLIA_GIT_TOKEN`. Never place it in workspace files, remote URLs, Git
   config, prompts, reports, or command output.
-- Use the `workspace-git` skill for manual pushes and structural changes. The
-  bundled no-agent cron job performs the routine pull only.
+- Use the `workspace-git` skill for local history, manual pushes, and structural
+  changes. When configured, the bundled no-agent cron job performs pulls only.
 - Do not use hard resets, force-pushes, destructive conflict resolution, or
   pulls over dirty files. Stop and report the exact Git state instead.
 

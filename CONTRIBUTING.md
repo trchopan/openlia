@@ -78,3 +78,21 @@ values in repository files.
 
 Before submitting a change, review the complete staged file list and confirm
 that no local or generated files are included.
+
+## Commit Messages
+
+Use a concise Conventional Commit subject for source repository changes:
+
+```text
+<type>: <imperative summary>
+```
+
+Common types are `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, and `ci`.
+Keep one coherent change per commit, use a lowercase type, omit a trailing
+period, and add a body only when the reason or operational impact is not clear
+from the diff. Pull request numbers may be appended by the merge workflow.
+
+The Personal OS workspace has a separate history policy. Its routine content
+snapshots use `backup: <concise description>`; initialization and repository
+maintenance use `chore:`, while explicitly requested structural documentation
+changes may use `docs:`. A local workspace commit does not authorize a push.

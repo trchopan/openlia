@@ -1,9 +1,9 @@
 # Optional Cron Jobs
 
-The workspace Git pull is the only job OpenLia enables automatically. It is a
-static no-agent job created by `openlia init` after the workspace remote has
-been configured. It runs the bundled `scripts/openlia-workspace-git-sync.sh`
-script on the configured schedule and does not spend model tokens.
+When a workspace remote is configured, its Git pull is the only job OpenLia
+enables automatically. It is a static no-agent job created after remote setup.
+It runs the bundled `scripts/openlia-workspace-git-sync.sh` script on the
+configured schedule and does not spend model tokens.
 
 Other jobs are not enabled by this profile. Scheduled agent work must be
 reviewed after the interactive workflows and credentials are configured.

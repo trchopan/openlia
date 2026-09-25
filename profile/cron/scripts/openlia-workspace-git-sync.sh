@@ -48,6 +48,11 @@ if [[ -n "$(git status --porcelain)" ]]; then
     exit 0
 fi
 
+if [[ "$(git config --bool --get openlia.workspace-remote-enabled || true)" == false ]]; then
+    printf '%s\n' '{"wakeAgent":false,"status":"disabled"}'
+    exit 0
+fi
+
 origin_url=$(git remote get-url origin 2>/dev/null || true)
 if [[ -z "$origin_url" ]]; then
     printf '%s\n' 'workspace Git sync stopped: origin is not configured' >&2

@@ -80,7 +80,8 @@ in the configured `fallback_providers` entries instead.
 ## Workspace Git
 
 The provider-free CLI and local smoke checks validate the bundled workspace Git
-skill, image tooling, profile sync script, and protected workspace template.
+skill, image tooling, profile sync script, protected workspace template, and
+local repository initialization without a remote.
 Actual remote synchronization requires a repository-scoped GitHub PAT in the
 protected source and a disposable or approved private repository. The setup
 flow performs the initial push, while the scheduled job only pulls clean

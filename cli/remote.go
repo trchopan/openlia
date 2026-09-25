@@ -225,7 +225,7 @@ func operatorArguments(operation string, args []string) ([]string, bool) {
 
 func operatorOnlyOperation(operation string) bool {
 	switch filepath.ToSlash(operation) {
-	case "skill-sources", "skills", "workspace-migrate":
+	case "skill-sources", "skills", "workspace-git", "ops/workspace-git.sh", "workspace-migrate":
 		return true
 	default:
 		return false
