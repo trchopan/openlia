@@ -63,6 +63,7 @@ func TestOperatorArgumentsMapAllOperationScripts(t *testing.T) {
 		"skill-sources",
 		"skills",
 		"workspace-migrate",
+		"instructions",
 	} {
 		if _, ok := operatorArguments(script, []string{"--json"}); !ok {
 			t.Fatalf("script %s was not mapped to the Go operator", script)
@@ -87,7 +88,7 @@ func TestSkillSourcesTransportAsJSON(t *testing.T) {
 func TestOperatorOnlyOperationsHaveNoLegacyFallback(t *testing.T) {
 	config := defaultConfig()
 	config.Target = "operator@example.test"
-	for _, operation := range []string{"skill-sources", "skills", "workspace-git"} {
+	for _, operation := range []string{"skill-sources", "skills", "workspace-git", "instructions"} {
 		command := (Remote{Config: config}).operationCommand(operation, "list", "--json")
 		if strings.Contains(command, "ops/skills") || !strings.Contains(command, "Go operator is required") {
 			t.Fatalf("%s operation has unsafe fallback: %s", operation, command)
@@ -115,7 +116,7 @@ func TestLocalExtractsOperatorErrorJSON(t *testing.T) {
 	config.Mode = "local"
 	config.Target = ""
 	config.InstallRoot = filepath.Join(t.TempDir(), "openlia")
-	_, err := (Local{Config: config}).operator(context.Background(), filepath.Join(config.InstallRoot, "release"), "unknown", "--json")
+	_, err := (Local{Config: config}).operator(context.Background(), filepath.Join(config.InstallRoot, "release"), nil, "unknown", "--json")
 	if err == nil || !strings.Contains(err.Error(), "local operator failed: unknown command") {
 		t.Fatalf("Local.operator() error = %v", err)
 	}

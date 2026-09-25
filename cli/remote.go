@@ -197,6 +197,8 @@ func operatorArguments(operation string, args []string) ([]string, bool) {
 		command = "skills"
 	case "workspace-migrate":
 		command = "workspace-migrate"
+	case "instructions":
+		command = "instructions"
 	case "ops/bootstrap.sh":
 		command = "bootstrap"
 	case "ops/profile.sh":
@@ -225,7 +227,7 @@ func operatorArguments(operation string, args []string) ([]string, bool) {
 
 func operatorOnlyOperation(operation string) bool {
 	switch filepath.ToSlash(operation) {
-	case "skill-sources", "skills", "workspace-git", "ops/workspace-git.sh", "workspace-migrate":
+	case "skill-sources", "skills", "workspace-git", "ops/workspace-git.sh", "workspace-migrate", "instructions":
 		return true
 	default:
 		return false
@@ -507,16 +509,16 @@ func (local Local) command(ctx context.Context, operationRoot, script string, ar
 }
 
 func (local Local) operation(ctx context.Context, script string, input []byte, args ...string) ([]byte, error) {
-	if len(input) != 0 {
-		return nil, fmt.Errorf("local operations do not accept stdin")
-	}
 	if operatorArgs, ok := operatorArguments(script, args); ok {
-		return local.operator(ctx, local.releasePath(), operatorArgs...)
+		return local.operator(ctx, local.releasePath(), input, operatorArgs...)
+	}
+	if len(input) != 0 {
+		return nil, fmt.Errorf("local legacy operations do not accept stdin")
 	}
 	return local.command(ctx, local.releasePath(), script, args...)
 }
 
-func (local Local) operator(ctx context.Context, operationRoot string, args ...string) ([]byte, error) {
+func (local Local) operator(ctx context.Context, operationRoot string, input []byte, args ...string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -544,7 +546,7 @@ func (local Local) operator(ctx context.Context, operationRoot string, args ...s
 	}()
 
 	var stdout, stderr bytes.Buffer
-	code := operator.RunContext(ctx, args, nil, &stdout, &stderr)
+	code := operator.RunContext(ctx, args, bytes.NewReader(input), &stdout, &stderr)
 	if code != operator.ExitOK {
 		detail := strings.TrimSpace(redact(stderr.String()))
 		if parsed := operatorError(stdout.Bytes()); parsed != "" {
@@ -690,7 +692,7 @@ func (local Local) health(ctx context.Context, allowStopped, providerCheck bool)
 }
 
 func (local Local) uninstall(ctx context.Context) ([]byte, error) {
-	return local.operator(ctx, local.rootPath("current"), "uninstall", "--json")
+	return local.operator(ctx, local.rootPath("current"), nil, "uninstall", "--json")
 }
 
 func (local Local) composeLogs(ctx context.Context, follow bool) ([]byte, error) {

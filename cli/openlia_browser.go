@@ -247,10 +247,13 @@ func renderOpenLIABrowserRunner(target openliaBrowserTarget, nodePath, nodeDir, 
 func lifecycleOpenLIABrowser(options Options, ctx context.Context, target openliaBrowserTarget, action string) int {
 	root := shellQuote(target.Root)
 	pid := target.Root + "/run/openlia-browser.pid"
+	legacyPID := target.Root + "/run/browser-tools.pid"
+	stop := "for pid_file in " + shellQuote(pid) + " " + shellQuote(legacyPID) + "; do if [ -f \"$pid_file\" ]; then kill \"$(cat \"$pid_file\")\" 2>/dev/null || true; rm -f \"$pid_file\"; fi; done"
+	waitHealthy := "for attempt in 1 2 3 4 5 6 7 8 9 10; do if curl -fsS http://127.0.0.1:8932/health >/dev/null 2>&1; then exit 0; fi; sleep 1; done; exit 1"
 	commands := map[string]string{
-		"start":   "set -eu; if [ -f " + shellQuote(pid) + " ] && kill -0 \"$(cat " + shellQuote(pid) + ")\" 2>/dev/null; then exit 0; fi; nohup " + root + "/run.sh > " + root + "/logs/openlia-browser.log 2>&1 < /dev/null & echo $! > " + shellQuote(pid) + "; chmod 600 " + shellQuote(pid),
-		"stop":    "set -eu; if [ -f " + shellQuote(pid) + " ]; then kill \"$(cat " + shellQuote(pid) + ")\" 2>/dev/null || true; rm -f " + shellQuote(pid) + "; fi",
-		"restart": "set -eu; if [ -f " + shellQuote(pid) + " ]; then kill \"$(cat " + shellQuote(pid) + ")\" 2>/dev/null || true; rm -f " + shellQuote(pid) + "; fi; nohup " + root + "/run.sh > " + root + "/logs/openlia-browser.log 2>&1 < /dev/null & echo $! > " + shellQuote(pid) + "; chmod 600 " + shellQuote(pid),
+		"start":   "set -eu; if [ -f " + shellQuote(pid) + " ] && kill -0 \"$(cat " + shellQuote(pid) + ")\" 2>/dev/null; then " + waitHealthy + "; fi; " + stop + "; nohup " + root + "/run.sh > " + root + "/logs/openlia-browser.log 2>&1 < /dev/null & echo $! > " + shellQuote(pid) + "; chmod 600 " + shellQuote(pid) + "; " + waitHealthy,
+		"stop":    "set -eu; " + stop,
+		"restart": "set -eu; " + stop + "; nohup " + root + "/run.sh > " + root + "/logs/openlia-browser.log 2>&1 < /dev/null & echo $! > " + shellQuote(pid) + "; chmod 600 " + shellQuote(pid) + "; " + waitHealthy,
 	}
 	command, ok := commands[action]
 	if !ok {

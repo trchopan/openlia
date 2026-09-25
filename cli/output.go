@@ -99,6 +99,8 @@ Usage:
   openlia backup create|restore
   openlia workspace git setup|status
   openlia workspace migrate [<path>|upload <path>|status [id]|merge [id]|list] [--dry-run]
+  openlia instructions status [NAME]
+  openlia instructions diff|merge|keep|reset NAME
   openlia workspace-ui password
   openlia browser configure --local|--target user@host --root PATH --extension-token-file PATH [--ssh-port PORT]
   openlia browser install|start|stop|restart|status|logs|uninstall

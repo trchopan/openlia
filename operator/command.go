@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -103,6 +104,8 @@ func RunContext(ctx context.Context, args []string, input io.Reader, output, err
 		return runWorkspaceGit(ctx, config, args, output, errorOutput, jsonOutput)
 	case "workspace-migrate":
 		return runWorkspaceMigrate(ctx, config, args, output, errorOutput, jsonOutput)
+	case "instructions":
+		return runInstructions(config, args, input, output, errorOutput, jsonOutput, now)
 	case "uninstall":
 		if len(args) != 0 {
 			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("uninstall accepts no arguments"))
@@ -299,7 +302,7 @@ func runDeploy(ctx context.Context, config Config, args []string, output, errorO
 			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 		}
 		human := fmt.Sprintf("openlia deploy: profile assets synchronized; workspace preserved; updated=%d; forked=%d; updates_available=%d; customized=%d; unmanaged=%d", result.Skills.Updated, result.Skills.Forked, result.Skills.UpdatesAvailable, result.Skills.Customized, result.Skills.Unmanaged)
-		return emit(output, map[string]any{"ok": true, "action": "profile", "backup": backup.Archive, "workspace": "preserved", "profile_sync": result}, jsonOutput, human)
+		return emit(output, map[string]any{"ok": true, "action": "profile", "backup": backup.Archive, "workspace": "preserved", "attention_required": result.Instructions.AttentionRequired, "profile_sync": result}, jsonOutput, human)
 	}
 	result, err := Deploy(ctx, config, NewCompose(config, nil), DeployOptions{Action: action, Component: component, ForceStart: forceStart}, now)
 	if err != nil {
@@ -400,6 +403,67 @@ func commandError(output, errorOutput io.Writer, jsonOutput bool, code int, err 
 	return code
 }
 
+func runInstructions(config Config, args []string, input io.Reader, output, errorOutput io.Writer, jsonOutput bool, now time.Time) int {
+	if len(args) == 0 {
+		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("instructions requires status, diff, merge, keep, or reset"))
+	}
+	action := args[0]
+	args = args[1:]
+	approved, args := removeFlag(args, "--approve")
+	switch action {
+	case "status":
+		if len(args) > 1 {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("instructions status accepts at most one name"))
+		}
+		selected := ""
+		if len(args) == 1 {
+			selected = args[0]
+		}
+		result, err := InstructionStatus(config, selected)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, result, jsonOutput, fmt.Sprintf("openlia instructions: %d instruction file(s); attention_required=%t", len(result.Instructions), result.AttentionRequired))
+	case "diff":
+		if len(args) != 1 {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("instructions diff requires NAME"))
+		}
+		result, err := InstructionDiff(config, args[0])
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		if !jsonOutput {
+			fmt.Fprint(output, result.ThreeWay)
+			return ExitOK
+		}
+		return emit(output, result, true, "")
+	case "merge", "keep", "reset":
+		if len(args) != 1 || !approved {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("instructions %s requires NAME and --approve", action))
+		}
+		if input == nil {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("instruction mutation request is required"))
+		}
+		decoder := json.NewDecoder(io.LimitReader(input, 64*1024))
+		decoder.DisallowUnknownFields()
+		var request InstructionMutationRequest
+		if err := decoder.Decode(&request); err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("decode instruction mutation request: %w", err))
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("instruction mutation request contains trailing data"))
+		}
+		result, err := MutateInstruction(config, args[0], action, request, now)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, result, jsonOutput, fmt.Sprintf("openlia instructions: %s %s; state=%s", action, args[0], result.State))
+	default:
+		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("unknown instructions action %q", action))
+	}
+}
+
 func removeFlag(args []string, wanted string) (bool, []string) {
 	found := false
 	result := make([]string, 0, len(args))
@@ -452,7 +516,7 @@ Usage:
 
 Subcommands:
 	  bootstrap profile skill-status skill-fork skill-migration skill-sources skills backup attachments auth deploy
-	  healthcheck workspace-git workspace-migrate uninstall`)
+	  healthcheck workspace-git workspace-migrate instructions uninstall`)
 }
 
 func runWorkspaceMigrate(ctx context.Context, config Config, args []string, output, errorOutput io.Writer, jsonOutput bool) int {

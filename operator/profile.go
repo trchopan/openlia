@@ -38,10 +38,11 @@ func NewProfileOperator(config Config) *ProfileOperator {
 }
 
 type ProfileSyncResult struct {
-	OK        bool              `json:"ok"`
-	Action    string            `json:"action"`
-	Workspace string            `json:"workspace"`
-	Skills    ProfileSkillStats `json:"skills"`
+	OK           bool                    `json:"ok"`
+	Action       string                  `json:"action"`
+	Workspace    string                  `json:"workspace"`
+	Skills       ProfileSkillStats       `json:"skills"`
+	Instructions InstructionStatusResult `json:"instructions"`
 }
 
 type ProfileSkillStats struct {
@@ -207,16 +208,12 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 		marker string
 		mode   fs.FileMode
 	}{
-		{filepath.Join(p.Config.RepositoryRoot, "profile", "SOUL.md"), filepath.Join(p.Config.DataRoot, "SOUL.md"), filepath.Join(managedRoot, "SOUL.md.sha256"), 0o600},
-		{filepath.Join(p.Config.RepositoryRoot, "profile", "AGENTS.md"), filepath.Join(p.Config.DataRoot, "AGENTS.md"), filepath.Join(managedRoot, "AGENTS.md.sha256"), 0o600},
 		{filepath.Join(p.Config.RepositoryRoot, "profile", "config.yaml"), filepath.Join(p.Config.DataRoot, "config.yaml"), filepath.Join(managedRoot, "config.yaml.sha256"), 0o600},
 		{filepath.Join(p.Config.RepositoryRoot, "profile", "cron", "scripts", "openlia-workspace-git-sync.sh"), filepath.Join(p.Config.DataRoot, "scripts", "openlia-workspace-git-sync.sh"), filepath.Join(managedRoot, "openlia-workspace-git-sync.sh.sha256"), 0o700},
 	} {
 		var err error
 		if filepath.Base(item.dest) == "config.yaml" {
 			err = p.syncHermesConfig(item.source, item.dest, item.marker, item.mode)
-		} else if filepath.Base(item.dest) == "SOUL.md" {
-			err = p.syncSoul(item.source, item.dest, item.marker, item.mode)
 		} else {
 			err = p.syncFile(item.source, item.dest, item.marker, item.mode)
 		}
@@ -228,7 +225,11 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 		return ProfileSyncResult{}, err
 	}
 
-	result := ProfileSyncResult{OK: true, Action: "profile-sync", Workspace: "preserved", Skills: ProfileSkillStats{
+	instructions, err := SyncInstructions(p.Config, p.now())
+	if err != nil {
+		return ProfileSyncResult{}, err
+	}
+	result := ProfileSyncResult{OK: true, Action: "profile-sync", Workspace: "preserved", Instructions: instructions, Skills: ProfileSkillStats{
 		CustomizedNames: []string{}, UnmanagedNames: []string{}, Results: []SkillResult{},
 	}}
 	sourceRoot := filepath.Join(p.Config.RepositoryRoot, "profile", "skills")

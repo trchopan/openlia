@@ -66,6 +66,8 @@ func Run(args []string, assets fs.FS) int {
 		return commandBackup(options, remaining[1:])
 	case "workspace":
 		return commandWorkspace(options, remaining[1:])
+	case "instructions":
+		return commandInstructions(options, remaining[1:])
 	case "workspace-ui":
 		return commandWorkspaceUI(options, remaining[1:])
 	case "browser":
@@ -433,6 +435,92 @@ func commandLifecycle(options Options, action string, args []string) int {
 	return renderRemote(options, raw, "openlia "+action+": "+redact(string(raw)))
 }
 
+type instructionStatusEnvelope struct {
+	Schema            int  `json:"schema"`
+	OK                bool `json:"ok"`
+	AttentionRequired bool `json:"attention_required"`
+	Instructions      []struct {
+		Name            string `json:"name"`
+		State           string `json:"state"`
+		CurrentHash     string `json:"current_hash"`
+		AvailableHash   string `json:"available_hash"`
+		UpdateAvailable bool   `json:"update_available"`
+	} `json:"instructions"`
+}
+
+func commandInstructions(options Options, args []string) int {
+	if len(args) == 0 {
+		return fail(options, ExitUsage, "instructions requires status, diff, merge, keep, or reset", nil)
+	}
+	action := args[0]
+	args = args[1:]
+	if action != "status" && action != "diff" && action != "merge" && action != "keep" && action != "reset" {
+		return fail(options, ExitUsage, "instructions requires status, diff, merge, keep, or reset", nil)
+	}
+	if action == "status" {
+		if len(args) > 1 {
+			return fail(options, ExitUsage, "instructions status accepts at most one name", nil)
+		}
+	} else if len(args) != 1 {
+		return fail(options, ExitUsage, "instructions "+action+" requires NAME", nil)
+	}
+	config, code := configOrError(options)
+	if code != ExitOK {
+		return code
+	}
+	ctx, cancel := remoteContext()
+	defer cancel()
+	deployment := newDeployment(config)
+	if action == "status" || action == "diff" {
+		opArgs := []string{action}
+		opArgs = append(opArgs, args...)
+		if options.JSON || action == "status" {
+			opArgs = append(opArgs, "--json")
+		}
+		raw, err := deployment.operation(ctx, "instructions", nil, opArgs...)
+		if err != nil {
+			return fail(options, ExitFailure, err.Error(), nil)
+		}
+		if action == "status" && !options.JSON {
+			var status instructionStatusEnvelope
+			if json.Unmarshal(raw, &status) != nil {
+				return fail(options, ExitFailure, "could not parse instruction status", nil)
+			}
+			for _, item := range status.Instructions {
+				fmt.Fprintf(os.Stdout, "%s: %s\n", item.Name, item.State)
+			}
+			return ExitOK
+		}
+		return renderRemote(options, raw, "")
+	}
+	if options.NonInteractive {
+		return fail(options, ExitUsage, "instruction mutations require interactive confirmation", nil)
+	}
+	name := args[0]
+	statusRaw, err := deployment.operation(ctx, "instructions", nil, "status", name, "--json")
+	if err != nil {
+		return fail(options, ExitFailure, err.Error(), nil)
+	}
+	var status instructionStatusEnvelope
+	if json.Unmarshal(statusRaw, &status) != nil || len(status.Instructions) != 1 {
+		return fail(options, ExitFailure, "could not parse instruction status", nil)
+	}
+	item := status.Instructions[0]
+	expected := action + " instructions " + name
+	if !confirmExact(options, fmt.Sprintf("%s %s?", titleWord(action), name), expected) {
+		return fail(options, approvalExitCode(options), "instruction mutation cancelled", nil)
+	}
+	request, err := json.Marshal(map[string]any{"schema": 1, "expected_current_hash": item.CurrentHash, "expected_available_hash": item.AvailableHash})
+	if err != nil {
+		return fail(options, ExitInternal, err.Error(), nil)
+	}
+	raw, err := deployment.operation(ctx, "instructions", request, action, name, "--approve", "--json")
+	if err != nil {
+		return fail(options, ExitFailure, err.Error(), nil)
+	}
+	return renderRemote(options, raw, "openlia instructions "+action+": "+name)
+}
+
 func deploymentResultIsRunning(raw []byte) bool {
 	state, ok := deploymentResultState(raw)
 	return ok && state == "running"
@@ -560,19 +648,21 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 		if err := deployment.activateRelease(ctx); err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
-		profileArgs := []string{"profile"}
-		if options.JSON {
-			profileArgs = append(profileArgs, "--json")
-		}
-		raw, err := deployment.operation(ctx, "deploy", nil, profileArgs...)
-		if err != nil {
-			return fail(options, ExitFailure, err.Error(), nil)
-		}
+		// A version-isolated release does not inherit generated Compose state.
+		// Generate it before profile backup so running optional services can be
+		// stopped consistently against the newly activated release.
 		if config.WorkspaceUIHost != "" || len(config.Services) > 0 {
 			if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
 				return fail(options, ExitFailure, "optional runtime Compose generation failed: "+err.Error(), nil)
 			}
-			raw, err = deployment.deploy(ctx, "deploy", false, "all")
+		}
+		profileArgs := []string{"profile", "--json"}
+		profileRaw, err := deployment.operation(ctx, "deploy", nil, profileArgs...)
+		if err != nil {
+			return fail(options, ExitFailure, err.Error(), nil)
+		}
+		if config.WorkspaceUIHost != "" || len(config.Services) > 0 {
+			_, err = deployment.deploy(ctx, "deploy", false, "all")
 			if err != nil {
 				return fail(options, ExitFailure, "optional runtime reconciliation failed: "+err.Error(), nil)
 			}
@@ -590,7 +680,7 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 				return fail(options, ExitFailure, "workspace Git reconciliation failed: "+err.Error(), nil)
 			}
 		}
-		return renderRemote(options, raw, "openlia update openlia: profile assets synchronized")
+		return renderOpenLIAUpdate(ctx, deployment, options, profileRaw)
 	}
 	// Runtime image updates intentionally reuse the pinned Compose definition.
 	// The command does not silently change a tag or digest; operators update the
@@ -613,6 +703,43 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 		return fail(options, ExitFailure, err.Error(), map[string]any{"component": component})
 	}
 	return renderRemote(options, raw, "openlia update "+component+": pinned runtime reconciled")
+}
+
+func renderOpenLIAUpdate(ctx context.Context, deployment deployment, options Options, raw []byte) int {
+	if options.JSON {
+		return renderRemote(options, raw, "")
+	}
+	var envelope struct {
+		ProfileSync struct {
+			Instructions instructionStatusEnvelope `json:"instructions"`
+		} `json:"profile_sync"`
+	}
+	if json.Unmarshal(raw, &envelope) != nil {
+		return fail(options, ExitFailure, "could not parse OpenLia update result", nil)
+	}
+	fmt.Fprintln(os.Stdout, "openlia update openlia: profile assets synchronized")
+	pending := make([]string, 0)
+	for _, item := range envelope.ProfileSync.Instructions.Instructions {
+		if item.UpdateAvailable {
+			pending = append(pending, item.Name)
+			fmt.Fprintf(os.Stdout, "Instruction update requires review: %s (%s)\n", item.Name, item.State)
+			fmt.Fprintf(os.Stdout, "Review with: openlia instructions diff %s\n", item.Name)
+		}
+	}
+	if len(pending) > 0 && !options.NonInteractive {
+		fmt.Fprint(os.Stderr, "Review instruction updates now? [y/N]: ")
+		answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if strings.EqualFold(strings.TrimSpace(answer), "y") || strings.EqualFold(strings.TrimSpace(answer), "yes") {
+			for _, name := range pending {
+				diff, err := deployment.operation(ctx, "instructions", nil, "diff", name)
+				if err != nil {
+					return fail(options, ExitFailure, "instruction review failed: "+err.Error(), nil)
+				}
+				fmt.Fprintf(os.Stdout, "\n%s\n%s", name, diff)
+			}
+		}
+	}
+	return ExitOK
 }
 
 func commandSkills(options Options, args []string, assets fs.FS) int {
