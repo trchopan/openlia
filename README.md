@@ -709,6 +709,27 @@ synchronizes the Go operator, profile, templates, and bundled skills.
 The Hermes, Locho, and Open WebUI commands reconcile only their pinned runtime
 boundaries; they do not silently replace desired digests.
 
+OpenLia tracks provenance for `profile/AGENTS.md`, `profile/SOUL.md`, and
+`workspace/AGENTS.md`. Unchanged profile instructions update automatically.
+Customized profile instructions and workspace-template changes remain active
+and are staged for explicit review:
+
+```sh
+openlia instructions status
+openlia instructions diff workspace/AGENTS.md
+openlia instructions merge workspace/AGENTS.md
+openlia instructions keep workspace/AGENTS.md
+openlia instructions reset workspace/AGENTS.md
+```
+
+`merge`, `keep`, and `reset` require exact interactive confirmation, create a
+backup, and reject the operation if either reviewed file changed in the
+meantime. `keep` preserves the local instruction while acknowledging the new
+upstream baseline. `reset` installs the upstream instruction. `merge` only
+applies a conflict-free three-way merge; structural or overlapping edits remain
+unchanged for manual review. The managed output-language block in `SOUL.md` is
+excluded from customization detection and continues to follow `config.toml`.
+
 Profile synchronization tracks distribution-owned skill provenance in
 `meta/managed/skills/<skill>.json`, including the upstream base version, source
 identifier, content hash, base snapshot, customization patch, and timestamps.
