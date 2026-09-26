@@ -58,8 +58,8 @@ test.describe("mock visual catalog", () => {
     await page.goto("/");
     await openNotes(page);
     await expect(
-      page.getByRole("textbox", { name: "Document editor" }),
-    ).toHaveValue("Hello");
+      page.getByRole("article", { name: "Markdown preview" }),
+    ).toBeVisible();
     await captureScreenshot(page, testInfo, "selected-document");
   });
 
@@ -79,6 +79,7 @@ test.describe("mock visual catalog", () => {
   test("edited draft and revision context", async ({ page }, testInfo) => {
     await page.goto("/");
     await openNotes(page);
+    await page.getByRole("button", { name: "Edit" }).click();
     const editor = page.getByRole("textbox", { name: "Document editor" });
     await editor.fill("Hello\nThis is a screenshot verification draft.");
     await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
@@ -129,6 +130,7 @@ test.describe("mock visual catalog", () => {
   test("revision conflict", async ({ page }, testInfo) => {
     await page.goto("/?scenario=conflict");
     await openNotes(page);
+    await page.getByRole("button", { name: "Edit" }).click();
     await page
       .getByRole("textbox", { name: "Document editor" })
       .fill("A conflicting draft");
@@ -160,5 +162,66 @@ test.describe("mock visual catalog", () => {
       "Workspace data could not be loaded.",
     );
     await captureScreenshot(page, testInfo, "load-error");
+  });
+
+  test("skills catalog overview", async ({ page }, testInfo) => {
+    await page.goto("/skills");
+    if (testInfo.project.name === "mobile") {
+      const drawerBtn = page
+        .getByRole("button", { exact: true, name: "Skills" })
+        .first();
+      if (await drawerBtn.isVisible()) {
+        await drawerBtn.click();
+      }
+    }
+    await expect(page.getByText(/Skills \(/)).toBeVisible();
+    await captureScreenshot(page, testInfo, "skills-overview");
+  });
+
+  test("skills selected instruction", async ({ page }, testInfo) => {
+    await page.goto("/skills/productivity/notion");
+    await expect(
+      page.getByRole("heading", { exact: true, level: 1, name: "notion" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("article", { name: "Markdown preview" }),
+    ).toBeVisible();
+    await captureScreenshot(page, testInfo, "skills-selected-instruction");
+  });
+
+  test("frontmatter structured block", async ({ page }, testInfo) => {
+    await page.goto("/skills/productivity/notion");
+    await expect(page.getByText("NOTION_API_KEY")).toBeVisible();
+    await captureScreenshot(page, testInfo, "frontmatter-structured-block");
+  });
+
+  test("skills overview subtab", async ({ page }, testInfo) => {
+    await page.goto("/skills/productivity/notion");
+    await page.getByRole("button", { name: "Overview & Details" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Prerequisites" }),
+    ).toBeVisible();
+    await captureScreenshot(page, testInfo, "skills-overview-subtab");
+  });
+
+  test("skills auxiliary files subtab", async ({ page }, testInfo) => {
+    await page.goto("/skills/claim-review");
+    await page.getByRole("button", { name: /Files \(/ }).click();
+    await expect(page.getByText("scripts/review.py")).toBeVisible();
+    await captureScreenshot(page, testInfo, "skills-auxiliary-files");
+  });
+
+  test("skills create modal", async ({ page }, testInfo) => {
+    await page.goto("/skills");
+    await page
+      .getByRole("button", { exact: true, name: "Create New Skill" })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Create New Skill" }),
+    ).toBeVisible();
+    await page
+      .getByPlaceholder("e.g. invoice-parser")
+      .fill("meeting-summarizer");
+    await captureScreenshot(page, testInfo, "skills-create-modal");
   });
 });

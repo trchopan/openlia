@@ -293,10 +293,11 @@ func generateAttachmentsFile(config Config) error {
 	}
 	if config.WorkspaceUIHost != "" {
 		workspace, _ := json.Marshal(filepath.Join(config.DataRoot, "workspace"))
+		skills, _ := json.Marshal(filepath.Join(config.DataRoot, "skills"))
 		passwordHashFile, _ := json.Marshal(config.WorkspaceUIPasswordHashFile)
 		builder.WriteString("  workspace-ui:\n    image: \"${OPENLIA_WORKSPACE_UI_IMAGE:-openlia-workspace-ui:v0.1.0}\"\n")
 		builder.WriteString("    build:\n      context: ..\n      dockerfile: docker/workspace-ui.Dockerfile\n")
-		builder.WriteString(fmt.Sprintf("    command: [\"bun\", \"/opt/openlia/workspace-ui/server.js\"]\n    restart: unless-stopped\n    user: \"%d:%d\"\n    read_only: true\n    tmpfs:\n      - /tmp:rw,noexec,nosuid,size=32m\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    environment:\n      OPENLIA_WORKSPACE_ROOT: /workspace\n      OPENLIA_WORKSPACE_UI_BIND: 0.0.0.0\n      OPENLIA_WORKSPACE_UI_PORT: \"%d\"\n", config.RuntimeUID, config.RuntimeGID, workspaceUIPort))
+		builder.WriteString(fmt.Sprintf("    command: [\"bun\", \"/opt/openlia/workspace-ui/server.js\"]\n    restart: unless-stopped\n    user: \"%d:%d\"\n    read_only: true\n    tmpfs:\n      - /tmp:rw,noexec,nosuid,size=32m\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    environment:\n      OPENLIA_WORKSPACE_ROOT: /workspace\n      OPENLIA_SKILLS_ROOT: /skills\n      OPENLIA_WORKSPACE_UI_BIND: 0.0.0.0\n      OPENLIA_WORKSPACE_UI_PORT: \"%d\"\n", config.RuntimeUID, config.RuntimeGID, workspaceUIPort))
 		quotedPublicOrigin, _ := json.Marshal(config.WorkspaceUIPublicOrigin)
 		builder.WriteString("      OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN: ")
 		builder.Write(quotedPublicOrigin)
@@ -306,7 +307,9 @@ func generateAttachmentsFile(config Config) error {
 		}
 		builder.WriteString("    volumes:\n      - type: bind\n        source: ")
 		builder.Write(workspace)
-		builder.WriteString("\n        target: /workspace")
+		builder.WriteString("\n        target: /workspace\n      - type: bind\n        source: ")
+		builder.Write(skills)
+		builder.WriteString("\n        target: /skills")
 		if config.WorkspaceUIAuthRequired {
 			builder.WriteString("\n      - type: bind\n        source: ")
 			builder.Write(passwordHashFile)

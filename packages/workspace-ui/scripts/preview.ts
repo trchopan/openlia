@@ -5,6 +5,9 @@ const packageRoot = resolve(import.meta.dir, "..");
 const workspaceRoot = resolve(
   process.env.OPENLIA_WORKSPACE_ROOT ?? join(packageRoot, ".preview-workspace"),
 );
+const skillsRoot = resolve(
+  process.env.OPENLIA_SKILLS_ROOT ?? join(packageRoot, ".preview-skills"),
+);
 const port = process.env.OPENLIA_WORKSPACE_UI_PORT ?? "8089";
 
 mkdirSync(workspaceRoot, { recursive: true });
@@ -15,10 +18,13 @@ if (!existsSync(examplePath))
     "# Workspace UI\n\nThis is the production build preview.\n",
   );
 
+mkdirSync(skillsRoot, { recursive: true });
+
 const server = Bun.spawn(["bun", "dist/server.js"], {
   cwd: packageRoot,
   env: {
     ...process.env,
+    OPENLIA_SKILLS_ROOT: skillsRoot,
     OPENLIA_WORKSPACE_ROOT: workspaceRoot,
     OPENLIA_WORKSPACE_UI_AUTH_REQUIRED: "false",
     OPENLIA_WORKSPACE_UI_BIND: "127.0.0.1",

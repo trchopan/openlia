@@ -5,6 +5,9 @@ const packageRoot = resolve(import.meta.dir, "..");
 const workspaceRoot = resolve(
   process.env.OPENLIA_WORKSPACE_ROOT ?? join(packageRoot, ".dev-workspace"),
 );
+const skillsRoot = resolve(
+  process.env.OPENLIA_SKILLS_ROOT ?? join(packageRoot, ".dev-skills"),
+);
 const backendPort = process.env.OPENLIA_WORKSPACE_UI_PORT ?? "8089";
 const frontendPort = process.env.OPENLIA_WORKSPACE_UI_DEV_PORT ?? "5173";
 const backendUrl = `http://127.0.0.1:${backendPort}`;
@@ -17,8 +20,20 @@ if (!existsSync(examplePath))
     "# Workspace UI\n\nEdit this document while developing the real backend.\n",
   );
 
+mkdirSync(skillsRoot, { recursive: true });
+const sampleSkillDir = join(skillsRoot, "sample-skill");
+mkdirSync(sampleSkillDir, { recursive: true });
+const sampleSkillMd = join(sampleSkillDir, "SKILL.md");
+if (!existsSync(sampleSkillMd)) {
+  writeFileSync(
+    sampleSkillMd,
+    "---\nname: sample-skill\ndescription: Sample skill for local development\nversion: 1.0.0\n---\n# Sample Skill\n\nInstructions for Hermes.\n",
+  );
+}
+
 const environment = {
   ...process.env,
+  OPENLIA_SKILLS_ROOT: skillsRoot,
   OPENLIA_WORKSPACE_ROOT: workspaceRoot,
   OPENLIA_WORKSPACE_UI_AUTH_REQUIRED: "false",
   OPENLIA_WORKSPACE_UI_BIND: "127.0.0.1",
@@ -55,6 +70,7 @@ process.on("SIGTERM", stopChildren);
 console.log(`workspace-ui frontend: http://127.0.0.1:${frontendPort}`);
 console.log(`workspace-ui backend:  ${backendUrl}`);
 console.log(`workspace root:        ${workspaceRoot}`);
+console.log(`skills root:           ${skillsRoot}`);
 
 const exitCode = await Promise.race(children.map((child) => child.exited));
 const unexpectedExit = !stopping && exitCode !== 0;

@@ -1,18 +1,18 @@
 import type { WorkspaceView } from "./components";
 
+export type MainTab = "documents" | "skills";
+
 export interface WorkspaceRoute {
+  tab?: MainTab | undefined;
   path?: string | undefined;
   view?: WorkspaceView | undefined;
   filter?: string | undefined;
   scenario?: string | undefined;
+  skill?: string | undefined;
+  skillFile?: string | undefined;
 }
 
-const validViews: ReadonlySet<string> = new Set([
-  "edit",
-  "split",
-  "preview",
-  "info",
-]);
+const validViews: ReadonlySet<string> = new Set(["edit", "preview", "info"]);
 
 function isValidView(value: string | null): value is WorkspaceView {
   return value !== null && validViews.has(value);
@@ -40,18 +40,45 @@ export function parseRoute(
 
   const pathname = url.pathname;
   let path: string | undefined;
+  let skill: string | undefined;
+  let tab: MainTab | undefined;
 
   if (pathname.startsWith("/files/")) {
     const raw = pathname.slice("/files/".length);
     if (raw) path = safeDecodeURIComponent(raw);
+    tab = "documents";
   } else if (pathname === "/files") {
     path = undefined;
+    tab = "documents";
   } else if (pathname.startsWith("/file/")) {
     const raw = pathname.slice("/file/".length);
     if (raw) path = safeDecodeURIComponent(raw);
+    tab = "documents";
   } else if (pathname === "/file") {
     path = undefined;
+    tab = "documents";
+  } else if (pathname.startsWith("/skills/")) {
+    const raw = pathname.slice("/skills/".length);
+    if (raw) skill = safeDecodeURIComponent(raw);
+    tab = "skills";
+  } else if (pathname === "/skills") {
+    skill = undefined;
+    tab = "skills";
   }
+
+  const tabParam = url.searchParams.get("tab");
+  if (tabParam === "skills" || tabParam === "documents") {
+    tab = tabParam;
+  }
+
+  const skillParam = url.searchParams.get("skill");
+  if (skillParam) {
+    skill = skillParam.trim();
+    tab = "skills";
+  }
+
+  const skillFileParam = url.searchParams.get("skillFile");
+  const skillFile = skillFileParam ? skillFileParam.trim() : undefined;
 
   if (!path) {
     const fallbackPath =
@@ -79,13 +106,26 @@ export function parseRoute(
     filter,
     path: path || undefined,
     scenario,
+    skill: skill || undefined,
+    skillFile,
+    tab,
     view,
   };
 }
 
 export function buildRouteUrl(route: WorkspaceRoute): string {
   let pathname = "/";
-  if (route.path) {
+  if (route.tab === "skills" || route.skill) {
+    if (route.skill) {
+      const segments = route.skill
+        .replace(/^\/+/, "")
+        .split("/")
+        .map(encodeURIComponent);
+      pathname = `/skills/${segments.join("/")}`;
+    } else {
+      pathname = "/skills";
+    }
+  } else if (route.path) {
     const segments = route.path
       .replace(/^\/+/, "")
       .split("/")
@@ -102,6 +142,9 @@ export function buildRouteUrl(route: WorkspaceRoute): string {
   }
   if (route.filter) {
     params.set("filter", route.filter);
+  }
+  if (route.skillFile) {
+    params.set("skillFile", route.skillFile);
   }
 
   const query = params.toString();

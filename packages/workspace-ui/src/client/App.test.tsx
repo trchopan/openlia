@@ -20,6 +20,7 @@ describe("workspace application", () => {
   test("opens a document, tracks edits, and saves it", async () => {
     render(<App api={createMockWorkspaceApi()} />);
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("textbox", {
       name: "Document editor",
     });
@@ -37,6 +38,7 @@ describe("workspace application", () => {
   test("keeps the draft visible when saving encounters a revision conflict", async () => {
     render(<App api={createMockWorkspaceApi({ scenario: "conflict" })} />);
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("textbox", {
       name: "Document editor",
     });
@@ -52,6 +54,7 @@ describe("workspace application", () => {
   test("protects a dirty draft before switching documents", async () => {
     render(<App api={createMockWorkspaceApi()} />);
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("textbox", {
       name: "Document editor",
     });
@@ -101,10 +104,10 @@ describe("workspace application", () => {
     window.history.replaceState(null, "", "/files/notes.md");
     render(<App api={createMockWorkspaceApi()} />);
 
-    const editor = await screen.findByRole("textbox", {
-      name: "Document editor",
-    });
-    expect(editor).toHaveValue("Hello");
+    expect(
+      await screen.findByRole("article", { name: "Markdown preview" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Hello")).toBeInTheDocument();
     expect(document.title).toBe("notes.md - OpenLia Workspace");
   });
 
@@ -112,12 +115,12 @@ describe("workspace application", () => {
     window.history.replaceState(
       null,
       "",
-      "/files/notes.md?view=preview&filter=calendar",
+      "/files/notes.md?view=edit&filter=calendar",
     );
     render(<App api={createMockWorkspaceApi()} />);
 
     expect(
-      await screen.findByRole("article", { name: "Markdown preview" }),
+      await screen.findByRole("textbox", { name: "Document editor" }),
     ).toBeInTheDocument();
     const filterInput = screen.getByLabelText("Find files");
     expect(filterInput).toHaveValue("calendar");
@@ -128,11 +131,11 @@ describe("workspace application", () => {
     render(<App api={createMockWorkspaceApi()} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
-    await screen.findByRole("textbox", { name: "Document editor" });
+    await screen.findByRole("article", { name: "Markdown preview" });
     expect(window.location.pathname).toBe("/files/notes.md");
 
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
-    expect(window.location.search).toContain("view=preview");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(window.location.search).toContain("view=edit");
 
     const filterInput = screen.getByLabelText("Find files");
     fireEvent.change(filterInput, { target: { value: "task" } });
@@ -143,7 +146,7 @@ describe("workspace application", () => {
     window.history.replaceState(null, "", "/files/notes.md");
     render(<App api={createMockWorkspaceApi()} />);
 
-    await screen.findByRole("textbox", { name: "Document editor" });
+    await screen.findByRole("article", { name: "Markdown preview" });
 
     window.history.replaceState(null, "", "/");
     fireEvent(window, new PopStateEvent("popstate"));

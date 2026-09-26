@@ -2,14 +2,20 @@ import { existsSync, lstatSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import type {
   AuthLoginResponse,
+  SkillCreateRequest,
+  SkillToggleEnableRequest,
+  SkillTogglePinRequest,
+  SkillWriteRequest,
   WorkspaceErrorResponse,
   WorkspaceWriteRequest,
 } from "../shared/api";
 import { Authenticator } from "./auth";
+import { SkillService } from "./skills";
 import { WorkspaceError, WorkspaceService } from "./workspace";
 
 export interface WorkspaceHandlerOptions {
   workspaceRoot: string;
+  skillsRoot?: string;
   staticRoot?: string;
   maxEditableBytes?: number;
   maxDownloadBytes?: number;
@@ -153,6 +159,14 @@ export function createWorkspaceHandler(
   options: WorkspaceHandlerOptions,
 ): (request: Request, clientKey?: string) => Promise<Response> {
   const service = new WorkspaceService(options);
+  const skillsRoot =
+    options.skillsRoot ??
+    process.env.OPENLIA_SKILLS_ROOT ??
+    join(options.workspaceRoot, "..", "skills");
+  const skillService = new SkillService({
+    maxEditableBytes: options.maxEditableBytes,
+    skillsRoot,
+  });
   const staticRoot = options.staticRoot ?? join(import.meta.dir, "public");
   const publicOrigin = normalizeOrigin(options.publicOrigin);
   if (options.publicOrigin && !publicOrigin)
@@ -183,7 +197,9 @@ export function createWorkspaceHandler(
           url.pathname.startsWith("/files/") ||
           url.pathname === "/files" ||
           url.pathname.startsWith("/file/") ||
-          url.pathname === "/file")
+          url.pathname === "/file" ||
+          url.pathname.startsWith("/skills/") ||
+          url.pathname === "/skills")
       ) {
         return (
           staticFile(staticRoot, "/") ??
@@ -238,7 +254,8 @@ export function createWorkspaceHandler(
         });
       }
       if (
-        url.pathname.startsWith("/api/workspace/") &&
+        (url.pathname.startsWith("/api/workspace/") ||
+          url.pathname.startsWith("/api/skills/")) &&
         !authenticator.isAuthenticated(request)
       ) {
         return json(
@@ -300,6 +317,103 @@ export function createWorkspaceHandler(
             writeRequest.expected_revision,
           ),
         );
+      }
+      if (request.method === "GET" && url.pathname === "/api/skills/list") {
+        return json(skillService.list());
+      }
+      if (request.method === "GET" && url.pathname === "/api/skills/detail") {
+        return json(skillService.detail(url.searchParams.get("id")));
+      }
+      if (request.method === "GET" && url.pathname === "/api/skills/file") {
+        return json(
+          skillService.readFile(
+            url.searchParams.get("id"),
+            url.searchParams.get("path"),
+          ),
+        );
+      }
+      if (request.method === "PUT" && url.pathname === "/api/skills/file") {
+        if (!sameOrigin(request, url, publicOrigin))
+          return json(
+            { schema: 1, ok: false, error: "origin_not_allowed" },
+            403,
+          );
+        const bodyResult = await readJson(
+          request,
+          (options.maxEditableBytes ?? 2 * 1024 * 1024) + 4096,
+        );
+        if (bodyResult.tooLarge)
+          return json(
+            { schema: 1, ok: false, error: "request_too_large" },
+            413,
+          );
+        const body: unknown = bodyResult.value;
+        if (!isObject(body))
+          return json(
+            { schema: 1, ok: false, error: "request_body_must_be_json" },
+            400,
+          );
+        const writeRequest = body as Partial<SkillWriteRequest>;
+        return json(
+          skillService.writeFile(
+            writeRequest.id,
+            writeRequest.path,
+            writeRequest.content,
+            writeRequest.expected_revision,
+          ),
+        );
+      }
+      if (
+        request.method === "POST" &&
+        url.pathname === "/api/skills/toggle-enable"
+      ) {
+        if (!sameOrigin(request, url, publicOrigin))
+          return json(
+            { schema: 1, ok: false, error: "origin_not_allowed" },
+            403,
+          );
+        const bodyResult = await readJson(request, 4096);
+        const body: unknown = bodyResult.value;
+        if (!isObject(body) || typeof body.enabled !== "boolean")
+          return json({ schema: 1, ok: false, error: "invalid_request" }, 400);
+        const req = body as Partial<SkillToggleEnableRequest>;
+        skillService.toggleEnable(req.id, Boolean(body.enabled));
+        return json({ schema: 1, ok: true });
+      }
+      if (
+        request.method === "POST" &&
+        url.pathname === "/api/skills/toggle-pin"
+      ) {
+        if (!sameOrigin(request, url, publicOrigin))
+          return json(
+            { schema: 1, ok: false, error: "origin_not_allowed" },
+            403,
+          );
+        const bodyResult = await readJson(request, 4096);
+        const body: unknown = bodyResult.value;
+        if (!isObject(body) || typeof body.pinned !== "boolean")
+          return json({ schema: 1, ok: false, error: "invalid_request" }, 400);
+        const req = body as Partial<SkillTogglePinRequest>;
+        skillService.togglePin(req.id, Boolean(body.pinned));
+        return json({ schema: 1, ok: true });
+      }
+      if (request.method === "POST" && url.pathname === "/api/skills/create") {
+        if (!sameOrigin(request, url, publicOrigin))
+          return json(
+            { schema: 1, ok: false, error: "origin_not_allowed" },
+            403,
+          );
+        const bodyResult = await readJson(request, 4096);
+        const body: unknown = bodyResult.value;
+        if (!isObject(body))
+          return json({ schema: 1, ok: false, error: "invalid_request" }, 400);
+        const req = body as Partial<SkillCreateRequest>;
+        const createdId = skillService.create(
+          req.name,
+          req.category,
+          req.description,
+        );
+        return json({ id: createdId, ok: true, schema: 1 }, 201);
       }
       return json({ schema: 1, ok: false, error: "not_found" }, 404);
     } catch (error) {

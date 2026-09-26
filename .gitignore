@@ -38,6 +38,8 @@ docker/compose.generated.yaml
 /packages/*/dist/
 /packages/workspace-ui/.dev-workspace/
 /packages/workspace-ui/.preview-workspace/
+/packages/workspace-ui/.dev-skills/
+/packages/workspace-ui/.preview-skills/
 /packages/workspace-ui/.playwright/
 node_modules/
 *.test

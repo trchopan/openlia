@@ -19,6 +19,31 @@ describe("workspace presentation components", () => {
     expect(container.querySelector("script")).toBeNull();
   });
 
+  test("renders frontmatter as a structured card in MarkdownPreview", () => {
+    render(
+      <MarkdownPreview
+        content={`---
+name: my-skill
+description: A helpful skill
+tags:
+  - web
+  - api
+---
+# Main Content
+This is the document body.
+`}
+      />,
+    );
+
+    expect(screen.getByText("my-skill")).toBeInTheDocument();
+    expect(screen.getByText("A helpful skill")).toBeInTheDocument();
+    expect(screen.getByText("web")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Main Content" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("This is the document body.")).toBeInTheDocument();
+  });
+
   test("renders a ChatGPT export as a conversation with sources", () => {
     render(
       <ChatgptPreview

@@ -2,6 +2,8 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode, RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { FrontmatterBlock } from "./FrontmatterBlock";
+import { parseMarkdownFrontmatter } from "./frontmatter";
 import {
   isChatgptExportPath,
   parseChatgptExport,
@@ -14,7 +16,7 @@ import type {
   WorkspaceTreeEntry,
 } from "../shared/api";
 
-export type WorkspaceView = "edit" | "split" | "preview" | "info";
+export type WorkspaceView = "edit" | "preview" | "info";
 
 interface TreeNode {
   path: string;
@@ -106,25 +108,25 @@ function StatusBadge({
 }
 
 export function WorkspaceHeader({
+  activeTab = "documents",
   authRequired,
-  detailsOpen,
   dirty,
   filesButtonRef,
   file,
   git,
-  onOpenDetails,
   onOpenFiles,
   onSignOut,
+  onTabChange,
 }: {
+  activeTab?: "documents" | "skills";
   authRequired: boolean;
-  detailsOpen: boolean;
   dirty: boolean;
   filesButtonRef: RefObject<HTMLButtonElement | null>;
   file: WorkspaceFile | null;
   git: WorkspaceGitStatus | null;
-  onOpenDetails: () => void;
   onOpenFiles: () => void;
   onSignOut: () => void;
+  onTabChange?: (tab: "documents" | "skills") => void;
 }) {
   const gitText = git?.configured
     ? `${git.branch ?? "Git"}${git.dirty ? " / changes" : " / clean"}`
@@ -138,12 +140,43 @@ export function WorkspaceHeader({
         onClick={onOpenFiles}
         type="button"
       >
-        Files
+        {activeTab === "skills" ? "Skills" : "Files"}
       </button>
+
+      {onTabChange && (
+        <div className="join border border-base-content/15 rounded-lg bg-base-200/60 p-0.5 mr-2">
+          <button
+            className={`btn btn-xs join-item ${
+              activeTab === "documents"
+                ? "btn-primary shadow-xs"
+                : "btn-ghost text-base-content/70"
+            }`}
+            onClick={() => onTabChange("documents")}
+            type="button"
+          >
+            Documents
+          </button>
+          <button
+            className={`btn btn-xs join-item ${
+              activeTab === "skills"
+                ? "btn-primary shadow-xs"
+                : "btn-ghost text-base-content/70"
+            }`}
+            onClick={() => onTabChange("skills")}
+            type="button"
+          >
+            Skills
+          </button>
+        </div>
+      )}
+
       <div className="min-w-0 flex-1">
-        <p className="workspace-eyebrow">OPENLIA / WORKSPACE</p>
+        <p className="workspace-eyebrow">
+          OPENLIA / {activeTab === "skills" ? "SKILLS" : "WORKSPACE"}
+        </p>
         <h1 className="workspace-title" title={file?.path}>
-          {file?.path.split("/").at(-1) ?? "Workspace"}
+          {file?.path.split("/").at(-1) ??
+            (activeTab === "skills" ? "Skills" : "Workspace")}
         </h1>
         {file?.path?.includes("/") && (
           <p className="workspace-path" title={file.path}>
@@ -158,13 +191,6 @@ export function WorkspaceHeader({
         <span className="workspace-git-status">
           <StatusBadge>{gitText}</StatusBadge>
         </span>
-        <button
-          className={`workspace-details-toggle btn btn-ghost btn-sm ${detailsOpen ? "text-primary" : ""}`}
-          onClick={onOpenDetails}
-          type="button"
-        >
-          Details
-        </button>
         {authRequired && (
           <button
             className="btn btn-ghost btn-sm text-primary"
@@ -466,6 +492,11 @@ const markdownComponents = {
 };
 
 export function MarkdownPreview({ content }: { content: string }) {
+  const { frontmatter, rawYaml, body } = useMemo(
+    () => parseMarkdownFrontmatter(content),
+    [content],
+  );
+
   if (!content)
     return (
       <div className="grid h-full min-h-[22rem] place-items-center p-6 text-center text-sm italic text-base-content/50">
@@ -475,11 +506,14 @@ export function MarkdownPreview({ content }: { content: string }) {
 
   return (
     <article aria-label="Markdown preview" className="workspace-markdown">
+      {frontmatter && rawYaml && (
+        <FrontmatterBlock data={frontmatter} rawYaml={rawYaml} />
+      )}
       <ReactMarkdown
         components={markdownComponents}
         remarkPlugins={[remarkGfm]}
       >
-        {content}
+        {body}
       </ReactMarkdown>
     </article>
   );
@@ -730,6 +764,7 @@ function EditorPane({
 
 export function DocumentPane({
   conflict,
+  detailsOpen = false,
   diff,
   draft,
   documentError,
@@ -746,6 +781,7 @@ export function DocumentPane({
   onViewChange,
 }: {
   conflict: string;
+  detailsOpen?: boolean;
   diff: string[];
   draft: string;
   documentError: string;
@@ -788,50 +824,34 @@ export function DocumentPane({
               ) : (
                 <>
                   <ModeButton
-                    active={view === "edit"}
-                    onClick={() => onViewChange("edit")}
-                    value="edit"
-                  >
-                    Edit
-                  </ModeButton>
-                  <ModeButton
-                    active={view === "split"}
-                    className="hidden md:inline-flex"
-                    onClick={() => onViewChange("split")}
-                    value="split"
-                  >
-                    <span className="hidden md:inline">Split</span>
-                    <span className="md:hidden">Edit</span>
-                  </ModeButton>
-                  <ModeButton
                     active={view === "preview"}
                     onClick={() => onViewChange("preview")}
                     value="preview"
                   >
                     Preview
                   </ModeButton>
+                  <ModeButton
+                    active={view === "edit"}
+                    onClick={() => onViewChange("edit")}
+                    value="edit"
+                  >
+                    Edit
+                  </ModeButton>
                 </>
               )}
-              <ModeButton
-                active={view === "info"}
-                className="xl:hidden"
-                onClick={onOpenDetails}
-                value="info"
-              >
-                Info
-              </ModeButton>
             </div>
-            <div className="flex shrink-0 gap-2">
-              {!isChatExport && (
-                <button
-                  className="btn btn-primary btn-sm"
-                  disabled={!canEdit || !dirty || saving}
-                  onClick={onSave}
-                  type="button"
-                >
-                  {saving ? "Saving..." : dirty ? "Save" : "Saved"}
-                </button>
-              )}
+            {!isChatExport && (
+              <button
+                className="btn btn-primary btn-sm shrink-0"
+                disabled={!canEdit || !dirty || saving}
+                onClick={onSave}
+                type="button"
+              >
+                {saving ? "Saving..." : dirty ? "Save" : "Saved"}
+              </button>
+            )}
+            {/* Desktop actions */}
+            <div className="hidden sm:flex shrink-0 items-center gap-2">
               <button
                 className="btn btn-outline btn-sm"
                 onClick={onDownload}
@@ -839,6 +859,48 @@ export function DocumentPane({
               >
                 Download
               </button>
+              <button
+                aria-pressed={detailsOpen}
+                className={`btn btn-sm ${detailsOpen ? "btn-secondary" : "btn-outline"}`}
+                onClick={onOpenDetails}
+                type="button"
+              >
+                Details
+              </button>
+            </div>
+            {/* Mobile actions & dropdown menu */}
+            <div className="flex sm:hidden shrink-0 items-center gap-1">
+              <div className="dropdown dropdown-end">
+                <button
+                  aria-label="Document actions"
+                  className="btn btn-ghost btn-xs btn-square"
+                  tabIndex={0}
+                  type="button"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <title>Document actions</title>
+                    <circle cx="12" cy="5" r="2" />
+                    <circle cx="12" cy="12" r="2" />
+                    <circle cx="12" cy="19" r="2" />
+                  </svg>
+                </button>
+                <ul className="dropdown-content menu z-30 rounded-box border border-base-content/10 bg-base-100 p-1 shadow-lg text-xs w-36">
+                  <li>
+                    <button onClick={onOpenDetails} type="button">
+                      {detailsOpen ? "Hide Details" : "Show Details"}
+                    </button>
+                  </li>
+                  <li>
+                    <button onClick={onDownload} type="button">
+                      Download
+                    </button>
+                  </li>
+                </ul>
+              </div>
             </div>
           </div>
           {fileLoading && (
@@ -887,24 +949,11 @@ export function DocumentPane({
               fileLoading={fileLoading}
               onDraftChange={onDraftChange}
             />
-          ) : view === "preview" ? (
+          ) : (
             <section aria-label="Preview" className="workspace-preview-pane">
               <div className="workspace-pane-label">Preview</div>
               <MarkdownPreview content={draft} />
             </section>
-          ) : (
-            <div className="workspace-split-pane">
-              <EditorPane
-                draft={draft}
-                file={file}
-                fileLoading={fileLoading}
-                onDraftChange={onDraftChange}
-              />
-              <section aria-label="Preview" className="workspace-preview-pane">
-                <div className="workspace-pane-label">Preview</div>
-                <MarkdownPreview content={draft} />
-              </section>
-            </div>
           )}
         </>
       ) : (
