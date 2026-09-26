@@ -141,21 +141,11 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 			// the stack so configuration changes reach every service.
 			args = []string{"up", "-d", "--force-recreate"}
 		case options.Component == "all":
-			args = []string{"up", "-d"}
-			if options.Action == "deploy" {
-				args = append(args, "--build", "--remove-orphans")
-			}
+			args = []string{"up", "-d", "--remove-orphans"}
 		case options.Component == "hermes":
-			args = []string{"up", "-d"}
-			if options.Action == "deploy" {
-				args = append(args, "--build")
-			}
-			args = append(args, "--no-deps", "hermes")
+			args = []string{"up", "-d", "--no-deps", "hermes"}
 		case options.Component == "workspace-ui":
 			args = []string{"up", "-d", "--no-deps", "--force-recreate", "workspace-ui"}
-			if options.Action == "deploy" {
-				args = []string{"up", "-d", "--build", "--no-deps", "--force-recreate", "workspace-ui"}
-			}
 		case options.Component == "open-webui":
 			args = []string{"up", "-d", "--no-deps", "--force-recreate", "open-webui"}
 		default:
@@ -164,9 +154,6 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 				return DeployResult{}, fmt.Errorf("stack was not started")
 			}
 			args = []string{"up", "-d"}
-			if options.Action == "deploy" {
-				args = append(args, "--build")
-			}
 			args = append(args, append([]string{"--no-deps"}, services...)...)
 		}
 		if res, err := compose.Run(ctx, args...); err != nil {
@@ -196,14 +183,7 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 		}
 		healthy := false
 		for attempt := 0; attempt < attempts; attempt++ {
-			healthyNow := false
-			if options.Component == "workspace-ui" {
-				healthyNow = workspaceUIHealthy(ctx, config, compose)
-			} else if options.Component == "open-webui" {
-				healthyNow = openWebUIHealthy(ctx, config, compose)
-			} else if health, healthErr := Healthcheck(ctx, config, compose, false, false); healthErr == nil && health.OK {
-				healthyNow = true
-			}
+			healthyNow := deploymentReady(ctx, config, compose, options.Component)
 			if healthyNow {
 				healthy = true
 				break
@@ -218,6 +198,10 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 				case <-timer.C:
 				}
 			}
+		}
+		if healthy && options.Component != "workspace-ui" && options.Component != "open-webui" {
+			health, healthErr := Healthcheck(ctx, config, compose, false, false)
+			healthy = healthErr == nil && health.OK
 		}
 		if !healthy {
 			_ = RecordChange(config, options.Action, "failed", backup, "health check failed after start", now)
@@ -235,6 +219,63 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 		return DeployResult{}, err
 	}
 	return DeployResult{OK: true, Action: options.Action, State: state, Backup: backup}, nil
+}
+
+// deploymentReady avoids running the full diagnostic health check on every
+// two-second poll. The full check still runs once after the services are up.
+func deploymentReady(ctx context.Context, config Config, compose Compose, component string) bool {
+	result, err := compose.Run(ctx, "ps", "--services", "--filter", "status=running")
+	if err != nil {
+		return false
+	}
+	running := map[string]bool{}
+	for _, service := range strings.Split(strings.TrimSpace(string(result.Stdout)), "\n") {
+		if service = strings.TrimSpace(service); service != "" {
+			running[service] = true
+		}
+	}
+	required := []string{}
+	switch component {
+	case "hermes":
+		required = []string{"hermes"}
+	case "locho":
+		required = append(required, composeServices(ctx, compose)...)
+	case "workspace-ui":
+		required = []string{"workspace-ui"}
+	case "open-webui":
+		required = []string{"open-webui"}
+	default:
+		configured, configErr := compose.Run(ctx, "config", "--services")
+		if configErr != nil {
+			return false
+		}
+		for _, service := range strings.Split(strings.TrimSpace(string(configured.Stdout)), "\n") {
+			if service = strings.TrimSpace(service); service != "" {
+				required = append(required, service)
+			}
+		}
+	}
+	for _, service := range required {
+		if !running[service] {
+			return false
+		}
+	}
+	if component == "workspace-ui" || (component == "all" && config.WorkspaceUIHost != "") {
+		if !workspaceUIHealthy(ctx, config, compose) {
+			return false
+		}
+	}
+	if component == "open-webui" || (component == "all" && config.OpenWebUIHost != "") {
+		if !openWebUIHealthy(ctx, config, compose) {
+			return false
+		}
+	}
+	if component == "all" || component == "hermes" || component == "locho" {
+		if _, err := compose.Run(ctx, "exec", "-T", "hermes", "sh", "-c", "command -v hermes >/dev/null && hermes config check"); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func workspaceUIHealthy(ctx context.Context, config Config, compose Compose) bool {
@@ -281,17 +322,6 @@ func composeServices(ctx context.Context, compose Compose) []string {
 		}
 	}
 	return services
-}
-
-func insertBuild(args []string) []string {
-	result := make([]string, 0, len(args)+1)
-	for _, arg := range args {
-		result = append(result, arg)
-		if arg == "up" {
-			result = append(result, "--build")
-		}
-	}
-	return result
 }
 
 type HealthResult struct {

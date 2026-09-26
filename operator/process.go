@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -29,21 +30,28 @@ type EnvironmentCommandRunner interface {
 	RunWithEnv(context.Context, []string, string, ...string) (CommandResult, error)
 }
 
-// ExecRunner runs a host process without invoking a shell.
-type ExecRunner struct{}
-
-func (ExecRunner) Run(ctx context.Context, name string, args ...string) (CommandResult, error) {
-	return ExecRunner{}.RunWithEnv(ctx, nil, name, args...)
+// ExecRunner runs a host process without invoking a shell. Stderr is retained
+// for diagnostics and can also be streamed to the operator's error output.
+type ExecRunner struct {
+	Stderr io.Writer
 }
 
-func (ExecRunner) RunWithEnv(ctx context.Context, overrides []string, name string, args ...string) (CommandResult, error) {
+func (runner ExecRunner) Run(ctx context.Context, name string, args ...string) (CommandResult, error) {
+	return runner.RunWithEnv(ctx, nil, name, args...)
+}
+
+func (runner ExecRunner) RunWithEnv(ctx context.Context, overrides []string, name string, args ...string) (CommandResult, error) {
 	command := exec.CommandContext(ctx, name, args...)
 	if len(overrides) > 0 {
 		command.Env = mergedEnvironment(overrides)
 	}
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
-	command.Stderr = &stderr
+	if runner.Stderr == nil {
+		command.Stderr = &stderr
+	} else {
+		command.Stderr = io.MultiWriter(&stderr, runner.Stderr)
+	}
 	err := command.Run()
 	result := CommandResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), ExitCode: 0}
 	if err == nil {
