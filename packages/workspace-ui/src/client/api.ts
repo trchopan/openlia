@@ -1,6 +1,12 @@
 import type {
   AuthLoginResponse,
   AuthSessionResponse,
+  SkillCreateRequest,
+  SkillDetailResponse,
+  SkillFileResponse,
+  SkillsListResponse,
+  SkillSuccessResponse,
+  SkillWriteResponse,
   WorkspaceErrorResponse,
   WorkspaceFile,
   WorkspaceFileMetadata,
@@ -35,6 +41,22 @@ export interface WorkspaceApi {
   ): Promise<WorkspaceWriteResponse>;
   loadGitStatus(): Promise<WorkspaceGitStatus>;
   downloadUrl(path: string): string;
+
+  loadSkills(): Promise<SkillsListResponse>;
+  loadSkillDetail(id: string): Promise<SkillDetailResponse>;
+  loadSkillFile(id: string, path: string): Promise<SkillFileResponse>;
+  saveSkillFile(
+    id: string,
+    path: string,
+    content: string,
+    expectedRevision: string,
+  ): Promise<SkillWriteResponse>;
+  toggleSkillEnable(
+    id: string,
+    enabled: boolean,
+  ): Promise<SkillSuccessResponse>;
+  toggleSkillPin(id: string, pinned: boolean): Promise<SkillSuccessResponse>;
+  createSkill(request: SkillCreateRequest): Promise<SkillSuccessResponse>;
 }
 
 type ResponseValidator<T> = (value: unknown) => value is T;
@@ -157,6 +179,51 @@ function isWorkspaceGitStatus(value: unknown): value is WorkspaceGitStatus {
   );
 }
 
+function isSkillsListResponse(value: unknown): value is SkillsListResponse {
+  return (
+    isObject(value) &&
+    value.schema === 1 &&
+    Array.isArray(value.skills) &&
+    Array.isArray(value.categories)
+  );
+}
+
+function isSkillDetailResponse(value: unknown): value is SkillDetailResponse {
+  return (
+    isObject(value) &&
+    value.schema === 1 &&
+    isObject(value.skill) &&
+    typeof value.skill.id === "string" &&
+    typeof value.skill.name === "string"
+  );
+}
+
+function isSkillFileResponse(value: unknown): value is SkillFileResponse {
+  return (
+    isObject(value) &&
+    value.schema === 1 &&
+    typeof value.id === "string" &&
+    typeof value.path === "string" &&
+    typeof value.content === "string" &&
+    typeof value.revision === "string"
+  );
+}
+
+function isSkillWriteResponse(value: unknown): value is SkillWriteResponse {
+  return (
+    isObject(value) &&
+    value.schema === 1 &&
+    value.ok === true &&
+    typeof value.id === "string" &&
+    typeof value.path === "string" &&
+    typeof value.revision === "string"
+  );
+}
+
+function isSkillSuccessResponse(value: unknown): value is SkillSuccessResponse {
+  return isObject(value) && value.schema === 1 && value.ok === true;
+}
+
 export const httpWorkspaceApi: WorkspaceApi = {
   loadTree: () =>
     requestJson<WorkspaceTreeResponse>(
@@ -205,4 +272,58 @@ export const httpWorkspaceApi: WorkspaceApi = {
     ),
   downloadUrl: (path) =>
     `/api/workspace/download?${new URLSearchParams({ path })}`,
+
+  loadSkills: () =>
+    requestJson<SkillsListResponse>("/api/skills/list", isSkillsListResponse),
+  loadSkillDetail: (id) =>
+    requestJson<SkillDetailResponse>(
+      `/api/skills/detail?${new URLSearchParams({ id })}`,
+      isSkillDetailResponse,
+    ),
+  loadSkillFile: (id, path) =>
+    requestJson<SkillFileResponse>(
+      `/api/skills/file?${new URLSearchParams({ id, path })}`,
+      isSkillFileResponse,
+    ),
+  saveSkillFile: (id, path, content, expectedRevision) =>
+    requestJson<SkillWriteResponse>("/api/skills/file", isSkillWriteResponse, {
+      body: JSON.stringify({
+        content,
+        expected_revision: expectedRevision,
+        id,
+        path,
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "PUT",
+    }),
+  toggleSkillEnable: (id, enabled) =>
+    requestJson<SkillSuccessResponse>(
+      "/api/skills/toggle-enable",
+      isSkillSuccessResponse,
+      {
+        body: JSON.stringify({ enabled, id }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    ),
+  toggleSkillPin: (id, pinned) =>
+    requestJson<SkillSuccessResponse>(
+      "/api/skills/toggle-pin",
+      isSkillSuccessResponse,
+      {
+        body: JSON.stringify({ id, pinned }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    ),
+  createSkill: (request) =>
+    requestJson<SkillSuccessResponse>(
+      "/api/skills/create",
+      isSkillSuccessResponse,
+      {
+        body: JSON.stringify(request),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    ),
 };

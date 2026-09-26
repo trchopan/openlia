@@ -14,6 +14,9 @@ function portFromEnvironment(value: string | undefined): number {
 const workspaceRoot = resolve(
   process.env.OPENLIA_WORKSPACE_ROOT ?? "/workspace",
 );
+const skillsRoot = process.env.OPENLIA_SKILLS_ROOT
+  ? resolve(process.env.OPENLIA_SKILLS_ROOT)
+  : resolve(workspaceRoot, "..", "skills");
 const bind = process.env.OPENLIA_WORKSPACE_UI_BIND ?? "127.0.0.1";
 const port = portFromEnvironment(process.env.OPENLIA_WORKSPACE_UI_PORT);
 const authRequired = process.env.OPENLIA_WORKSPACE_UI_AUTH_REQUIRED === "true";
@@ -22,6 +25,7 @@ const handler = createWorkspaceHandler({
   authRequired,
   passwordHashFile,
   publicOrigin: process.env.OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN,
+  skillsRoot,
   staticRoot: join(import.meta.dir, "public"),
   workspaceRoot,
 });

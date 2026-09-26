@@ -7,6 +7,9 @@ describe("route helpers", () => {
       filter: undefined,
       path: undefined,
       scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: undefined,
       view: undefined,
     });
   });
@@ -16,6 +19,9 @@ describe("route helpers", () => {
       filter: undefined,
       path: "notes.md",
       scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: "documents",
       view: undefined,
     });
   });
@@ -27,6 +33,9 @@ describe("route helpers", () => {
       filter: undefined,
       path: "calendar/2026-09-23 lunch meeting.md",
       scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: "documents",
       view: undefined,
     });
   });
@@ -36,6 +45,9 @@ describe("route helpers", () => {
       filter: undefined,
       path: "tasks/todo.md",
       scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: "documents",
       view: undefined,
     });
   });
@@ -45,6 +57,9 @@ describe("route helpers", () => {
       filter: undefined,
       path: "notes.md",
       scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: undefined,
       view: undefined,
     });
 
@@ -52,6 +67,9 @@ describe("route helpers", () => {
       filter: undefined,
       path: "inbox/draft.md",
       scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: undefined,
       view: undefined,
     });
   });
@@ -63,14 +81,20 @@ describe("route helpers", () => {
       filter: "cal",
       path: "notes.md",
       scenario: "auth",
+      skill: undefined,
+      skillFile: undefined,
+      tab: "documents",
       view: "preview",
     });
 
-    expect(parseRoute("/?q=searchterm&view=split")).toEqual({
+    expect(parseRoute("/?q=searchterm&view=edit")).toEqual({
       filter: "searchterm",
       path: undefined,
       scenario: undefined,
-      view: "split",
+      skill: undefined,
+      skillFile: undefined,
+      tab: undefined,
+      view: "edit",
     });
   });
 
@@ -79,6 +103,52 @@ describe("route helpers", () => {
       filter: undefined,
       path: "notes.md",
       scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: "documents",
+      view: undefined,
+    });
+    expect(parseRoute("/files/notes.md?view=split")).toEqual({
+      filter: undefined,
+      path: "notes.md",
+      scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: "documents",
+      view: undefined,
+    });
+  });
+
+  test("parses skills routes and query params", () => {
+    expect(parseRoute("/skills")).toEqual({
+      filter: undefined,
+      path: undefined,
+      scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: "skills",
+      view: undefined,
+    });
+
+    expect(
+      parseRoute("/skills/productivity/notion?skillFile=scripts/sync.py"),
+    ).toEqual({
+      filter: undefined,
+      path: undefined,
+      scenario: undefined,
+      skill: "productivity/notion",
+      skillFile: "scripts/sync.py",
+      tab: "skills",
+      view: undefined,
+    });
+
+    expect(parseRoute("/?tab=skills&skill=claim-review")).toEqual({
+      filter: undefined,
+      path: undefined,
+      scenario: undefined,
+      skill: "claim-review",
+      skillFile: undefined,
+      tab: "skills",
       view: undefined,
     });
   });
@@ -105,5 +175,17 @@ describe("route helpers", () => {
         filter: "notes",
       }),
     ).toBe("/?filter=notes");
+    expect(
+      buildRouteUrl({
+        tab: "skills",
+      }),
+    ).toBe("/skills");
+    expect(
+      buildRouteUrl({
+        skill: "productivity/notion",
+        skillFile: "scripts/sync.py",
+        tab: "skills",
+      }),
+    ).toBe("/skills/productivity/notion?skillFile=scripts%2Fsync.py");
   });
 });

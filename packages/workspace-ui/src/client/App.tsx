@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type {
+  SkillDetail,
+  SkillFileEntry,
+  SkillFileResponse,
+  SkillSummary,
   WorkspaceFile,
   WorkspaceGitStatus,
   WorkspaceTreeEntry,
 } from "../shared/api";
+import { CreateSkillModal } from "./CreateSkillModal";
+import { SkillDetailPane, type SkillSubTab } from "./SkillDetailPane";
+import { SkillsNavigator } from "./SkillsNavigator";
 import { ApiError, httpWorkspaceApi, type WorkspaceApi } from "./api";
 import { isChatgptExportPath } from "./chatgpt";
 import {
@@ -15,22 +22,18 @@ import {
   type WorkspaceView,
 } from "./components";
 import { diffLines } from "./markdown";
-import { navigateRoute, parseRoute } from "./route";
+import { type MainTab, navigateRoute, parseRoute } from "./route";
 import "./styles.css";
 
 type PendingAction =
   | { kind: "open"; path: string }
+  | { kind: "openSkill"; id: string; skillFile?: string | undefined }
+  | { kind: "switchTab"; tab: MainTab }
   | { kind: "signout" }
   | null;
 
 function defaultView(): WorkspaceView {
-  if (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(min-width: 768px)").matches
-  )
-    return "split";
-  return "edit";
+  return "preview";
 }
 
 function ErrorMessage({
@@ -135,9 +138,20 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           filter: undefined,
           path: undefined,
           scenario: undefined,
+          skill: undefined,
+          skillFile: undefined,
+          tab: undefined,
           view: undefined,
         },
   );
+
+  const [activeTab, setActiveTab] = useState<MainTab>(
+    () =>
+      initialRoute.current.tab ??
+      (initialRoute.current.skill ? "skills" : "documents"),
+  );
+
+  // Documents state
   const [tree, setTree] = useState<WorkspaceTreeEntry[]>([]);
   const [treeTruncated, setTreeTruncated] = useState(false);
   const [filter, setFilter] = useState(() => initialRoute.current.filter ?? "");
@@ -150,6 +164,28 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   const [workspaceError, setWorkspaceError] = useState("");
   const [documentError, setDocumentError] = useState("");
   const [conflict, setConflict] = useState("");
+
+  // Skills state
+  const [skills, setSkills] = useState<SkillSummary[]>([]);
+  const [skillCategories, setSkillCategories] = useState<string[]>([]);
+  const [skillsFilter, setSkillsFilter] = useState("");
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(
+    () => initialRoute.current.skill ?? null,
+  );
+  const [selectedSkillDetail, setSelectedSkillDetail] =
+    useState<SkillDetail | null>(null);
+  const [selectedSkillFile, setSelectedSkillFile] =
+    useState<SkillFileResponse | null>(null);
+  const [activeSkillSubTab, setActiveSkillSubTab] =
+    useState<SkillSubTab>("instructions");
+  const [skillDraft, setSkillDraft] = useState("");
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [skillFileLoading, setSkillFileLoading] = useState(false);
+  const [skillSaving, setSkillSaving] = useState(false);
+  const [skillError, setSkillError] = useState("");
+  const [isCreateSkillOpen, setIsCreateSkillOpen] = useState(false);
+
+  // Auth & Navigation state
   const [authReady, setAuthReady] = useState(false);
   const [authRequired, setAuthRequired] = useState(false);
   const [needsLogin, setNeedsLogin] = useState(false);
@@ -166,26 +202,42 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   );
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const fileRequestSequence = useRef(0);
+  const skillRequestSequence = useRef(0);
   const initialPathOpened = useRef(false);
 
-  const dirty = file !== null && file.content !== draft;
-  const diff = dirty ? diffLines(file.content, draft) : [];
+  const docDirty = file !== null && file.content !== draft;
+  const skillDirty =
+    selectedSkillFile !== null && selectedSkillFile.content !== skillDraft;
+  const dirty = activeTab === "skills" ? skillDirty : docDirty;
+  const diff = docDirty && file ? diffLines(file.content, draft) : [];
 
   const appStateRef = useRef({
+    activeTab,
     dirty,
+    docDirty,
     file,
     filter,
     openFile,
+    openSkill,
     save,
+    saveSkillFile,
+    selectedSkillFile,
+    skillDirty,
     view,
   });
   useEffect(() => {
     appStateRef.current = {
+      activeTab,
       dirty,
+      docDirty,
       file,
       filter,
       openFile,
+      openSkill,
       save,
+      saveSkillFile,
+      selectedSkillFile,
+      skillDirty,
       view,
     };
   });
@@ -205,23 +257,37 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           setLoading(false);
           return;
         }
-        const [treeResponse, gitResponse] = await Promise.all([
+
+        const [treeResponse, gitResponse, skillsResponse] = await Promise.all([
           api.loadTree(),
           api.loadGitStatus().catch(() => null),
+          api
+            .loadSkills()
+            .catch(() => ({ categories: [], schema: 1 as const, skills: [] })),
         ]);
         if (isActive && !isActive()) return;
+
         setTree(treeResponse.entries);
         setTreeTruncated(treeResponse.truncated);
         setGit(gitResponse);
+        setSkills(skillsResponse.skills);
+        setSkillCategories(skillsResponse.categories);
         setNeedsLogin(false);
         setAuthReady(true);
+
         if (!initialPathOpened.current) {
           initialPathOpened.current = true;
           const route =
             typeof window !== "undefined"
               ? parseRoute(window.location)
               : initialRoute.current;
-          if (route.path) {
+
+          if (route.tab === "skills" || route.skill) {
+            setActiveTab("skills");
+            if (route.skill) {
+              void appStateRef.current.openSkill(route.skill, route.skillFile);
+            }
+          } else if (route.path) {
             void appStateRef.current.openFile(route.path, {
               keepView: Boolean(route.view),
               replaceHistory: true,
@@ -264,10 +330,17 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     function handleSaveShortcut(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s")
         return;
-      if (!appStateRef.current.dirty || !appStateRef.current.file?.editable)
-        return;
-      event.preventDefault();
-      void appStateRef.current.save();
+      const { activeTab, docDirty, file, save, saveSkillFile, skillDirty } =
+        appStateRef.current;
+      if (activeTab === "skills") {
+        if (!skillDirty) return;
+        event.preventDefault();
+        void saveSkillFile();
+      } else {
+        if (!docDirty || !file?.editable) return;
+        event.preventDefault();
+        void save();
+      }
     }
 
     window.addEventListener("keydown", handleSaveShortcut);
@@ -276,32 +349,52 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
   useEffect(() => {
     function handlePopState() {
-      const { dirty, file, filter, openFile, view } = appStateRef.current;
+      const { activeTab, dirty, file, filter, openFile, openSkill, view } =
+        appStateRef.current;
       const route = parseRoute(window.location);
+
       if (dirty) {
-        if (file?.path) {
+        if (activeTab === "documents" && file?.path) {
           navigateRoute(
             {
               filter: filter || undefined,
               path: file.path,
               scenario: route.scenario,
+              tab: "documents",
               view,
             },
             { replace: true },
           );
         }
-        setPendingAction({ kind: "open", path: route.path ?? "" });
+        if (route.tab === "skills" || route.skill) {
+          setPendingAction({
+            id: route.skill ?? "",
+            kind: "openSkill",
+            skillFile: route.skillFile,
+          });
+        } else {
+          setPendingAction({ kind: "open", path: route.path ?? "" });
+        }
         return;
       }
 
       setFilter(route.filter ?? "");
+
+      if (route.tab) {
+        setActiveTab(route.tab);
+      }
 
       if (route.view) {
         setView(route.view);
         if (route.view === "info") setDetailsOpen(true);
       }
 
-      if (route.path) {
+      if (route.tab === "skills" || route.skill) {
+        setActiveTab("skills");
+        if (route.skill) {
+          void openSkill(route.skill, route.skillFile);
+        }
+      } else if (route.path) {
         if (route.path !== file?.path) {
           void openFile(route.path, {
             keepView: Boolean(route.view),
@@ -322,16 +415,23 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-    if (file?.path) {
-      const name = file.path.split("/").at(-1) ?? file.path;
-      document.title = `${name} - OpenLia Workspace`;
+    if (activeTab === "skills") {
+      document.title = selectedSkillDetail
+        ? `${selectedSkillDetail.name} - OpenLia Skills`
+        : "Skills - OpenLia Workspace";
     } else {
-      document.title = "OpenLia Workspace";
+      if (file?.path) {
+        const name = file.path.split("/").at(-1) ?? file.path;
+        document.title = `${name} - OpenLia Workspace`;
+      } else {
+        document.title = "OpenLia Workspace";
+      }
     }
-  }, [file?.path]);
+  }, [activeTab, file?.path, selectedSkillDetail]);
 
   function handleUnauthorized() {
     setTree([]);
+    setSkills([]);
     setGit(null);
     setNeedsLogin(true);
     setAuthRequired(true);
@@ -347,21 +447,32 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       setPassword("");
       setNeedsLogin(false);
       setLoading(true);
-      const [treeResponse, gitResponse] = await Promise.all([
+      const [treeResponse, gitResponse, skillsResponse] = await Promise.all([
         api.loadTree(),
         api.loadGitStatus().catch(() => null),
+        api
+          .loadSkills()
+          .catch(() => ({ categories: [], schema: 1 as const, skills: [] })),
       ]);
       setTree(treeResponse.entries);
       setTreeTruncated(treeResponse.truncated);
       setGit(gitResponse);
+      setSkills(skillsResponse.skills);
+      setSkillCategories(skillsResponse.categories);
       setWorkspaceError("");
+
       if (!initialPathOpened.current) {
         initialPathOpened.current = true;
         const route =
           typeof window !== "undefined"
             ? parseRoute(window.location)
             : initialRoute.current;
-        if (route.path) {
+        if (route.tab === "skills" || route.skill) {
+          setActiveTab("skills");
+          if (route.skill) {
+            void appStateRef.current.openSkill(route.skill, route.skillFile);
+          }
+        } else if (route.path) {
           void openFile(route.path, {
             keepView: Boolean(route.view),
             replaceHistory: true,
@@ -390,9 +501,12 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   async function performSignOut() {
     await api.logout().catch(() => undefined);
     setTree([]);
+    setSkills([]);
     setGit(null);
     setFile(null);
     setDraft("");
+    setSelectedSkillDetail(null);
+    setSelectedSkillFile(null);
     setNeedsLogin(true);
     setAuthRequired(true);
     setAuthError("");
@@ -404,6 +518,21 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   function requestSignOut() {
     if (dirty) setPendingAction({ kind: "signout" });
     else void performSignOut();
+  }
+
+  function requestTabChange(nextTab: MainTab) {
+    if (nextTab === activeTab) return;
+    if (dirty) {
+      setPendingAction({ kind: "switchTab", tab: nextTab });
+    } else {
+      setActiveTab(nextTab);
+      navigateRoute({
+        path: nextTab === "documents" ? file?.path : undefined,
+        skill:
+          nextTab === "skills" ? (selectedSkillId ?? undefined) : undefined,
+        tab: nextTab,
+      });
+    }
   }
 
   async function openFile(
@@ -438,6 +567,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           filter: filter || undefined,
           path,
           scenario: currentRoute.scenario,
+          tab: "documents",
           view: nextView,
         },
         { replace: options?.replaceHistory },
@@ -462,6 +592,80 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     }
     if (dirty) setPendingAction({ kind: "open", path });
     else void openFile(path, { keepView: true });
+  }
+
+  async function openSkill(id: string, skillFilePath = "SKILL.md") {
+    const requestSequence = ++skillRequestSequence.current;
+    setSkillsLoading(true);
+    setSkillError("");
+    try {
+      const [detailRes, fileRes] = await Promise.all([
+        api.loadSkillDetail(id),
+        api.loadSkillFile(id, skillFilePath).catch(() => null),
+      ]);
+      if (requestSequence !== skillRequestSequence.current) return;
+      setSelectedSkillId(id);
+      setSelectedSkillDetail(detailRes.skill);
+      setSelectedSkillFile(fileRes);
+      setSkillDraft(fileRes ? fileRes.content : "");
+      setActiveSkillSubTab(
+        skillFilePath === "SKILL.md" ? "instructions" : "files",
+      );
+      setFilesOpen(false);
+
+      navigateRoute({
+        skill: id,
+        skillFile: skillFilePath !== "SKILL.md" ? skillFilePath : undefined,
+        tab: "skills",
+      });
+    } catch (caught) {
+      if (requestSequence !== skillRequestSequence.current) return;
+      if (caught instanceof ApiError && caught.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      setSkillError("Failed to load skill details.");
+    } finally {
+      if (requestSequence === skillRequestSequence.current)
+        setSkillsLoading(false);
+    }
+  }
+
+  function requestOpenSkill(id: string, skillFilePath?: string) {
+    if (
+      id === selectedSkillId &&
+      (!skillFilePath || skillFilePath === selectedSkillFile?.path)
+    ) {
+      setFilesOpen(false);
+      return;
+    }
+    if (dirty) {
+      setPendingAction({ id, kind: "openSkill", skillFile: skillFilePath });
+    } else {
+      void openSkill(id, skillFilePath);
+    }
+  }
+
+  async function openSkillFile(fileEntry: SkillFileEntry) {
+    if (!selectedSkillId) return;
+    if (skillDirty) {
+      setPendingAction({
+        id: selectedSkillId,
+        kind: "openSkill",
+        skillFile: fileEntry.path,
+      });
+      return;
+    }
+    setSkillFileLoading(true);
+    try {
+      const res = await api.loadSkillFile(selectedSkillId, fileEntry.path);
+      setSelectedSkillFile(res);
+      setSkillDraft(res.content);
+    } catch {
+      setSkillError(`Could not load ${fileEntry.path}`);
+    } finally {
+      setSkillFileLoading(false);
+    }
   }
 
   async function save(): Promise<boolean> {
@@ -494,29 +698,111 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     }
   }
 
+  async function saveSkillFile(): Promise<boolean> {
+    if (!selectedSkillDetail || !selectedSkillFile || skillSaving) return false;
+    setSkillSaving(true);
+    setSkillError("");
+    try {
+      const res = await api.saveSkillFile(
+        selectedSkillDetail.id,
+        selectedSkillFile.path,
+        skillDraft,
+        selectedSkillFile.revision,
+      );
+      setSelectedSkillFile({
+        ...selectedSkillFile,
+        content: skillDraft,
+        modified_at: res.modified_at,
+        revision: res.revision,
+      });
+
+      // If SKILL.md was updated, reload detail and skills list to refresh frontmatter description
+      if (selectedSkillFile.path === "SKILL.md") {
+        const [updatedDetail, updatedSkills] = await Promise.all([
+          api.loadSkillDetail(selectedSkillDetail.id),
+          api.loadSkills(),
+        ]);
+        setSelectedSkillDetail(updatedDetail.skill);
+        setSkills(updatedSkills.skills);
+      }
+      return true;
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 409) {
+        setSkillError(
+          "Revision conflict. The file changed on disk. Revert or copy your changes.",
+        );
+      } else {
+        setSkillError("Failed to save skill file.");
+      }
+      return false;
+    } finally {
+      setSkillSaving(false);
+    }
+  }
+
+  async function handleToggleSkillEnable(enabled: boolean) {
+    if (!selectedSkillDetail) return;
+    try {
+      await api.toggleSkillEnable(selectedSkillDetail.id, enabled);
+      setSelectedSkillDetail({ ...selectedSkillDetail, enabled });
+      setSkills((prev) =>
+        prev.map((s) =>
+          s.id === selectedSkillDetail.id ? { ...s, enabled } : s,
+        ),
+      );
+    } catch {
+      setSkillError("Failed to toggle skill enable state.");
+    }
+  }
+
+  async function handleToggleSkillPin(id: string, pinned: boolean) {
+    try {
+      await api.toggleSkillPin(id, pinned);
+      if (selectedSkillDetail?.id === id) {
+        setSelectedSkillDetail({ ...selectedSkillDetail, pinned });
+      }
+      setSkills((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, pinned } : s)),
+      );
+    } catch {
+      setSkillError("Failed to update skill pin state.");
+    }
+  }
+
+  async function handleCreateSkill(
+    name: string,
+    category: string,
+    description: string,
+  ) {
+    const res = await api.createSkill({ category, description, name });
+    const skillsRes = await api.loadSkills();
+    setSkills(skillsRes.skills);
+    setSkillCategories(skillsRes.categories);
+    if (res.id) {
+      void openSkill(res.id);
+    }
+  }
+
   async function saveAndContinue() {
     const action = pendingAction;
     if (!action) return;
-    const saved = await save();
-    if (!saved) return;
+    const ok = activeTab === "skills" ? await saveSkillFile() : await save();
+    if (!ok) return;
     setPendingAction(null);
+
     if (action.kind === "open") {
       if (action.path) {
         void openFile(action.path, { keepView: true });
       } else {
         setFile(null);
         setDraft("");
-        const currentRoute =
-          typeof window !== "undefined" ? parseRoute(window.location) : {};
-        navigateRoute(
-          {
-            filter: filter || undefined,
-            scenario: currentRoute.scenario,
-            view,
-          },
-          { replace: true },
-        );
+        navigateRoute({ tab: "documents", view }, { replace: true });
       }
+    } else if (action.kind === "openSkill") {
+      void openSkill(action.id, action.skillFile);
+    } else if (action.kind === "switchTab") {
+      setActiveTab(action.tab);
+      navigateRoute({ tab: action.tab });
     } else {
       void performSignOut();
     }
@@ -526,24 +812,26 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     const action = pendingAction;
     if (!action) return;
     setPendingAction(null);
-    setDraft(file?.content ?? "");
+
+    if (activeTab === "skills") {
+      setSkillDraft(selectedSkillFile?.content ?? "");
+    } else {
+      setDraft(file?.content ?? "");
+    }
+
     if (action.kind === "open") {
       if (action.path) {
         void openFile(action.path, { keepView: true });
       } else {
         setFile(null);
         setDraft("");
-        const currentRoute =
-          typeof window !== "undefined" ? parseRoute(window.location) : {};
-        navigateRoute(
-          {
-            filter: filter || undefined,
-            scenario: currentRoute.scenario,
-            view,
-          },
-          { replace: true },
-        );
+        navigateRoute({ tab: "documents", view }, { replace: true });
       }
+    } else if (action.kind === "openSkill") {
+      void openSkill(action.id, action.skillFile);
+    } else if (action.kind === "switchTab") {
+      setActiveTab(action.tab);
+      navigateRoute({ tab: action.tab });
     } else {
       void performSignOut();
     }
@@ -559,6 +847,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         filter: normalizedFilter || undefined,
         path: file?.path,
         scenario: currentRoute.scenario,
+        tab: "documents",
         view,
       },
       { replace: true },
@@ -575,6 +864,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         filter: filter || undefined,
         path: file?.path,
         scenario: currentRoute.scenario,
+        tab: activeTab,
         view: nextView,
       },
       { replace: true },
@@ -602,23 +892,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         filter: filter || undefined,
         path: file?.path,
         scenario: currentRoute.scenario,
+        tab: activeTab,
         view: nextView,
-      },
-      { replace: true },
-    );
-  }
-
-  function openInfoView() {
-    setDetailsOpen(true);
-    setView("info");
-    const currentRoute =
-      typeof window !== "undefined" ? parseRoute(window.location) : {};
-    navigateRoute(
-      {
-        filter: filter || undefined,
-        path: file?.path,
-        scenario: currentRoute.scenario,
-        view: "info",
       },
       { replace: true },
     );
@@ -654,86 +929,197 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   return (
     <main className="workspace-app">
       <WorkspaceHeader
+        activeTab={activeTab}
         authRequired={authRequired}
-        detailsOpen={detailsOpen}
         dirty={dirty}
+        file={activeTab === "skills" ? null : file}
         filesButtonRef={filesButtonRef}
-        file={file}
         git={git}
-        onOpenDetails={openHeaderDetails}
         onOpenFiles={() => setFilesOpen(true)}
         onSignOut={requestSignOut}
+        onTabChange={requestTabChange}
       />
+
       {workspaceError && (
         <ErrorMessage
           error={workspaceError}
           onRetry={() => void loadWorkspace()}
         />
       )}
-      <div
-        className={`workspace-layout ${detailsOpen ? "xl:grid-cols-[clamp(18rem,22vw,22rem)_minmax(0,1fr)_clamp(16rem,20vw,20rem)]" : "xl:grid-cols-[clamp(18rem,22vw,22rem)_minmax(0,1fr)]"}`}
-      >
-        <FileNavigator
-          entries={tree}
-          filter={filter}
-          loading={loading}
-          mobileOpen={filesOpen}
-          onClose={() => {
-            setFilesOpen(false);
-            filesButtonRef.current?.focus();
-          }}
-          onFilterChange={handleFilterChange}
-          onOpenFile={requestOpenFile}
-          onRetry={() => void loadWorkspace()}
-          selectedPath={file?.path}
-          truncated={treeTruncated}
-          workspaceError={workspaceError}
-        />
-        <DocumentPane
-          conflict={conflict}
-          diff={diff}
-          draft={draft}
-          documentError={documentError}
-          file={file}
-          fileLoading={fileLoading}
-          onCloseFiles={() => setFilesOpen(true)}
-          onDownload={() => {
-            if (file) window.location.href = api.downloadUrl(file.path);
-          }}
-          onDraftChange={setDraft}
-          onOpenDetails={openInfoView}
-          onRetry={() => {
-            const pathToRetry =
-              file?.path ??
-              (typeof window !== "undefined"
-                ? parseRoute(window.location).path
-                : undefined);
-            if (pathToRetry) void openFile(pathToRetry, { keepView: true });
-          }}
-          onSave={() => void save()}
-          onViewChange={handleViewChange}
-          saving={saving}
-          view={view}
-        />
-        {detailsOpen && (
-          <div className="hidden min-h-0 xl:block">
-            <DocumentInspector diff={diff} draft={draft} file={file} />
+
+      {activeTab === "documents" ? (
+        <div
+          className={`workspace-layout ${
+            detailsOpen
+              ? "xl:grid-cols-[clamp(18rem,22vw,22rem)_minmax(0,1fr)_clamp(16rem,20vw,20rem)]"
+              : "xl:grid-cols-[clamp(18rem,22vw,22rem)_minmax(0,1fr)]"
+          }`}
+        >
+          <FileNavigator
+            entries={tree}
+            filter={filter}
+            loading={loading}
+            mobileOpen={filesOpen}
+            onClose={() => {
+              setFilesOpen(false);
+              filesButtonRef.current?.focus();
+            }}
+            onFilterChange={handleFilterChange}
+            onOpenFile={requestOpenFile}
+            onRetry={() => void loadWorkspace()}
+            selectedPath={file?.path}
+            truncated={treeTruncated}
+            workspaceError={workspaceError}
+          />
+          <DocumentPane
+            conflict={conflict}
+            detailsOpen={detailsOpen}
+            diff={diff}
+            documentError={documentError}
+            draft={draft}
+            file={file}
+            fileLoading={fileLoading}
+            onCloseFiles={() => setFilesOpen(true)}
+            onDownload={() => {
+              if (file) window.location.href = api.downloadUrl(file.path);
+            }}
+            onDraftChange={setDraft}
+            onOpenDetails={openHeaderDetails}
+            onRetry={() => {
+              const pathToRetry =
+                file?.path ??
+                (typeof window !== "undefined"
+                  ? parseRoute(window.location).path
+                  : undefined);
+              if (pathToRetry) void openFile(pathToRetry, { keepView: true });
+            }}
+            onSave={() => void save()}
+            onViewChange={handleViewChange}
+            saving={saving}
+            view={view}
+          />
+          {detailsOpen && (
+            <div className="hidden min-h-0 xl:block">
+              <DocumentInspector diff={diff} draft={draft} file={file} />
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="workspace-layout xl:grid-cols-[clamp(18rem,22vw,22rem)_minmax(0,1fr)]">
+          <div
+            className={`fixed inset-y-0 left-0 z-30 w-72 transform bg-base-100 transition-transform xl:static xl:w-full xl:translate-x-0 ${
+              filesOpen ? "translate-x-0" : "-translate-x-full"
+            }`}
+          >
+            <SkillsNavigator
+              categories={skillCategories}
+              filter={skillsFilter}
+              loading={skillsLoading}
+              onCreateClick={() => setIsCreateSkillOpen(true)}
+              onFilterChange={setSkillsFilter}
+              onSelectSkill={requestOpenSkill}
+              onTogglePin={(id, pinned) =>
+                void handleToggleSkillPin(id, pinned)
+              }
+              selectedSkillId={selectedSkillId}
+              skills={skills}
+            />
           </div>
-        )}
-      </div>
+
+          {filesOpen && (
+            <button
+              aria-label="Close skills navigator"
+              className="fixed inset-0 z-20 bg-black/40 xl:hidden"
+              onClick={() => setFilesOpen(false)}
+              type="button"
+            />
+          )}
+
+          {selectedSkillDetail ? (
+            <SkillDetailPane
+              activeSubTab={activeSkillSubTab}
+              draftContent={skillDraft}
+              error={skillError}
+              isSaving={skillSaving || skillFileLoading}
+              onDismissError={() => setSkillError("")}
+              onDraftChange={setSkillDraft}
+              onResetFile={() => {
+                if (selectedSkillFile) setSkillDraft(selectedSkillFile.content);
+              }}
+              onSaveFile={() => void saveSkillFile()}
+              onSelectFile={(f) => void openSkillFile(f)}
+              onSubTabChange={setActiveSkillSubTab}
+              onToggleEnable={(en) => void handleToggleSkillEnable(en)}
+              onTogglePin={(pin) => {
+                if (selectedSkillDetail)
+                  void handleToggleSkillPin(selectedSkillDetail.id, pin);
+              }}
+              onViewChange={setView}
+              selectedFile={selectedSkillFile}
+              skill={selectedSkillDetail}
+              view={view}
+            />
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center p-8 text-center bg-base-100">
+              <div className="max-w-md space-y-3">
+                <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-primary/10 text-primary">
+                  <svg
+                    className="h-6 w-6"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.5}
+                    viewBox="0 0 24 24"
+                  >
+                    <title>Skills Management</title>
+                    <path
+                      d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
+                <h2 className="text-xl font-bold">Skills Management</h2>
+                <p className="text-sm text-base-content/60">
+                  Select a skill from the sidebar to inspect its instructions
+                  and files, or scaffold a new skill.
+                </p>
+                <button
+                  className="btn btn-primary btn-sm mt-2"
+                  onClick={() => setIsCreateSkillOpen(true)}
+                  type="button"
+                >
+                  Create New Skill
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {pendingAction && (
         <DirtyDraftDialog
           actionLabel={
             pendingAction.kind === "open"
               ? "opening another file"
-              : "signing out"
+              : pendingAction.kind === "openSkill"
+                ? "opening another skill"
+                : pendingAction.kind === "switchTab"
+                  ? "switching view mode"
+                  : "signing out"
           }
           onCancel={() => setPendingAction(null)}
           onDiscard={discardAndContinue}
           onSave={() => void saveAndContinue()}
-          saving={saving}
+          saving={saving || skillSaving}
         />
       )}
+
+      <CreateSkillModal
+        categories={skillCategories}
+        isOpen={isCreateSkillOpen}
+        onClose={() => setIsCreateSkillOpen(false)}
+        onCreate={handleCreateSkill}
+      />
     </main>
   );
 }
