@@ -131,9 +131,9 @@ func configOrError(options Options) (Config, int) {
 
 func commandInit(options Options, args []string, assets fs.FS) int {
 	set := newFlagSet("init")
-	local := set.Bool("local", false, "deploy on this machine")
-	target := set.String("target", "", "SSH destination such as user@host")
-	root := set.String("root", "", "OpenLia installation root")
+	local := set.Bool("local", false, "run Hermes Agent on this machine")
+	target := set.String("target", "", "install and control Hermes Agent on this SSH target")
+	root := set.String("root", "", "OpenLia installation root on the selected agent machine")
 	project := set.String("project", "", "Compose project name")
 	timezone := set.String("timezone", "", "IANA timezone for the Hermes agent")
 	model := set.String("model", "", "Hermes model identifier")
@@ -538,9 +538,9 @@ func deploymentResultState(raw []byte) (string, bool) {
 
 func commandUninstall(options Options, args []string) int {
 	set := newFlagSet("uninstall")
-	local := set.Bool("local", false, "uninstall a local deployment")
-	target := set.String("target", "", "SSH destination such as user@host")
-	root := set.String("root", "", "specific OpenLia installation root")
+	local := set.Bool("local", false, "uninstall the agent on this machine")
+	target := set.String("target", "", "uninstall the agent on this SSH target")
+	root := set.String("root", "", "specific OpenLia installation root on the selected agent machine")
 	project := set.String("project", "", "Compose project name")
 	if err := set.Parse(args); err != nil {
 		return ExitUsage

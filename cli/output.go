@@ -77,6 +77,11 @@ func fail(options Options, code int, message string, fields map[string]any) int 
 func usage(out io.Writer) {
 	fmt.Fprintln(out, `openlia - a thin Hermes Agent operations control plane
 
+Run this CLI on the operator machine. In local mode it runs the agent on that
+machine; with --target it uses SSH to install and control the agent on another
+machine. The same pattern applies to openlia browser: the browser service is
+managed locally or on its selected SSH target.
+
 Usage:
   openlia init [--local|--target user@host] [--root /path] [--project NAME]
                [--timezone Asia/Ho_Chi_Minh] [--model MODEL] [--provider PROVIDER]

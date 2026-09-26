@@ -37,12 +37,13 @@ OpenLia repository/release
 Operator machine
         |
         | openlia CLI: deployment, operations, diagnostics
-        +-- Local Docker engine
-        |     `-- Docker Compose (runtime plane)
-        `-- SSH / Git -> Remote Linux VM
+        +-- Local mode
+        |     `-- Agent machine (same machine)
+        |           `-- Docker Compose (runtime plane)
+        `-- SSH -> Remote agent machine
               `-- Docker Compose (runtime plane)
 
-Both runtime planes contain:
+Both agent runtime planes contain:
   +-- Hermes gateway container
   +-- one Locho attachment container per host
   +-- persistent Hermes data (/opt/data)
@@ -64,6 +65,47 @@ the supervised Playwright MCP proxy. The optional Workspace UI is disabled unles
 `[workspace-ui]` section is present in `config.toml`. The optional Open WebUI
 chat interface is disabled unless an `[open-webui]` section is present in
 `config.toml` or `--open-webui` is provided during `openlia init`.
+
+### Machine Roles
+
+The full `openlia` CLI is installed and run on the **operator machine**. It is
+the control plane, not a service that must be installed on the agent machine.
+For a remote deployment, the CLI connects over SSH, uploads the release and a
+small target-side operator artifact, and starts the runtime there. The remote
+agent machine does not need an OpenLia checkout or the user-facing `openlia`
+CLI.
+
+| Machine | Responsibility |
+| --- | --- |
+| Operator machine | Runs `openlia`, stores the operator config, and supplies protected source files. |
+| Agent machine | Runs Hermes Agent, Docker Compose, Locho, the workspace, and persistent runtime state. |
+| Browser machine | Runs `openlia-browser`, Playwright MCP, the browser, and its browser profile when browser tools use a separate host. |
+
+Local mode means the agent or browser service runs on the operator machine.
+Remote mode means the operator CLI uses SSH to manage that component on the
+selected target. The agent target and browser target are independent, so the
+browser can run on the agent machine, on the operator machine, or on a third
+machine.
+
+```text
+Operator machine
+  openlia CLI
+      |
+      +-- SSH -> Agent machine
+      |          Hermes + Docker Compose + workspace/state
+      |
+      `-- SSH -> Browser machine (optional)
+                 openlia-browser + Playwright + browser profile
+
+Agent machine -- Locho attachment --> Browser machine
+```
+
+Run the commands in this README from the operator machine unless a command is
+explicitly marked as running on the agent or browser machine. The default
+operator config is `~/.config/openlia/config.toml`; set `OPENLIA_CONFIG` to
+use a different config for another deployment. Configured secret and
+attachment source paths are also read from the operator machine and uploaded
+to the selected runtime when required.
 
 Browser tools are configured independently from the Hermes deployment target:
 
@@ -435,6 +477,20 @@ access to the configured image registries and release downloads. The pinned
 images and bundled binaries support `amd64` and `arm64`. Local Docker roots must
 be on a filesystem shared with Docker Desktop on macOS.
 
+For a remote agent machine, verify before initialization that:
+
+- the operator machine has the `openlia` release CLI and an SSH key or other
+  configured SSH authentication for `user@host`;
+- the agent machine is Linux with Docker Engine and Compose v2;
+- the SSH user can run Docker, either directly or through the supported
+  passwordless-sudo path; and
+- the agent machine can reach the required image registries and release
+  downloads.
+
+The remote agent machine does not need Go, Bun, the OpenLia repository, or the
+full user-facing `openlia` CLI. The release carries the target-side operator
+artifact and runtime files over SSH.
+
 ## Source Builds and Releases
 
 The supported installation route is a published OpenLia release: use its
@@ -468,7 +524,7 @@ make build
 ```
 
 Configure the primary provider and ordered fallback list in the OpenLia operator
-config before initializing the deployment:
+config on the operator machine before initializing the deployment:
 
 ```toml
 [openlia]
@@ -569,6 +625,7 @@ Key integration details:
 Then initialize:
 
 ```sh
+# Run on the operator machine. Hermes runs on this same machine.
 ./openlia init --local --root "$HOME/.openlia"
 ```
 
@@ -582,12 +639,15 @@ deployment. On Linux, a local Docker Engine with Compose v2 is supported.
 Remote deployment remains available:
 
 ```sh
+# Run on the operator machine. Hermes runs on user@host.
 ./openlia init --target user@host --root /srv/openlia
 ```
 
 `init` installs the pinned OpenLia release at the selected root, initializes the
-workspace only when it is empty, starts the Compose stack, and runs health
-checks. Provider credentials are never accepted as command-line values.
+workspace only when it is empty, starts the Compose stack on the selected agent
+machine, and runs health checks. The `--root` path is on that agent machine;
+the full `openlia` CLI remains on the operator machine. Provider credentials
+are never accepted as command-line values.
 Configure a protected dotenv source path in the operator config:
 
 ```toml
@@ -596,7 +656,7 @@ source = "/path/outside/this/repository/hermes.env"
 ```
 
 The source must already exist as a regular file outside the checkout with mode
-`0600`:
+`0600` on the operator machine:
 
 ```sh
 chmod 600 "$HOME/.config/openlia/dev/openlia_dev.env"
@@ -691,6 +751,11 @@ tool output are not localized by this setting.
 
 ## Operations
 
+Run these commands on the operator machine. For a remote deployment, the CLI
+uses the target saved in the operator config and performs the operation over
+SSH; you do not need to install or invoke the full `openlia` CLI on the agent
+machine.
+
 ```text
 openlia status --json
 openlia doctor --json
@@ -705,6 +770,12 @@ openlia backup restore --non-interactive --archive /path/to/backup.tar.gz
 openlia backup rollback-restore --non-interactive --archive /path/to/rollback.tar.gz
 openlia workspace git status
 openlia workspace git setup
+```
+
+Use a separate operator config when managing another deployment:
+
+```sh
+OPENLIA_CONFIG="$HOME/.config/openlia/remote.toml" openlia status
 ```
 
 `openlia backup create` creates a compact durable backup of the workspace,

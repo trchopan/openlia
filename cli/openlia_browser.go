@@ -87,11 +87,11 @@ func commandOpenLIABrowser(options Options, args []string, assets fs.FS) int {
 
 func configureOpenLIABrowser(options Options, args []string) int {
 	set := newFlagSet("browser configure")
-	local := set.Bool("local", false, "manage openlia-browser on this machine")
-	target := set.String("target", "", "SSH destination such as user@host")
-	root := set.String("root", "", "openlia-browser installation root on the selected machine")
+	local := set.Bool("local", false, "run openlia-browser on this machine")
+	target := set.String("target", "", "install and control openlia-browser on this SSH target")
+	root := set.String("root", "", "openlia-browser installation root on the selected browser machine")
 	sshPort := set.Int("ssh-port", 22, "SSH port")
-	tokenFile := set.String("extension-token-file", "", "Playwright extension token file on the selected machine")
+	tokenFile := set.String("extension-token-file", "", "Playwright extension token file on the selected browser machine")
 	if err := set.Parse(args); err != nil || set.NArg() != 0 {
 		return fail(options, ExitUsage, "browser configure requires --local or --target and --root", nil)
 	}
