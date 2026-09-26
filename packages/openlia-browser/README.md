@@ -4,6 +4,33 @@
 Streamable HTTP endpoint through one loopback listener. It is setup and relay
 infrastructure, not an OpenLia browser workflow or crawler.
 
+## Where It Runs
+
+Run the `openlia browser` commands on the operator machine. With `--local`,
+the browser service runs on that same machine. With `--target`, the CLI uses
+SSH to install and control `openlia-browser` on a separate browser machine.
+That machine does not need the full `openlia` CLI or an OpenLia repository
+checkout.
+
+```text
+Operator machine
+  openlia browser
+      |
+      | SSH
+      v
+Browser machine
+  openlia-browser
+  Playwright MCP
+  Browser + authenticated profile
+```
+
+The remote install uploads the bundled `server.js` and a launcher script. The
+browser machine must already provide Node.js with `npx`, the browser
+installation, the Playwright extension/token setup, and the configured token
+file. `openlia browser install` does not install the operating system, Node.js,
+Playwright, or the browser application. The `--root` and
+`--extension-token-file` paths refer to paths on the selected browser machine.
+
 Build the Node-compatible bundle from the repository root:
 
 ```sh
@@ -82,6 +109,7 @@ ownership for the shared authenticated profile.
 The supported OpenLia lifecycle is configuration-driven:
 
 ```sh
+# Run these commands on the operator machine.
 openlia browser configure \
   --target "user@browser-host" \
   --ssh-port 22 \
@@ -96,10 +124,14 @@ openlia browser status
 Use `--local` instead of `--target` when the browser host is the same machine.
 The service is detached from the invoking shell but does not automatically
 restart after a reboot when no operating-system service manager is installed.
+The operator config records the browser target, so later `install`, `start`,
+`stop`, `restart`, `status`, `logs`, and `uninstall` commands continue to use
+the operator machine's SSH connection.
 
 ## Connect With Locho
 
-On the browser host, expose only openlia-browser through Locho:
+On the browser machine, expose only `openlia-browser` through Locho. Hermes
+does not connect to raw Playwright directly:
 
 ```toml
 [[services]]
@@ -110,6 +142,19 @@ endpoint = "127.0.0.1:8932"
 
 Raw Playwright MCP remains private on `127.0.0.1:8931` and must not be shared
 with OpenLia.
+
+The resulting path is:
+
+```text
+Agent machine: Hermes
+        |
+        | Locho attachment
+        v
+Browser machine: openlia-browser:8932
+        |
+        v
+Browser machine: Playwright MCP:8931 -> browser
+```
 
 Generate the openlia-browser capability using Locho, then place it in the OpenLia
 attachment file:

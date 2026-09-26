@@ -12,6 +12,11 @@ never commit them or pass them as ordinary command arguments. Use
 `openlia attachments rotate <host> --source /path/to/attachments.toml` to
 validate and replace one host without restarting unrelated sidecars.
 
+Run `openlia` on the operator machine. For a remote deployment, the
+`--source` path is read from the operator machine and the validated attachment
+file is uploaded to the selected agent runtime. The remote agent machine does
+not need the full `openlia` CLI.
+
 ## Service Mapping & Roles
 
 Discovered services can be assigned roles using `openlia attachments map`:
@@ -22,8 +27,8 @@ openlia attachments map <host> <service> --role openlia-browser
 openlia attachments map <host> <service> --role openai-gateway
 ```
 
-Or directly in `~/.config/openlia/config.toml` using one `[[services]]` block per
-host:
+Or directly in the operator machine's `~/.config/openlia/config.toml` using one
+`[[services]]` block per host:
 
 ```toml
 [[services]]
