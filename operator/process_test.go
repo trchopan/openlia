@@ -1,7 +1,10 @@
 package operator
 
 import (
+	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -38,5 +41,20 @@ func TestComposeRunPassesResolvedRuntimeEnvironment(t *testing.T) {
 		if !strings.Contains(environment, expected) {
 			t.Fatalf("Compose environment missing %q:\n%s", expected, environment)
 		}
+	}
+}
+
+func TestExecRunnerStreamsStderrWhileRetainingDiagnostics(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "stderr.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' progress >&2\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var streamed bytes.Buffer
+	result, err := (ExecRunner{Stderr: &streamed}).Run(context.Background(), script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(result.Stderr) != "progress\n" || streamed.String() != "progress\n" {
+		t.Fatalf("stderr was not retained and streamed: result=%q streamed=%q", result.Stderr, streamed.String())
 	}
 }

@@ -29,6 +29,23 @@ func TestOperationCommandUsesPrivilegedAndUnprivilegedRuntimeIdentities(t *testi
 	}
 }
 
+func TestRemoteOperationLockingLeavesReadsAvailable(t *testing.T) {
+	for _, test := range []struct {
+		script string
+		args   []string
+		read   bool
+	}{
+		{script: "healthcheck", args: []string{"--json"}, read: true},
+		{script: "instructions", args: []string{"diff", "workspace/AGENTS.md"}, read: true},
+		{script: "deploy", args: []string{"deploy", "--json"}, read: false},
+		{script: "attachments", args: []string{"rotate", "laptop"}, read: false},
+	} {
+		if got := remoteOperationReadOnly(test.script, test.args); got != test.read {
+			t.Fatalf("remoteOperationReadOnly(%q, %v) = %v, want %v", test.script, test.args, got, test.read)
+		}
+	}
+}
+
 func TestOperationCommandIncludesOutputLanguage(t *testing.T) {
 	config := defaultConfig()
 	config.Target = "operator@example.test"
@@ -120,6 +137,38 @@ func TestRemoteExtractsOperatorErrorJSON(t *testing.T) {
 	_, err := (Remote{Config: config}).ssh(context.Background(), "ignored", nil)
 	if err == nil || err.Error() != "remote command failed: remote skill failure" {
 		t.Fatalf("Remote.ssh() error = %v", err)
+	}
+}
+
+func TestRemoteSSHUsesBoundedConnectionOptions(t *testing.T) {
+	bin := t.TempDir()
+	ssh := filepath.Join(bin, "ssh")
+	argsFile := filepath.Join(t.TempDir(), "ssh-args")
+	if err := os.WriteFile(ssh, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SSH_ARGS_FILE\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv("SSH_ARGS_FILE", argsFile)
+	config := defaultConfig()
+	config.Target = "operator@example.test"
+	if _, err := (Remote{Config: config}).ssh(context.Background(), "true", nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := string(data)
+	for _, expected := range []string{
+		"-o\nBatchMode=yes",
+		"-o\nConnectTimeout=10",
+		"-o\nServerAliveInterval=5",
+		"-o\nServerAliveCountMax=3",
+		"--\noperator@example.test",
+	} {
+		if !strings.Contains(args, expected) {
+			t.Fatalf("SSH arguments missing %q:\n%s", expected, args)
+		}
 	}
 }
 

@@ -47,6 +47,39 @@ type openWebUIRunner struct {
 	calls []string
 }
 
+type deployBuildRunner struct {
+	calls     []string
+	dataRoot  string
+	secretDir string
+}
+
+func (r *deployBuildRunner) Run(_ context.Context, name string, args ...string) (CommandResult, error) {
+	call := strings.Join(append([]string{name}, args...), " ")
+	r.calls = append(r.calls, call)
+	if name == "docker" && len(args) > 0 && args[0] == "info" {
+		return CommandResult{Stdout: []byte("linux\n")}, nil
+	}
+	if strings.Contains(call, "config --services") || strings.Contains(call, "ps --services --filter status=running") {
+		return CommandResult{Stdout: []byte("hermes\n")}, nil
+	}
+	if strings.Contains(call, "ps -q hermes") {
+		return CommandResult{Stdout: []byte("hermes-id\n")}, nil
+	}
+	if strings.Contains(call, "HostConfig.Privileged") {
+		return CommandResult{Stdout: []byte("false\n")}, nil
+	}
+	if strings.Contains(call, `.Destination "/opt/data"`) {
+		return CommandResult{Stdout: []byte(r.dataRoot)}, nil
+	}
+	if strings.Contains(call, `.Destination "/run/openlia-secrets"`) {
+		return CommandResult{Stdout: []byte(r.secretDir)}, nil
+	}
+	if strings.Contains(call, "NetworkSettings.Networks") {
+		return CommandResult{Stdout: []byte("test-project-private \n")}, nil
+	}
+	return CommandResult{}, nil
+}
+
 func (r *openWebUIRunner) Run(_ context.Context, name string, args ...string) (CommandResult, error) {
 	call := strings.Join(append([]string{name}, args...), " ")
 	r.calls = append(r.calls, call)
@@ -159,6 +192,52 @@ func TestDeployRestartRecreatesFullStack(t *testing.T) {
 	}
 	if strings.Contains(joined, " compose restart") {
 		t.Fatalf("restart still used Compose restart: %s", joined)
+	}
+}
+
+func TestDeployBuildsOnceAndRunsOneFullHealthcheck(t *testing.T) {
+	repo := t.TempDir()
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	config := testConfig(repo, runtimeRoot)
+	for _, directory := range []string{config.DataRoot, config.BackupRoot, config.MetaRoot, config.LochoRoot, config.SecretDir} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(config.ComposeFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.ComposeFile, []byte("services: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.SecretFile, []byte("# test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteState(config, stateNeverStarted); err != nil {
+		t.Fatal(err)
+	}
+	runner := &deployBuildRunner{dataRoot: config.DataRoot, secretDir: config.SecretDir}
+	if _, err := Deploy(context.Background(), config, NewCompose(config, runner), DeployOptions{Action: "deploy", Component: "hermes", HealthAttempts: 1}, time.Now()); err != nil {
+		t.Fatalf("%v; calls=%v", err, runner.calls)
+	}
+	builds := 0
+	fullHealthchecks := 0
+	for _, call := range runner.calls {
+		if strings.Contains(call, " build hermes") {
+			builds++
+		}
+		if strings.Contains(call, " up -d") && strings.Contains(call, "--build") {
+			t.Fatalf("Compose up requested a duplicate build: %s", call)
+		}
+		if strings.HasSuffix(call, " info") {
+			fullHealthchecks++
+		}
+	}
+	if builds != 1 {
+		t.Fatalf("Hermes was built %d times: %v", builds, runner.calls)
+	}
+	if fullHealthchecks != 1 {
+		t.Fatalf("full healthcheck ran %d times: %v", fullHealthchecks, runner.calls)
 	}
 }
 

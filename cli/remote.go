@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -66,11 +67,17 @@ func (remote Remote) ssh(ctx context.Context, command string, input []byte) ([]b
 	if err != nil {
 		return nil, fmt.Errorf("ssh is required: %w", err)
 	}
-	process := exec.CommandContext(ctx, ssh, "--", remote.Config.Target, command)
+	process := exec.CommandContext(ctx, ssh,
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=10",
+		"-o", "ServerAliveInterval=5",
+		"-o", "ServerAliveCountMax=3",
+		"--", remote.Config.Target, command,
+	)
 	process.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	process.Stdout = &stdout
-	process.Stderr = &stderr
+	process.Stderr = io.MultiWriter(&stderr, os.Stderr)
 	err = process.Run()
 	if err != nil {
 		detail := strings.TrimSpace(redact(stderr.String()))
@@ -166,7 +173,37 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 }
 
 func (remote Remote) operation(ctx context.Context, script string, input []byte, args ...string) ([]byte, error) {
-	return remote.ssh(ctx, remote.operationCommand(script, args...), input)
+	command := remote.operationCommand(script, args...)
+	if remoteOperationReadOnly(script, args) {
+		return remote.ssh(ctx, command, input)
+	}
+	return remote.lockedSSH(ctx, command, input)
+}
+
+func remoteOperationReadOnly(script string, args []string) bool {
+	switch filepath.ToSlash(script) {
+	case "healthcheck", "skill-status":
+		return true
+	case "instructions":
+		return len(args) > 0 && (args[0] == "status" || args[0] == "diff")
+	case "workspace-git":
+		return len(args) > 0 && args[0] == "status"
+	case "skills":
+		return len(args) > 0 && (args[0] == "list" || args[0] == "show" || args[0] == "status")
+	case "skill-sources":
+		return len(args) > 0 && args[0] == "list"
+	default:
+		return false
+	}
+}
+
+// lockedSSH serializes mutating remote operations and releases the lock when
+// the SSH process exits. flock avoids stale lock files after a disconnected
+// operator or a crashed remote process.
+func (remote Remote) lockedSSH(ctx context.Context, command string, input []byte) ([]byte, error) {
+	lockPath := remote.Config.InstallRoot + ".operation.lock"
+	rootCommand := "set -eu; command -v flock >/dev/null 2>&1 || { printf '%s\\n' 'flock is required for serialized OpenLia operations' >&2; exit 69; }; exec 9>" + shellQuote(lockPath) + "; if ! flock -n 9; then printf '%s\\n' 'another OpenLia operation is already running' >&2; exit 75; fi; " + command
+	return remote.ssh(ctx, privilegedCommand(rootCommand), input)
 }
 
 func privilegedEnvironmentCommand(environment []string, executable string, args ...string) string {
@@ -316,7 +353,7 @@ func (remote Remote) uninstall(ctx context.Context) ([]byte, error) {
 	command := "if [ -x " + shellQuote(operatorAMD64) + " ] || [ -x " + shellQuote(operatorARM64) + " ] || [ -x " + shellQuote(script) + " ]; then " +
 		remote.operationCommandForRoot(current, "uninstall", "--json") +
 		"; else " + privilegedCommand(remote.legacyUninstallCommand(current)) + "; fi"
-	return remote.ssh(ctx, command, nil)
+	return remote.lockedSSH(ctx, command, nil)
 }
 
 func privilegedCommand(command string) string {
@@ -347,11 +384,16 @@ func (remote Remote) uploadRelease(ctx context.Context, archive []byte, digest s
 	if !safeVersion(remote.Config.Version) {
 		return fmt.Errorf("invalid release version")
 	}
+	if len(digest) != sha256.Size*2 || strings.Trim(digest, "0123456789abcdef") != "" {
+		return fmt.Errorf("invalid release digest")
+	}
 	checksum := shellQuote(digest + "\n")
 	marker := "{\"schema\":1,\"install_root\":\"" + strings.ReplaceAll(remote.Config.InstallRoot, "\\", "\\\\") + "\",\"project\":\"" + strings.ReplaceAll(remote.Config.Project, "\\", "\\\\") + "\",\"network\":\"" + strings.ReplaceAll(remote.Config.Project+"-private", "\\", "\\\\") + "\"}\n"
-	rootCommand := "set -eu; mkdir -p " + shellQuote(release) + " " + shellQuote(remote.rootPath("runtime", "meta")) + "; printf %s " + shellQuote(marker) + " > " + shellQuote(remote.rootPath("runtime", "meta", "runtime.json")) + "; chmod 600 " + shellQuote(remote.rootPath("runtime", "meta", "runtime.json")) + "; tar -xzf - -C " + shellQuote(release) + "; printf %s " + checksum + " > " + shellQuote(filepath.Join(release, "release.sha256")) + "; chmod 600 " + shellQuote(filepath.Join(release, "release.sha256"))
-	command := "if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then sudo -n sh -c " + shellQuote(rootCommand) + "; else " + rootCommand + "; fi"
-	_, err := remote.ssh(ctx, command, archive)
+	releases := remote.rootPath("releases")
+	archivePath := filepath.Join(releases, ".upload-"+remote.Config.Version+"-"+digest+".tar.gz")
+	staging := filepath.Join(releases, ".staging-"+remote.Config.Version+"-"+digest)
+	rootCommand := "set -eu; cleanup() { rm -rf -- " + shellQuote(staging) + " " + shellQuote(archivePath) + "; }; trap cleanup EXIT; mkdir -p " + shellQuote(releases) + " " + shellQuote(remote.rootPath("runtime", "meta")) + "; rm -rf -- " + shellQuote(staging) + "; rm -f -- " + shellQuote(archivePath) + "; cat > " + shellQuote(archivePath) + "; actual=$(sha256sum " + shellQuote(archivePath) + " | cut -d ' ' -f1); test \"$actual\" = " + shellQuote(digest) + "; mkdir " + shellQuote(staging) + "; tar -xzf " + shellQuote(archivePath) + " -C " + shellQuote(staging) + "; test -x " + shellQuote(filepath.Join(staging, "operator", "linux-arm64", "openlia-operator")) + " -o -x " + shellQuote(filepath.Join(staging, "operator", "linux-amd64", "openlia-operator")) + "; printf %s " + checksum + " > " + shellQuote(filepath.Join(staging, "release.sha256")) + "; chmod 600 " + shellQuote(filepath.Join(staging, "release.sha256")) + "; rm -rf -- " + shellQuote(release) + "; mv -- " + shellQuote(staging) + " " + shellQuote(release) + "; printf %s " + shellQuote(marker) + " > " + shellQuote(remote.rootPath("runtime", "meta", "runtime.json")) + "; chmod 600 " + shellQuote(remote.rootPath("runtime", "meta", "runtime.json"))
+	_, err := remote.lockedSSH(ctx, rootCommand, archive)
 	return err
 }
 
@@ -359,8 +401,7 @@ func (remote Remote) activateRelease(ctx context.Context) error {
 	current := remote.rootPath("current")
 	marker := "{\"schema\":1,\"install_root\":\"" + strings.ReplaceAll(remote.Config.InstallRoot, "\\", "\\\\") + "\",\"project\":\"" + strings.ReplaceAll(remote.Config.Project, "\\", "\\\\") + "\",\"network\":\"" + strings.ReplaceAll(remote.Config.Project+"-private", "\\", "\\\\") + "\"}\n"
 	rootCommand := "set -eu; mkdir -p " + shellQuote(remote.rootPath("releases")) + " " + shellQuote(remote.rootPath("runtime", "meta")) + "; ln -sfn " + shellQuote(remote.releasePath()) + " " + shellQuote(current) + "; printf %s " + shellQuote(marker) + " > " + shellQuote(remote.rootPath("runtime", "meta", "runtime.json")) + "; chmod 600 " + shellQuote(remote.rootPath("runtime", "meta", "runtime.json"))
-	command := "if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then sudo -n sh -c " + shellQuote(rootCommand) + "; else " + rootCommand + "; fi"
-	_, err := remote.ssh(ctx, command, nil)
+	_, err := remote.lockedSSH(ctx, rootCommand, nil)
 	return err
 }
 
@@ -409,7 +450,7 @@ func (remote Remote) uploadFile(ctx context.Context, source, destination string,
 	temporary := destination + ".tmp-openlia"
 	rootCommand := "set -eu; mkdir -p " + shellQuote(filepath.Dir(destination)) + "; umask 077; cat > " + shellQuote(temporary) + "; chmod " + shellQuote(fmt.Sprintf("%o", mode.Perm())) + " " + shellQuote(temporary) + "; mv -f " + shellQuote(temporary) + " " + shellQuote(destination)
 	command := "if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then sudo -n sh -c " + shellQuote(rootCommand) + "; else " + rootCommand + "; fi"
-	_, err = remote.ssh(ctx, command, data)
+	_, err = remote.lockedSSH(ctx, command, data)
 	return err
 }
 
@@ -810,12 +851,17 @@ func (remote Remote) removeFile(ctx context.Context, destination string) error {
 		return err
 	}
 	command := "if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then sudo -n rm -f -- " + shellQuote(destination) + "; else rm -f -- " + shellQuote(destination) + "; fi"
-	_, err := remote.ssh(ctx, command, nil)
+	_, err := remote.lockedSSH(ctx, command, nil)
 	return err
 }
 
 func remoteContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 30*time.Minute)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, timeoutCancel := context.WithTimeout(ctx, 30*time.Minute)
+	return ctx, func() {
+		timeoutCancel()
+		stop()
+	}
 }
 
 func runLocalCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
