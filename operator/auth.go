@@ -56,7 +56,7 @@ func RotateAuth(config Config, source string, now time.Time, composers ...Compos
 	if err := EnsureDir(config.RuntimeRoot, 0o700); err != nil {
 		return err
 	}
-	if err := EnsureDir(config.SecretDir, 0o700); err != nil {
+	if err := ensureSecretDirectory(config); err != nil {
 		return err
 	}
 	if _, err := CreateRollback(config, "auth-rotate", now, runtimeRelativePath(config, config.SecretFile)); err != nil {
@@ -70,6 +70,9 @@ func RotateAuth(config Config, source string, now time.Time, composers ...Compos
 		}
 	}
 	if err := AtomicCopyFile(source, config.SecretFile, 0o600); err != nil {
+		return err
+	}
+	if err := ensureRuntimeOwner(config.SecretFile, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
 		return err
 	}
 	return RecordChange(config, "auth-rotate", "ok", secretBackup, "provider credentials replaced atomically", now)
@@ -91,7 +94,7 @@ func rotateAuthWithCompose(ctx context.Context, config Config, compose Compose, 
 	if err := EnsureDir(config.RuntimeRoot, 0o700); err != nil {
 		return err
 	}
-	if err := EnsureDir(config.SecretDir, 0o700); err != nil {
+	if err := ensureSecretDirectory(config); err != nil {
 		return err
 	}
 	if _, err := CreateRollback(config, "auth-rotate", now, runtimeRelativePath(config, config.SecretFile)); err != nil {
@@ -121,9 +124,25 @@ func rotateAuthWithCompose(ctx context.Context, config Config, compose Compose, 
 		_ = RecordChange(config, "auth-rotate", "failed", secretBackup, "credential replacement failed", now)
 		return fmt.Errorf("credential replacement failed")
 	}
+	if err := ensureRuntimeOwner(config.SecretFile, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
+		restoreSecret := func() {
+			if secretBackup != "" {
+				_ = AtomicCopyFile(secretBackup, config.SecretFile, 0o600)
+				_ = ensureRuntimeOwner(config.SecretFile, config.RuntimeUID, config.RuntimeGID, 0o600)
+			} else if !secretPresent {
+				_ = os.Remove(config.SecretFile)
+			}
+		}
+		restoreSecret()
+		if previousState == stateRunning {
+			_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "hermes")
+		}
+		return fmt.Errorf("credential permissions could not be prepared")
+	}
 	restoreSecret := func() {
 		if secretBackup != "" {
 			_ = AtomicCopyFile(secretBackup, config.SecretFile, 0o600)
+			_ = ensureRuntimeOwner(config.SecretFile, config.RuntimeUID, config.RuntimeGID, 0o600)
 		} else if !secretPresent {
 			_ = os.Remove(config.SecretFile)
 		}

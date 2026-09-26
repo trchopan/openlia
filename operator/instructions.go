@@ -222,6 +222,9 @@ func syncInstruction(config Config, spec instructionSpec, version, sourceID stri
 		if err := AtomicWriteFile(spec.Target, currentData, 0o600); err != nil {
 			return InstructionResult{}, err
 		}
+		if err := ensureRuntimeOwner(spec.Target, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
+			return InstructionResult{}, err
+		}
 	} else if err != nil {
 		return InstructionResult{}, err
 	}
@@ -276,6 +279,9 @@ func syncInstruction(config Config, spec instructionSpec, version, sourceID stri
 		if err := AtomicWriteFile(spec.Target, writeData, 0o600); err != nil {
 			return InstructionResult{}, err
 		}
+		if err := ensureRuntimeOwner(spec.Target, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
+			return InstructionResult{}, err
+		}
 		if err := AtomicWriteFile(baselinePath, sourceCanonical, 0o600); err != nil {
 			return InstructionResult{}, err
 		}
@@ -303,13 +309,22 @@ func syncInstruction(config Config, spec instructionSpec, version, sourceID stri
 			if err := AtomicWriteFile(spec.Target, rendered, 0o600); err != nil {
 				return InstructionResult{}, err
 			}
+			if err := ensureRuntimeOwner(spec.Target, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
+				return InstructionResult{}, err
+			}
 		}
+	}
+	if err := ensureRuntimeOwner(spec.Target, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
+		return InstructionResult{}, err
 	}
 	if localChanged {
 		metadata.Ownership = "customized"
 	}
 	metadata.Distribution, metadata.SourceID, metadata.BaselineHash, metadata.CurrentHash, metadata.UpdatedAt = version, sourceID, baselineHash, currentHash, stamp
 	if err := writeInstructionMetadata(metadataPath, metadata); err != nil {
+		return InstructionResult{}, err
+	}
+	if err := ensureRuntimeOwner(spec.Target, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
 		return InstructionResult{}, err
 	}
 	return instructionResult(spec, metadata, currentHash, baselineHash, sourceHash, localChanged, upstreamChanged, action), nil
@@ -527,6 +542,9 @@ func MutateInstruction(config Config, name, action string, request InstructionMu
 	}
 	if action != "keep" {
 		if err := AtomicWriteFile(spec.Target, writeData, 0o600); err != nil {
+			return InstructionMutationResult{}, err
+		}
+		if err := ensureRuntimeOwner(spec.Target, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
 			return InstructionMutationResult{}, err
 		}
 	}

@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 type BackupResult struct {
@@ -45,6 +47,13 @@ type backupMetadata struct {
 	Secrets   string `json:"secrets"`
 }
 
+const (
+	maxArchiveMembers    = 100000
+	maxArchiveMemberSize = int64(1 << 30)
+	maxArchiveTotalSize  = int64(8 << 30)
+	maxArchivePathDepth  = 32
+)
+
 func CreateBackup(config Config, reason string, now time.Time, composers ...Compose) (BackupResult, error) {
 	var compose *Compose
 	if len(composers) > 0 {
@@ -61,6 +70,11 @@ func CreateRollback(config Config, reason string, now time.Time, paths ...string
 	if err := config.ValidatePaths(); err != nil {
 		return BackupResult{}, err
 	}
+	unlock, err := acquireBackupLock(context.Background(), config)
+	if err != nil {
+		return BackupResult{}, err
+	}
+	defer unlock()
 	if err := ValidateSafeComponent(reason, "rollback-reason"); err != nil {
 		return BackupResult{}, err
 	}
@@ -151,7 +165,7 @@ func CreateRollback(config Config, reason string, now time.Time, paths ...string
 	if err := AtomicWriteFile(destination+".json", append(data, '\n'), 0o600); err != nil {
 		return BackupResult{}, err
 	}
-	_, _ = PruneBackups(config, config.BackupRetention)
+	_, _ = pruneBackups(config, config.BackupRetention)
 	return BackupResult{OK: true, Archive: destination, Secrets: secretStatus, Action: "rollback"}, nil
 }
 
@@ -168,6 +182,15 @@ func runtimeRelativePath(config Config, path string) string {
 }
 
 func createBackup(ctx context.Context, config Config, reason string, now time.Time, compose *Compose) (result BackupResult, err error) {
+	unlock, err := acquireBackupLock(ctx, config)
+	if err != nil {
+		return BackupResult{}, err
+	}
+	defer unlock()
+	return createBackupWithRestart(ctx, config, reason, now, compose, true)
+}
+
+func createBackupWithRestart(ctx context.Context, config Config, reason string, now time.Time, compose *Compose, restartServices bool) (result BackupResult, err error) {
 	if err := config.ValidatePaths(); err != nil {
 		return BackupResult{}, err
 	}
@@ -204,6 +227,9 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 		uiWasRunning = true
 	}
 	defer func() {
+		if !restartServices {
+			return
+		}
 		if !wasRunning && !uiWasRunning {
 			return
 		}
@@ -340,7 +366,7 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 		if retention <= 0 {
 			retention = 5
 		}
-		_, _ = PruneBackups(config, retention)
+		_, _ = pruneBackups(config, retention)
 	}
 	return BackupResult{OK: true, Archive: destination, Secrets: "excluded"}, nil
 }
@@ -348,6 +374,49 @@ func createBackup(ctx context.Context, config Config, reason string, now time.Ti
 // PruneBackups retains the most recent keepCount durable and rollback archives
 // plus auxiliary backup files in config.BackupRoot, removing older ones.
 func PruneBackups(config Config, keepCount int) ([]string, error) {
+	if err := config.ValidatePaths(); err != nil {
+		return nil, err
+	}
+	unlock, err := acquireBackupLock(context.Background(), config)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	return pruneBackups(config, keepCount)
+}
+
+func acquireBackupLock(ctx context.Context, config Config) (func(), error) {
+	if err := EnsureDir(config.BackupRoot, 0o700); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(filepath.Join(config.BackupRoot, ".operation.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open backup operation lock: %w", err)
+	}
+	for {
+		err = unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		if err == nil {
+			return func() {
+				_ = unix.Flock(int(file.Fd()), unix.LOCK_UN)
+				_ = file.Close()
+			}, nil
+		}
+		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EAGAIN) {
+			_ = file.Close()
+			return nil, fmt.Errorf("acquire backup operation lock: %w", err)
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			_ = file.Close()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func pruneBackups(config Config, keepCount int) ([]string, error) {
 	if keepCount <= 0 {
 		keepCount = 5
 	}
@@ -475,14 +544,24 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 	if err := config.ValidatePaths(); err != nil {
 		return BackupResult{}, err
 	}
+	unlock, err := acquireBackupLock(ctx, config)
+	if err != nil {
+		return BackupResult{}, err
+	}
+	defer unlock()
 	if archivePath == "" {
 		entries, err := os.ReadDir(config.BackupRoot)
 		if err != nil {
 			return BackupResult{}, err
 		}
+		var newest time.Time
 		for _, entry := range entries {
 			if entry.Type().IsRegular() && strings.HasPrefix(entry.Name(), "openlia-") && strings.HasSuffix(entry.Name(), ".tar.gz") {
-				archivePath = filepath.Join(config.BackupRoot, entry.Name())
+				info, statErr := entry.Info()
+				if statErr == nil && (archivePath == "" || info.ModTime().After(newest)) {
+					archivePath = filepath.Join(config.BackupRoot, entry.Name())
+					newest = info.ModTime()
+				}
 			}
 		}
 	}
@@ -501,6 +580,9 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 	if info, err := os.Lstat(archivePath); err != nil || info.Mode()&os.ModeSymlink != 0 {
 		return BackupResult{}, fmt.Errorf("restore archive must be a regular file")
 	}
+	if err := verifyBackupDigest(archivePath); err != nil {
+		return BackupResult{}, err
+	}
 	manifest, err := inspectRestoreArchive(archivePath)
 	if err != nil {
 		return BackupResult{}, err
@@ -517,7 +599,24 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 	if err := EnsureDir(config.MetaRoot, 0o700); err != nil {
 		return BackupResult{}, err
 	}
-	preRestore, err := createBackup(ctx, config, "restore-preflight", now, compose)
+	wasRunning := compose != nil && compose.ServiceRunning(ctx, "hermes")
+	uiWasRunning := compose != nil && config.WorkspaceUIHost != "" && compose.ServiceRunning(ctx, "workspace-ui")
+	restoreCommitted := false
+	defer func() {
+		if restoreCommitted || compose == nil {
+			return
+		}
+		if wasRunning {
+			_, _ = compose.Run(context.Background(), "up", "-d", "--no-deps", "hermes")
+		}
+		if uiWasRunning {
+			_, _ = compose.Run(context.Background(), "up", "-d", "--no-deps", "workspace-ui")
+		}
+		if wasRunning {
+			_ = WriteState(config, stateRunning)
+		}
+	}()
+	preRestore, err := createBackupWithRestart(ctx, config, "restore-preflight", now, compose, false)
 	if err != nil {
 		return BackupResult{}, err
 	}
@@ -549,7 +648,11 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 		return BackupResult{}, err
 	}
 	if manifest.Schema >= 2 && manifest.Kind == "durable" {
-		return restoreDurableBackup(config, archivePath, staging, preRestore, now)
+		result, restoreErr := restoreDurableBackup(config, archivePath, staging, preRestore, now)
+		if restoreErr == nil {
+			restoreCommitted = true
+		}
+		return result, restoreErr
 	}
 	for _, root := range []string{"hermes", "meta", "locho"} {
 		info, rootErr := os.Stat(filepath.Join(staging, root))
@@ -616,6 +719,7 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 		_ = RecordChange(config, "restore", "failed", preRestore.Archive, "restore record failed", now)
 		return BackupResult{}, err
 	}
+	restoreCommitted = true
 	return BackupResult{OK: true, Action: "restore", Archive: archivePath, State: stateStopped, Secrets: "supplied_out_of_band"}, nil
 }
 
@@ -628,50 +732,149 @@ func restoreDurableBackup(config Config, archivePath, staging string, preRestore
 	if info, err := os.Stat(metaStage); err != nil || !info.IsDir() {
 		return BackupResult{}, fmt.Errorf("durable restore is missing metadata")
 	}
-	workspaceStage := filepath.Join(hermesStage, "workspace")
-	workspaceTarget := filepath.Join(config.DataRoot, "workspace")
-	oldWorkspace := filepath.Join(config.BackupRoot, fmt.Sprintf("pre-restore-workspace-%s-%d", now.UTC().Format("20060102T150405Z"), os.Getpid()))
-	restoreWorkspace := func() {
-		if _, err := os.Lstat(oldWorkspace); err == nil {
-			_ = os.RemoveAll(workspaceTarget)
-			_ = os.Rename(oldWorkspace, workspaceTarget)
-		}
+	dataReplacement, err := buildDurableReplacement(hermesStage, config.DataRoot, portableHermesGeneratedPath, config.RuntimeUID, config.RuntimeGID)
+	if err != nil {
+		return BackupResult{}, fmt.Errorf("stage Hermes restore: %w", err)
 	}
-	if _, err := os.Stat(workspaceStage); err == nil {
-		if _, statErr := os.Lstat(workspaceTarget); statErr == nil {
-			if err := os.Rename(workspaceTarget, oldWorkspace); err != nil {
-				return BackupResult{}, fmt.Errorf("current workspace move failed; restore was not applied")
-			}
-		} else if !errors.Is(statErr, os.ErrNotExist) {
-			return BackupResult{}, statErr
-		}
-		if err := os.Rename(workspaceStage, workspaceTarget); err != nil {
-			_ = os.Rename(oldWorkspace, workspaceTarget)
-			return BackupResult{}, fmt.Errorf("workspace restore failed; current state was restored")
-		}
+	metaReplacement, err := buildDurableReplacement(metaStage, config.MetaRoot, portableMetaGeneratedPath, config.RuntimeUID, config.RuntimeGID)
+	if err != nil {
+		_ = os.RemoveAll(dataReplacement)
+		return BackupResult{}, fmt.Errorf("stage metadata restore: %w", err)
 	}
-	if err := restoreDurableTreeFiltered(hermesStage, config.DataRoot, portableHermesGeneratedPath); err != nil {
-		restoreWorkspace()
-		_ = RecordChange(config, "restore", "failed", preRestore.Archive, "durable restore failed", now)
-		return BackupResult{}, err
+	oldData := filepath.Join(config.BackupRoot, fmt.Sprintf("pre-restore-hermes-%s-%d", now.UTC().Format("20060102T150405Z"), os.Getpid()))
+	oldMeta := filepath.Join(config.BackupRoot, fmt.Sprintf("pre-restore-meta-%s-%d", now.UTC().Format("20060102T150405Z"), os.Getpid()))
+	rollback := func() {
+		_ = os.RemoveAll(config.DataRoot)
+		_ = os.RemoveAll(config.MetaRoot)
+		_ = os.Rename(oldData, config.DataRoot)
+		_ = os.Rename(oldMeta, config.MetaRoot)
 	}
-	if err := restoreDurableTreeFiltered(metaStage, config.MetaRoot, portableMetaGeneratedPath); err != nil {
-		restoreWorkspace()
-		_ = RecordChange(config, "restore", "failed", preRestore.Archive, "durable metadata restore failed", now)
-		return BackupResult{}, err
+	if err := os.Rename(config.DataRoot, oldData); err != nil {
+		_ = os.RemoveAll(dataReplacement)
+		_ = os.RemoveAll(metaReplacement)
+		return BackupResult{}, fmt.Errorf("current Hermes data move failed; restore was not applied")
+	}
+	if err := os.Rename(config.MetaRoot, oldMeta); err != nil {
+		_ = os.Rename(oldData, config.DataRoot)
+		_ = os.RemoveAll(dataReplacement)
+		_ = os.RemoveAll(metaReplacement)
+		return BackupResult{}, fmt.Errorf("current metadata move failed; restore was not applied")
+	}
+	if err := os.Rename(dataReplacement, config.DataRoot); err != nil {
+		rollback()
+		_ = os.RemoveAll(metaReplacement)
+		return BackupResult{}, fmt.Errorf("Hermes data restore failed; current state was restored")
+	}
+	if err := os.Rename(metaReplacement, config.MetaRoot); err != nil {
+		rollback()
+		return BackupResult{}, fmt.Errorf("metadata restore failed; current state was restored")
 	}
 	if err := WriteRuntimeMetadata(config, now); err != nil {
-		restoreWorkspace()
+		rollback()
 		return BackupResult{}, err
 	}
 	if err := WriteState(config, stateStopped); err != nil {
-		restoreWorkspace()
+		rollback()
 		return BackupResult{}, err
+	}
+	if err := ensureRuntimeTreeOwner(config.MetaRoot, config.RuntimeUID, config.RuntimeGID); err != nil {
+		rollback()
+		return BackupResult{}, fmt.Errorf("restore metadata ownership: %w", err)
 	}
 	if err := RecordChange(config, "restore", "ok", preRestore.Archive, "durable archive="+archivePath, now); err != nil {
 		return BackupResult{}, err
 	}
+	_ = os.RemoveAll(oldData)
+	_ = os.RemoveAll(oldMeta)
 	return BackupResult{OK: true, Action: "restore", Archive: archivePath, State: stateStopped, Secrets: "supplied_out_of_band"}, nil
+}
+
+func buildDurableReplacement(source, current string, generated func(string, fs.DirEntry) bool, uid, gid int) (string, error) {
+	replacement, err := os.MkdirTemp(filepath.Dir(current), ".restore-tree-*")
+	if err != nil {
+		return "", err
+	}
+	if err := restoreDurableTreeFiltered(source, replacement, nil); err != nil {
+		_ = os.RemoveAll(replacement)
+		return "", err
+	}
+	if err := copyGeneratedTree(current, replacement, generated); err != nil {
+		_ = os.RemoveAll(replacement)
+		return "", err
+	}
+	if err := ensureRuntimeTreeOwner(replacement, uid, gid); err != nil {
+		_ = os.RemoveAll(replacement)
+		return "", err
+	}
+	return replacement, nil
+}
+
+func copyGeneratedTree(source, destination string, generated func(string, fs.DirEntry) bool) error {
+	return filepath.WalkDir(source, func(current string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, current)
+		if err != nil {
+			return err
+		}
+		if relative == "." {
+			return nil
+		}
+		relative = filepath.ToSlash(relative)
+		if !generated(relative, entry) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			info, infoErr := entry.Info()
+			if infoErr != nil {
+				return infoErr
+			}
+			if err := os.MkdirAll(filepath.Join(destination, filepath.FromSlash(relative)), info.Mode().Perm()); err != nil {
+				return err
+			}
+			return os.Chmod(filepath.Join(destination, filepath.FromSlash(relative)), info.Mode().Perm())
+		}
+		return copyRestoreEntry(current, filepath.Join(destination, filepath.FromSlash(relative)), entry)
+	})
+}
+
+func copyRestoreEntry(source, destination string, entry fs.DirEntry) error {
+	if entry.Type()&os.ModeSymlink != 0 {
+		link, err := os.Readlink(source)
+		if err != nil || !safeRelativeSymlink(filepath.ToSlash(filepath.Base(destination)), link) {
+			return fmt.Errorf("generated state contains unsafe symlink: %s", destination)
+		}
+		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+			return err
+		}
+		return os.Symlink(link, destination)
+	}
+	info, err := entry.Info()
+	if err != nil {
+		return err
+	}
+	if entry.IsDir() {
+		if err := os.MkdirAll(destination, info.Mode().Perm()); err != nil {
+			return err
+		}
+		return os.Chmod(destination, info.Mode().Perm())
+	}
+	base := filepath.Base(source)
+	if !info.Mode().IsRegular() || strings.HasSuffix(base, ".sock") || strings.HasSuffix(base, ".pid") || strings.HasSuffix(base, ".lock") {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	return AtomicWriteFile(destination, data, info.Mode().Perm())
 }
 
 func restoreDurableTree(source, destination string) error {
@@ -738,6 +941,11 @@ func RestoreRollback(config Config, archivePath string, now time.Time, composers
 	if err := config.ValidatePaths(); err != nil {
 		return BackupResult{}, err
 	}
+	unlock, err := acquireBackupLock(context.Background(), config)
+	if err != nil {
+		return BackupResult{}, err
+	}
+	defer unlock()
 	if err := ValidateAbsolutePath(archivePath, "rollback-archive"); err != nil || !within(archivePath, config.BackupRoot) {
 		return BackupResult{}, fmt.Errorf("rollback archive must be inside the backup directory")
 	}
@@ -890,6 +1098,9 @@ func appendDurableTree(archive *tar.Writer, label, root string, include func(str
 }
 
 func durableHermesPath(relative string, entry fs.DirEntry, bundledGroups map[string]bool) bool {
+	if excludedBackupPath(relative) {
+		return false
+	}
 	parts := strings.Split(relative, "/")
 	base := parts[len(parts)-1]
 	for _, part := range parts {
@@ -911,6 +1122,9 @@ func durableHermesPath(relative string, entry fs.DirEntry, bundledGroups map[str
 }
 
 func durableMetaPath(relative string, entry fs.DirEntry) bool {
+	if excludedBackupPath(relative) {
+		return false
+	}
 	if portableMetaGeneratedPath(relative, entry) {
 		return false
 	}
@@ -927,6 +1141,9 @@ func portableHermesGeneratedPath(relative string, entry fs.DirEntry) bool {
 	if entry.IsDir() {
 		return relative == "backups"
 	}
+	if strings.HasPrefix(relative, "backups/") {
+		return true
+	}
 	switch relative {
 	case "config.yaml", "services.json", "gateway_state.json", "channel_directory.json", ".clean_shutdown", "gateway-starts.log", "gateway.lock", "gateway.pid", "gateway.sock":
 		return true
@@ -938,6 +1155,9 @@ func portableHermesGeneratedPath(relative string, entry fs.DirEntry) bool {
 func portableMetaGeneratedPath(relative string, entry fs.DirEntry) bool {
 	if entry.IsDir() {
 		return relative == "locks"
+	}
+	if strings.HasPrefix(relative, "locks/") {
+		return true
 	}
 	switch relative {
 	case "runtime.json", "last-change.json", "stack-state", "services.json":
@@ -1009,7 +1229,7 @@ func writeTarFile(archive *tar.Writer, name string, data []byte, mode os.FileMod
 
 func excludedBackupPath(path string) bool {
 	parts := strings.Split(path, "/")
-	if len(parts) == 3 && parts[0] == "locho" && parts[len(parts)-1] == "attachments.toml" {
+	if len(parts) >= 3 && parts[0] == "locho" && parts[len(parts)-1] == "attachments.toml" {
 		return true
 	}
 	for _, part := range parts {
@@ -1023,7 +1243,11 @@ func excludedBackupPath(path string) bool {
 }
 
 func safeArchiveMember(name string) bool {
-	return !strings.HasPrefix(name, "/") && !strings.ContainsAny(name, " \t\r\n") && name != ".." && !strings.HasPrefix(name, "../") && !strings.Contains(name, "/../") && filepath.ToSlash(filepath.Clean(filepath.FromSlash(name))) == name
+	return !strings.HasPrefix(name, "/") && !strings.ContainsAny(name, "\x00\r\n") && name != ".." && !strings.HasPrefix(name, "../") && !strings.Contains(name, "/../") && filepath.ToSlash(filepath.Clean(filepath.FromSlash(name))) == name && archivePathDepth(name) <= maxArchivePathDepth
+}
+
+func archivePathDepth(name string) int {
+	return len(strings.Split(strings.Trim(name, "/"), "/"))
 }
 
 func allowedArchiveMember(name string) bool {
@@ -1044,6 +1268,28 @@ func validateRestoreArchive(path string) error {
 	return err
 }
 
+func verifyBackupDigest(archivePath string) error {
+	data, err := os.ReadFile(archivePath + ".json")
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read backup metadata: %w", err)
+	}
+	var metadata backupMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil || metadata.SHA256 == "" {
+		return fmt.Errorf("backup metadata is invalid")
+	}
+	digest, err := fileSHA256(archivePath)
+	if err != nil {
+		return fmt.Errorf("hash backup archive: %w", err)
+	}
+	if digest != metadata.SHA256 {
+		return fmt.Errorf("backup archive checksum does not match metadata")
+	}
+	return nil
+}
+
 func inspectRestoreArchive(path string) (backupManifest, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -1058,6 +1304,8 @@ func inspectRestoreArchive(path string) (backupManifest, error) {
 	manifest := backupManifest{}
 	manifestFound := false
 	dataBeforeManifest := false
+	members := 0
+	var totalSize int64
 	for {
 		header, readErr := reader.Next()
 		if errors.Is(readErr, io.EOF) {
@@ -1073,6 +1321,9 @@ func inspectRestoreArchive(path string) (backupManifest, error) {
 			continue
 		}
 		if name == "manifest.json" {
+			if manifestFound {
+				return backupManifest{}, fmt.Errorf("restore archive contains duplicate manifest")
+			}
 			if header.Typeflag != tar.TypeReg || header.Size < 0 || header.Size > 64*1024 {
 				_ = decompressor.Close()
 				_ = file.Close()
@@ -1087,6 +1338,11 @@ func inspectRestoreArchive(path string) (backupManifest, error) {
 			manifestFound = true
 			continue
 		}
+		members++
+		if members > maxArchiveMembers || header.Size > maxArchiveMemberSize || totalSize > maxArchiveTotalSize-header.Size {
+			return backupManifest{}, fmt.Errorf("restore archive exceeds safety limits")
+		}
+		totalSize += header.Size
 		if !manifestFound {
 			if !allowedArchiveMember(name) {
 				_ = decompressor.Close()
@@ -1155,6 +1411,8 @@ func extractRestoreArchive(path, destination string, manifest backupManifest) er
 		return fmt.Errorf("restore archive is not a readable tar archive")
 	}
 	reader := tar.NewReader(decompressor)
+	members := 0
+	var totalSize int64
 	defer decompressor.Close()
 	defer file.Close()
 	for {
@@ -1169,6 +1427,11 @@ func extractRestoreArchive(path, destination string, manifest backupManifest) er
 		if name == "" || name == "manifest.json" {
 			continue
 		}
+		members++
+		if members > maxArchiveMembers || header.Size > maxArchiveMemberSize || totalSize > maxArchiveTotalSize-header.Size {
+			return fmt.Errorf("restore archive exceeds safety limits")
+		}
+		totalSize += header.Size
 		if !allowedArchiveMemberForManifest(name, manifest) || (header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeSymlink) || header.Size < 0 || (header.Typeflag == tar.TypeSymlink && !safeRelativeSymlink(name, header.Linkname)) {
 			return fmt.Errorf("restore archive contains an unsupported or unsafe member")
 		}

@@ -92,8 +92,9 @@ not an endorsement or a source-code review. Review the resolved commit before
 installation and scope `OPENLIA_SKILLS_GIT_TOKEN` to read only the required
 private repositories. Install and update show an audited, immutable commit-bound
 plan before confirmation. The dependency builder uses the local operator UID/GID
-for non-root local deployments and UID/GID `10000` for remote or root-run
-operations; it has no deployment secret mount, though it retains network access
-for locked packages and vulnerability data.
+for non-root local deployments and the configured runtime UID/GID for remote or
+root-run operations; it has no deployment secret mount, though it retains
+network access for locked packages and vulnerability data. Locho and Workspace
+UI use the same runtime identity for their bind-mounted state.
 
 See the [contribution guidelines](CONTRIBUTING.md) for additional requirements.
