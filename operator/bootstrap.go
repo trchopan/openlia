@@ -58,6 +58,9 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 			return BootstrapResult{}, err
 		}
 	}
+	if err := ensureSecretDirectory(config); err != nil {
+		return BootstrapResult{}, err
+	}
 	if config.WorkspaceUIAuthRequired {
 		info, err := os.Stat(config.WorkspaceUIPasswordHashFile)
 		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o444 {
@@ -65,7 +68,7 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 		}
 	}
 	if config.OpenWebUIHost != "" {
-		if err := EnsureDir(config.OpenWebUIDataRoot, 0o777); err != nil {
+		if err := EnsureDir(config.OpenWebUIDataRoot, 0o700); err != nil {
 			return BootstrapResult{}, err
 		}
 	}
@@ -80,13 +83,24 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 	} else if err := os.Chmod(config.SecretFile, 0o600); err != nil {
 		return BootstrapResult{}, err
 	}
+	if err := ensureRuntimeOwner(config.SecretFile, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
+		return BootstrapResult{}, err
+	}
 
 	profileRoot := filepath.Join(config.RepositoryRoot, "profile")
 	if err := copyOnce(filepath.Join(profileRoot, "config.yaml"), filepath.Join(config.DataRoot, "config.yaml"), 0o600); err != nil {
 		return BootstrapResult{}, err
 	}
 	for _, name := range []string{"SOUL.md", "AGENTS.md"} {
-		if err := copyOnce(filepath.Join(profileRoot, name), filepath.Join(config.DataRoot, name), 0o600); err != nil {
+		destination := filepath.Join(config.DataRoot, name)
+		if err := copyOnce(filepath.Join(profileRoot, name), destination, 0o600); err != nil {
+			return BootstrapResult{}, err
+		}
+		if _, err := os.Stat(destination); err == nil {
+			if err := ensureRuntimeOwner(destination, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
+				return BootstrapResult{}, err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
 			return BootstrapResult{}, err
 		}
 	}
@@ -143,6 +157,13 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 		return BootstrapResult{}, err
 	}
 	return BootstrapResult{OK: true, Action: "bootstrap", State: stateNeverStarted, SecretValues: "not_reported"}, nil
+}
+
+func ensureSecretDirectory(config Config) error {
+	if err := EnsureDir(config.SecretDir, 0o700); err != nil {
+		return err
+	}
+	return ensureRuntimeOwner(config.SecretDir, config.RuntimeUID, config.RuntimeGID, 0o700)
 }
 
 func copyOnce(source, destination string, mode fs.FileMode) error {

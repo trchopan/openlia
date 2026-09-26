@@ -1485,11 +1485,21 @@ func commandRemoteBackupRestore(options Options, args []string, deployment deplo
 	if isInsideWorkingTree(archive) {
 		return fail(options, ExitUsage, "backup archive must be outside the OpenLia checkout", nil)
 	}
-	remoteArchive := deployment.rootPath("runtime", "backups", filepath.Base(archive))
+	remoteArchive := deployment.rootPath("runtime", "backups", fmt.Sprintf(".openlia-restore-%d-%s", os.Getpid(), filepath.Base(archive)))
 	if err := deployment.uploadFile(ctx, archive, remoteArchive, 0o600); err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
 	defer deployment.removeFile(context.Background(), remoteArchive)
+	localMetadata := archive + ".json"
+	remoteMetadata := remoteArchive + ".json"
+	if info, statErr := os.Stat(localMetadata); statErr == nil && info.Mode().IsRegular() {
+		if err := deployment.uploadFile(ctx, localMetadata, remoteMetadata, 0o600); err != nil {
+			return fail(options, ExitFailure, err.Error(), nil)
+		}
+		defer deployment.removeFile(context.Background(), remoteMetadata)
+	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return fail(options, ExitFailure, "could not inspect backup metadata: "+statErr.Error(), nil)
+	}
 	raw, err := deployment.operation(ctx, "backup", nil, action, "--archive", remoteArchive, "--json")
 	if err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)

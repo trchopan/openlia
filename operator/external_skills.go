@@ -1463,10 +1463,7 @@ func validateCachedSnapshot(sourceRoot, commit, snapshot string) error {
 }
 
 func (m *ExternalSkillManager) builderUser() string {
-	if m.Config.LocalMode && os.Geteuid() != 0 {
-		return fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid())
-	}
-	return "10000:10000"
+	return fmt.Sprintf("%d:%d", m.Config.RuntimeUID, m.Config.RuntimeGID)
 }
 
 func containerPath(hostRoot, containerRoot, path string) string {

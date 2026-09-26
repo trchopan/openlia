@@ -457,6 +457,7 @@ func (p *ProfileOperator) syncHermesConfig(source, destination, marker string, m
 	if err != nil {
 		return err
 	}
+	sourceData = renderOpenLiaConfig(sourceData, p.Config)
 	sourceHash := hashConfigWithoutFallback(sourceData)
 	destinationData, destinationErr := os.ReadFile(destination)
 	if errors.Is(destinationErr, os.ErrNotExist) {
@@ -476,7 +477,7 @@ func (p *ProfileOperator) syncHermesConfig(source, destination, marker string, m
 			return err
 		}
 	}
-	managed := destinationErr != nil || (previousHash == "" && destinationHash == sourceHash) || (previousHash != "" && (destinationHash == previousHash || legacyDestinationHash == previousHash))
+	managed := destinationErr != nil || hasOpenLiaConfigPlaceholders(destinationData) || (previousHash == "" && destinationHash == sourceHash) || (previousHash != "" && (destinationHash == previousHash || legacyDestinationHash == previousHash))
 	if managed {
 		destinationData = sourceData
 		if err := writeMarker(marker, sourceHash); err != nil {
@@ -490,7 +491,20 @@ func (p *ProfileOperator) syncHermesConfig(source, destination, marker string, m
 	if err := AtomicWriteFile(destination, updated, mode); err != nil {
 		return err
 	}
-	return os.Chmod(destination, mode)
+	return ensureRuntimeOwner(destination, p.Config.RuntimeUID, p.Config.RuntimeGID, mode)
+}
+
+func renderOpenLiaConfig(data []byte, config Config) []byte {
+	rendered := strings.NewReplacer(
+		"${OPENLIA_PROVIDER}", config.Provider,
+		"${OPENLIA_MODEL}", config.Model,
+	).Replace(string(data))
+	return []byte(rendered)
+}
+
+func hasOpenLiaConfigPlaceholders(data []byte) bool {
+	text := string(data)
+	return strings.Contains(text, "${OPENLIA_PROVIDER}") || strings.Contains(text, "${OPENLIA_MODEL}")
 }
 
 func hashConfigWithoutFallback(data []byte) string {

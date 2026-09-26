@@ -17,6 +17,18 @@ func TestOperationCommandIncludesTimezone(t *testing.T) {
 	}
 }
 
+func TestOperationCommandUsesPrivilegedAndUnprivilegedRuntimeIdentities(t *testing.T) {
+	config := defaultConfig()
+	config.Target = "operator@example.test"
+	command := (Remote{Config: config}).operationCommand("ops/deploy.sh", "deploy", "--json")
+	if !strings.Contains(command, "OPENLIA_RUNTIME_UID='10000'") || !strings.Contains(command, "OPENLIA_RUNTIME_GID='10000'") {
+		t.Fatalf("privileged runtime identity missing: %s", command)
+	}
+	if !strings.Contains(command, `OPENLIA_RUNTIME_UID="$(id -u)"`) || !strings.Contains(command, `OPENLIA_RUNTIME_GID="$(id -g)"`) {
+		t.Fatalf("unprivileged runtime identity fallback missing: %s", command)
+	}
+}
+
 func TestOperationCommandIncludesOutputLanguage(t *testing.T) {
 	config := defaultConfig()
 	config.Target = "operator@example.test"

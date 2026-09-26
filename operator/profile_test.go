@@ -101,6 +101,35 @@ func TestProfileSyncRendersFallbackProviders(t *testing.T) {
 	}
 }
 
+func TestProfileSyncRendersRuntimeProviderAndModel(t *testing.T) {
+	repo := t.TempDir()
+	runtime := filepath.Join(t.TempDir(), "runtime")
+	configPath := filepath.Join(repo, "profile", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "profile", "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("model:\n  provider: ${OPENLIA_PROVIDER}\n  default: ${OPENLIA_MODEL}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := testConfig(repo, runtime)
+	config.Provider = "copilot"
+	config.Model = "gpt-5.6-luna"
+	if _, err := NewProfileOperator(config).Sync(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(config.DataRoot, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, "${OPENLIA_") || !strings.Contains(text, "provider: copilot") || !strings.Contains(text, "default: gpt-5.6-luna") {
+		t.Fatalf("runtime config placeholders were not rendered:\n%s", data)
+	}
+}
+
 func TestProfileSyncUpdatesManagedOutputLanguage(t *testing.T) {
 	repo := t.TempDir()
 	runtime := filepath.Join(t.TempDir(), "runtime")

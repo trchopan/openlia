@@ -26,7 +26,8 @@ RUN apt-get update \
     unzip -q "${archive}" -d /tmp/bun; \
     install -m 0755 "/tmp/bun/bun-linux-${bun_arch}/bun" /usr/local/bin/bun; \
     rm -rf /tmp/bun "${archive}"; \
-    useradd --system --uid 10000 --home-dir /nonexistent --shell /usr/sbin/nologin openlia
+    groupadd --gid 10000 openlia \
+    && useradd --system --uid 10000 --gid 10000 --home-dir /nonexistent --shell /usr/sbin/nologin openlia
 
 COPY packages/workspace-ui/dist/ /opt/openlia/workspace-ui/
 RUN find /opt/openlia/workspace-ui -type d -exec chmod 0755 {} + \

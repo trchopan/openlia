@@ -190,7 +190,7 @@ func runBackup(ctx context.Context, config Config, args []string, _ io.Reader, o
 	if err != nil {
 		return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 	}
-	return emit(output, result, jsonOutput, "openlia backup: restored "+result.Archive)
+	return emit(output, result, jsonOutput, "openlia backup: restored "+result.Archive+"; secrets, attachments, and Open WebUI data remain destination-owned")
 }
 
 func runAttachments(ctx context.Context, config Config, args []string, output, errorOutput io.Writer, jsonOutput bool, now time.Time) int {
