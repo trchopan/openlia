@@ -104,6 +104,8 @@ func (remote Remote) composeEnvironment() string {
 func (remote Remote) operationCommandForRoot(operationRoot, operation string, args ...string) string {
 	environment := []string{
 		"OPENLIA_LOCAL_MODE='false'",
+		"OPENLIA_RUNTIME_UID='10000'",
+		"OPENLIA_RUNTIME_GID='10000'",
 		"OPENLIA_REPO_ROOT=" + shellQuote(operationRoot),
 		"OPENLIA_RUNTIME_ROOT=" + shellQuote(remote.rootPath("runtime")),
 		"OPENLIA_INSTALL_ROOT=" + shellQuote(remote.Config.InstallRoot),
@@ -173,7 +175,20 @@ func privilegedEnvironmentCommand(environment []string, executable string, args 
 		quotedArgs = append(quotedArgs, shellQuote(arg))
 	}
 	arguments := strings.Join(quotedArgs, " ")
-	return "if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then sudo -n env " + strings.Join(environment, " ") + " " + executable + " " + arguments + "; else env " + strings.Join(environment, " ") + " " + executable + " " + arguments + "; fi"
+	return "if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then sudo -n env " + strings.Join(environment, " ") + " " + executable + " " + arguments + "; else env " + strings.Join(unprivilegedEnvironment(environment), " ") + " " + executable + " " + arguments + "; fi"
+}
+
+func unprivilegedEnvironment(environment []string) []string {
+	values := append([]string(nil), environment...)
+	for index, value := range values {
+		switch {
+		case strings.HasPrefix(value, "OPENLIA_RUNTIME_UID="):
+			values[index] = `OPENLIA_RUNTIME_UID="$(id -u)"`
+		case strings.HasPrefix(value, "OPENLIA_RUNTIME_GID="):
+			values[index] = `OPENLIA_RUNTIME_GID="$(id -g)"`
+		}
+	}
+	return values
 }
 
 func operatorArguments(operation string, args []string) ([]string, bool) {
@@ -410,6 +425,8 @@ func (local Local) rootPath(parts ...string) string {
 func operationEnvironment(config Config, operationRoot string) []string {
 	return []string{
 		"OPENLIA_LOCAL_MODE=true",
+		"OPENLIA_RUNTIME_UID=" + strconv.Itoa(os.Getuid()),
+		"OPENLIA_RUNTIME_GID=" + strconv.Itoa(os.Getgid()),
 		"OPENLIA_REPO_ROOT=" + operationRoot,
 		"OPENLIA_RUNTIME_ROOT=" + filepath.Join(config.InstallRoot, "runtime"),
 		"OPENLIA_INSTALL_ROOT=" + config.InstallRoot,

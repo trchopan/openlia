@@ -28,7 +28,8 @@ RUN apt-get update \
     tar -xJf "${archive}" -C /tmp/locho; \
     install -m 0755 "/tmp/locho/locho-${locho_target}/locho" /usr/local/bin/locho; \
     rm -rf /tmp/locho "${archive}"; \
-    useradd --system --uid 10000 --home-dir /nonexistent --shell /usr/sbin/nologin locho
+    groupadd --gid 10000 locho \
+    && useradd --system --uid 10000 --gid 10000 --home-dir /nonexistent --shell /usr/sbin/nologin locho
 
 USER locho
 ENTRYPOINT ["locho"]

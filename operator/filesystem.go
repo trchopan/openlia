@@ -19,6 +19,38 @@ func EnsureDir(path string, mode fs.FileMode) error {
 	return nil
 }
 
+func ensureRuntimeOwner(path string, uid, gid int, mode fs.FileMode) error {
+	if os.Geteuid() == 0 {
+		if err := os.Chown(path, uid, gid); err != nil {
+			return fmt.Errorf("set owner %s: %w", path, err)
+		}
+	} else if uid != os.Getuid() || gid != os.Getgid() {
+		return fmt.Errorf("runtime identity %d:%d requires root, current operator is %d:%d", uid, gid, os.Getuid(), os.Getgid())
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		return fmt.Errorf("set mode %s: %w", path, err)
+	}
+	return nil
+}
+
+func ensureRuntimeTreeOwner(root string, uid, gid int) error {
+	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if err := os.Chown(path, uid, gid); err != nil {
+			if os.Geteuid() != 0 && uid == os.Getuid() && gid == os.Getgid() {
+				return nil
+			}
+			return fmt.Errorf("set owner %s: %w", path, err)
+		}
+		return nil
+	})
+}
+
 // AtomicWriteFile replaces destination only after the complete contents have
 // been written and synced. The parent directory must already exist, matching
 // the failure boundary of the shell atomic write helper.

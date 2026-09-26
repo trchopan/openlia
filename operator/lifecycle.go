@@ -29,6 +29,12 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 	if err := config.ValidatePaths(); err != nil {
 		return DeployResult{}, err
 	}
+	runtimeMetadata := filepath.Join(config.MetaRoot, "runtime.json")
+	if info, err := os.Stat(runtimeMetadata); err == nil && info.Mode().IsRegular() {
+		if err := ensureRuntimeOwner(runtimeMetadata, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
+			return DeployResult{}, fmt.Errorf("runtime metadata permissions could not be normalized: %w", err)
+		}
+	}
 	if options.Component == "" {
 		options.Component = "all"
 	}
@@ -112,7 +118,8 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 	shouldStart := options.ForceStart || (options.Action == "deploy" && previous != stateStopped)
 	if shouldStart {
 		normalizeWorkspace := func() error {
-			_, err := compose.Run(ctx, "exec", "-T", "-u", "root", "hermes", "sh", "-c", "chown -R 10000:10000 /opt/data/workspace && chmod 700 /opt/data/workspace")
+			ownership := strconv.Itoa(config.RuntimeUID) + ":" + strconv.Itoa(config.RuntimeGID)
+			_, err := compose.Run(ctx, "exec", "-T", "-u", "root", "hermes", "sh", "-c", "chown -R "+ownership+" /opt/data/workspace && chmod 700 /opt/data/workspace")
 			return err
 		}
 		workspaceUIStartedAfterHermes := false
@@ -173,7 +180,8 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 		if (options.Component == "all" || options.Component == "hermes") && !workspaceUIStartedAfterHermes {
 			// Normalize the bind-mounted workspace through the container user, not a
 			// host-side chown that may not exist on Docker Desktop.
-			_, _ = compose.Run(ctx, "exec", "-T", "-u", "root", "hermes", "sh", "-c", "chown -R 10000:10000 /opt/data/workspace && chmod 700 /opt/data/workspace")
+			ownership := strconv.Itoa(config.RuntimeUID) + ":" + strconv.Itoa(config.RuntimeGID)
+			_, _ = compose.Run(ctx, "exec", "-T", "-u", "root", "hermes", "sh", "-c", "chown -R "+ownership+" /opt/data/workspace && chmod 700 /opt/data/workspace")
 		}
 		if err := WriteState(config, stateRunning); err != nil {
 			return DeployResult{}, err

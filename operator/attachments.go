@@ -218,6 +218,12 @@ func generateAttachmentsFile(config Config) error {
 	if err != nil {
 		return err
 	}
+	for _, host := range hosts.Hosts {
+		path := filepath.Join(config.LochoRoot, host.Host, "attachments.toml")
+		if err := ensureLochoReadable(config, path); err != nil {
+			return fmt.Errorf("prepare Locho attachment %s: %w", host.Host, err)
+		}
+	}
 	var allServices []LochoService
 	browserURL := ""
 	hasOpenLIABrowserRole := false
@@ -290,7 +296,7 @@ func generateAttachmentsFile(config Config) error {
 		passwordHashFile, _ := json.Marshal(config.WorkspaceUIPasswordHashFile)
 		builder.WriteString("  workspace-ui:\n    image: \"${OPENLIA_WORKSPACE_UI_IMAGE:-openlia-workspace-ui:v0.1.0}\"\n")
 		builder.WriteString("    build:\n      context: ..\n      dockerfile: docker/workspace-ui.Dockerfile\n")
-		builder.WriteString(fmt.Sprintf("    command: [\"bun\", \"/opt/openlia/workspace-ui/server.js\"]\n    restart: unless-stopped\n    user: \"10000:10000\"\n    read_only: true\n    tmpfs:\n      - /tmp:rw,noexec,nosuid,size=32m\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    environment:\n      OPENLIA_WORKSPACE_ROOT: /workspace\n      OPENLIA_WORKSPACE_UI_BIND: 0.0.0.0\n      OPENLIA_WORKSPACE_UI_PORT: \"%d\"\n", workspaceUIPort))
+		builder.WriteString(fmt.Sprintf("    command: [\"bun\", \"/opt/openlia/workspace-ui/server.js\"]\n    restart: unless-stopped\n    user: \"%d:%d\"\n    read_only: true\n    tmpfs:\n      - /tmp:rw,noexec,nosuid,size=32m\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    environment:\n      OPENLIA_WORKSPACE_ROOT: /workspace\n      OPENLIA_WORKSPACE_UI_BIND: 0.0.0.0\n      OPENLIA_WORKSPACE_UI_PORT: \"%d\"\n", config.RuntimeUID, config.RuntimeGID, workspaceUIPort))
 		quotedPublicOrigin, _ := json.Marshal(config.WorkspaceUIPublicOrigin)
 		builder.WriteString("      OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN: ")
 		builder.Write(quotedPublicOrigin)
@@ -344,7 +350,7 @@ func generateAttachmentsFile(config Config) error {
 		fmt.Fprintf(&builder, "  locho-%s:\n", host.Host)
 		builder.WriteString("    image: \"${OPENLIA_LOCHO_IMAGE:-openlia-locho:v1.2.0-beta.1}\"\n")
 		builder.WriteString("    build:\n      context: ..\n      dockerfile: docker/locho.Dockerfile\n      args:\n        LOCHO_BASE_IMAGE: \"${LOCHO_BASE_IMAGE:-debian}\"\n        LOCHO_BASE_TAG: \"${LOCHO_BASE_TAG:-13.4-slim}\"\n        LOCHO_BASE_DIGEST: \"${LOCHO_BASE_DIGEST:-sha256:109e2c65005bf160609e4ba6acf7783752f8502ad218e298253428690b9eaa4b}\"\n        LOCHO_VERSION: \"1.2.0-beta.1\"\n        LOCHO_X86_64_SHA256: \"9d257c856f0a9c8220285db45c28c6227dfa76017d160f74490cfef7bd784ad4\"\n        LOCHO_AARCH64_SHA256: \"1c0e67b130734467783e5e48a69d3003d218a4da624ba5841f3c5e6840f19c18\"\n")
-		builder.WriteString("    command: [\"attach\", \"--config\", \"/etc/locho/attachments.toml\"]\n    restart: unless-stopped\n    read_only: true\n    tmpfs:\n      - /tmp\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    volumes:\n")
+		builder.WriteString(fmt.Sprintf("    command: [\"attach\", \"--config\", \"/etc/locho/attachments.toml\"]\n    restart: unless-stopped\n    user: \"%d:%d\"\n    read_only: true\n    tmpfs:\n      - /tmp\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    volumes:\n", config.RuntimeUID, config.RuntimeGID))
 		fmt.Fprintf(&builder, "      - type: bind\n        source: %s\n        target: /etc/locho/attachments.toml\n        read_only: true\n    networks:\n      - openlia-private\n", quoted)
 		builder.WriteString("    deploy:\n      resources:\n        limits:\n          cpus: \"0.5\"\n          memory: 512M\n")
 		builder.WriteString("    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n")
@@ -366,10 +372,13 @@ func ensureAPIServerEnv(config Config, path string) error {
 	if err != nil || apiKey == "" {
 		return fmt.Errorf("API_SERVER_KEY is required for the Hermes API server")
 	}
-	if err := EnsureDir(filepath.Dir(path), 0o700); err != nil {
+	if err := ensureSecretDirectory(config); err != nil {
 		return err
 	}
-	return AtomicWriteFile(path, []byte("API_SERVER_KEY="+apiKey+"\n"), 0o600)
+	if err := AtomicWriteFile(path, []byte("API_SERVER_KEY="+apiKey+"\n"), 0o600); err != nil {
+		return err
+	}
+	return ensureRuntimeOwner(path, config.RuntimeUID, config.RuntimeGID, 0o600)
 }
 
 func RotateAttachment(config Config, host, source string, now time.Time, composers ...Compose) error {
@@ -409,6 +418,9 @@ func RotateAttachmentContext(ctx context.Context, config Config, host, source st
 	}
 	if err := AtomicCopyFile(source, targetFile, 0o600); err != nil {
 		return err
+	}
+	if err := ensureLochoReadable(config, targetFile); err != nil {
+		return fmt.Errorf("prepare Locho attachment permissions: %w", err)
 	}
 	if err := GenerateAttachments(config); err != nil {
 		if configBackup != "" {
@@ -474,7 +486,7 @@ func rotateAttachmentWithCompose(ctx context.Context, config Config, compose Com
 	restore := func() {
 		if configBackup != "" {
 			_ = AtomicCopyFile(configBackup, targetFile, 0o600)
-			_ = ensureLochoReadable(targetFile)
+			_ = ensureLochoReadable(config, targetFile)
 		} else {
 			_ = os.Remove(targetFile)
 		}
@@ -495,7 +507,7 @@ func rotateAttachmentWithCompose(ctx context.Context, config Config, compose Com
 		_ = RecordChange(config, "locho-"+host+"-rotate", "failed", configBackup, "attachment replacement failed", now)
 		return fmt.Errorf("attachment replacement failed")
 	}
-	if err := ensureLochoReadable(targetFile); err != nil {
+	if err := ensureLochoReadable(config, targetFile); err != nil {
 		restore()
 		if previousState == stateRunning {
 			_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "locho-"+host)
@@ -534,14 +546,8 @@ func rotateAttachmentWithCompose(ctx context.Context, config Config, compose Com
 	return RecordChange(config, "locho-"+host+"-rotate", "ok", configBackup, "single host sidecar replaced", now)
 }
 
-func ensureLochoReadable(path string) error {
-	if os.Geteuid() != 0 {
-		return nil
-	}
-	if err := os.Chown(path, 10000, 999); err != nil {
-		return err
-	}
-	return os.Chmod(path, 0o600)
+func ensureLochoReadable(config Config, path string) error {
+	return ensureRuntimeOwner(path, config.RuntimeUID, config.RuntimeGID, 0o600)
 }
 
 func backupFile(config Config, source, label string, mode os.FileMode, now time.Time) (string, error) {
@@ -729,10 +735,10 @@ func EnsureOpenWebUISecrets(config Config) error {
 	if config.OpenWebUIHost == "" {
 		return nil
 	}
-	if err := EnsureDir(config.SecretDir, 0o700); err != nil {
+	if err := ensureSecretDirectory(config); err != nil {
 		return err
 	}
-	if err := EnsureDir(config.OpenWebUIDataRoot, 0o777); err != nil {
+	if err := EnsureDir(config.OpenWebUIDataRoot, 0o700); err != nil {
 		return err
 	}
 	openWebUIEnvPath := filepath.Join(config.SecretDir, "open-webui.env")
@@ -793,7 +799,13 @@ func EnsureOpenWebUISecrets(config Config) error {
 
 	content := fmt.Sprintf("OPENAI_API_KEY=%s\nWEBUI_SECRET_KEY=%s\n", apiKey, webuiSecret)
 	syncWebUIDatabaseKey(filepath.Join(config.OpenWebUIDataRoot, "webui.db"), apiKey)
-	return AtomicWriteFile(openWebUIEnvPath, []byte(content), 0o600)
+	if err := AtomicWriteFile(openWebUIEnvPath, []byte(content), 0o600); err != nil {
+		return err
+	}
+	if err := ensureRuntimeOwner(config.SecretFile, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
+		return err
+	}
+	return ensureRuntimeOwner(openWebUIEnvPath, config.RuntimeUID, config.RuntimeGID, 0o600)
 }
 
 func syncWebUIDatabaseKey(dbPath, apiKey string) {

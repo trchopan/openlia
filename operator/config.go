@@ -55,6 +55,8 @@ type Config struct {
 	OpenWebUIImage              string
 	OpenWebUIAuth               bool
 	OpenWebUIDataRoot           string
+	RuntimeUID                  int
+	RuntimeGID                  int
 	ServiceRoles                map[string]string
 	ConfiguredHosts             []string
 }
@@ -138,6 +140,14 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 	}
 	installRoot := getOr(values, "OPENLIA_INSTALL_ROOT", strings.TrimSuffix(runtimeRoot, "/runtime"))
 	project := getOr(values, "OPENLIA_PROJECT_NAME", "openlia")
+	localMode, err := boolValue(values, "OPENLIA_LOCAL_MODE", false)
+	if err != nil {
+		return Config{}, err
+	}
+	runtimeUID, runtimeGID, err := runtimeIdentity(values, localMode)
+	if err != nil {
+		return Config{}, err
+	}
 	fallbackProviders := []FallbackProviderConfig{}
 	if rawFallbacks := values["OPENLIA_FALLBACK_PROVIDERS"]; rawFallbacks != "" {
 		if err := json.Unmarshal([]byte(rawFallbacks), &fallbackProviders); err != nil {
@@ -182,6 +192,8 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		APIHost:                 getOr(values, "OPENLIA_API_HOST", "127.0.0.1"),
 		WorkspaceUIPort:         8089,
 		WorkspaceUIPublicOrigin: values["OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN"],
+		RuntimeUID:              runtimeUID,
+		RuntimeGID:              runtimeGID,
 	}
 	if err := validateOutputLanguage(config.OutputLanguage); err != nil {
 		return Config{}, fmt.Errorf("OPENLIA_OUTPUT_LANGUAGE: %w", err)
@@ -195,9 +207,7 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		config.BackupRetention = parsed
 	}
 
-	if config.LocalMode, err = boolValue(values, "OPENLIA_LOCAL_MODE", false); err != nil {
-		return Config{}, err
-	}
+	config.LocalMode = localMode
 	if config.SkillsConfigured, err = boolValue(values, "OPENLIA_SKILLS_CONFIGURED", false); err != nil {
 		return Config{}, err
 	}
@@ -354,9 +364,32 @@ func boolValue(values map[string]string, key string, fallback bool) (bool, error
 	return parsed, nil
 }
 
+func runtimeIdentity(values map[string]string, local bool) (int, int, error) {
+	uid, gid := 10000, 10000
+	if local {
+		uid, gid = os.Getuid(), os.Getgid()
+	}
+	for key, value := range map[string]*int{
+		"OPENLIA_RUNTIME_UID": &uid,
+		"OPENLIA_RUNTIME_GID": &gid,
+	} {
+		if valueText := strings.TrimSpace(values[key]); valueText != "" {
+			parsed, err := strconv.Atoi(valueText)
+			if err != nil || parsed < 0 {
+				return 0, 0, fmt.Errorf("%s must be a non-negative integer", key)
+			}
+			*value = parsed
+		}
+	}
+	return uid, gid, nil
+}
+
 // ValidatePaths applies the path and component constraints used by the shell
 // operations before they touch the filesystem.
 func (c Config) ValidatePaths() error {
+	if c.RuntimeUID < 0 || c.RuntimeGID < 0 {
+		return fmt.Errorf("runtime UID/GID must be non-negative")
+	}
 	if err := validateOutputLanguage(c.OutputLanguage); err != nil {
 		return fmt.Errorf("output language: %w", err)
 	}

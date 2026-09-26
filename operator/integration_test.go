@@ -33,6 +33,21 @@ func TestFilesystemOperatorWorkflow(t *testing.T) {
 	if result, err := Bootstrap(config, false, now); err != nil || !result.OK {
 		t.Fatalf("Bootstrap() = %+v, %v", result, err)
 	}
+	if info, err := os.Stat(config.SecretDir); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("secret directory permissions = %v, want 0700", err)
+	}
+	if info, err := os.Stat(config.SecretFile); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("secret file permissions = %v, want 0600", err)
+	}
+	for _, name := range []string{"SOUL.md", "AGENTS.md"} {
+		info, err := os.Stat(filepath.Join(config.DataRoot, name))
+		if err != nil {
+			t.Fatalf("%s stat failed: %v", name, err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s permissions = %v, want 0600", name, info.Mode().Perm())
+		}
+	}
 	if err := GenerateAttachments(config); err != nil {
 		t.Fatal(err)
 	}

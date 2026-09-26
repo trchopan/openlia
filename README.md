@@ -602,9 +602,11 @@ The source must already exist as a regular file outside the checkout with mode
 chmod 600 "$HOME/.config/openlia/dev/openlia_dev.env"
 ```
 
-Local deployments preserve host-file ownership; the Linux containers normalize
-their runtime ownership internally. No host-side `chown` to the container UID
-is required for local mode.
+Local deployments preserve host-file ownership; the Linux containers use the
+invoking user's UID/GID for shared runtime files. Remote deployments use
+UID/GID `10000` when the operator runs with passwordless sudo, and the SSH
+user's UID/GID when it runs without sudo. No manual host-side `chown` is
+required.
 
 The configured source is used by `init` and subsequent credential rotations:
 
@@ -715,6 +717,12 @@ runtime. Archive members use logical `hermes/` and `meta/` roots rather than
 host absolute paths. Durable restore maps them to the destination runtime and
 regenerates installation identity, stack state, service registries, and host
 configuration; provide destination secrets and attachment sources separately.
+Restore replaces durable Hermes and metadata trees transactionally, removes
+stale durable files, and normalizes restored ownership to the deployment
+runtime UID/GID. It preserves destination secrets, Locho attachments, Open
+WebUI data, and generated host configuration. A pre-restore backup is created
+automatically; restore leaves the stack stopped so the operator can verify state
+before running `openlia start` or `openlia restart`.
 
 `openlia update` is read-only without a component. `openlia update openlia`
 synchronizes the Go operator, profile, templates, and bundled skills.

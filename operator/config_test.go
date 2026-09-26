@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,6 +34,8 @@ func testConfig(repo, runtime string) Config {
 		OpenWebUIHost:     "",
 		OpenWebUIPort:     8090,
 		OpenWebUIDataRoot: filepath.Join(runtime, "open-webui"),
+		RuntimeUID:        os.Getuid(),
+		RuntimeGID:        os.Getgid(),
 	}
 }
 
@@ -101,6 +104,43 @@ func TestLoadConfigFromEnvRequiresRuntimeRoot(t *testing.T) {
 	_, err := LoadConfigFromEnv(map[string]string{"OPENLIA_REPO_ROOT": t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "OPENLIA_RUNTIME_ROOT is required") {
 		t.Fatalf("missing runtime root error = %v", err)
+	}
+}
+
+func TestLoadConfigFromEnvUsesRuntimeIdentity(t *testing.T) {
+	config, err := LoadConfigFromEnv(map[string]string{
+		"OPENLIA_REPO_ROOT":    t.TempDir(),
+		"OPENLIA_RUNTIME_ROOT": filepath.Join(t.TempDir(), "runtime"),
+		"OPENLIA_LOCAL_MODE":   "false",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.RuntimeUID != 10000 || config.RuntimeGID != 10000 {
+		t.Fatalf("remote runtime identity = %d:%d, want 10000:10000", config.RuntimeUID, config.RuntimeGID)
+	}
+
+	config, err = LoadConfigFromEnv(map[string]string{
+		"OPENLIA_REPO_ROOT":    t.TempDir(),
+		"OPENLIA_RUNTIME_ROOT": filepath.Join(t.TempDir(), "runtime"),
+		"OPENLIA_LOCAL_MODE":   "true",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.RuntimeUID != os.Getuid() || config.RuntimeGID != os.Getgid() {
+		t.Fatalf("local runtime identity = %d:%d, want %d:%d", config.RuntimeUID, config.RuntimeGID, os.Getuid(), os.Getgid())
+	}
+}
+
+func TestLoadConfigFromEnvRejectsInvalidRuntimeIdentity(t *testing.T) {
+	_, err := LoadConfigFromEnv(map[string]string{
+		"OPENLIA_REPO_ROOT":    t.TempDir(),
+		"OPENLIA_RUNTIME_ROOT": filepath.Join(t.TempDir(), "runtime"),
+		"OPENLIA_RUNTIME_UID":  "not-a-number",
+	})
+	if err == nil || !strings.Contains(err.Error(), "OPENLIA_RUNTIME_UID") {
+		t.Fatalf("invalid runtime identity error = %v", err)
 	}
 }
 

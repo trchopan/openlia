@@ -246,6 +246,9 @@ func TestBackupExcludesSecretsAndAttachmentCapabilities(t *testing.T) {
 		filepath.Join(config.DataRoot, "keep.txt"):                        "keep",
 		filepath.Join(config.DataRoot, "auth.json"):                       "secret",
 		filepath.Join(config.DataRoot, "session.env"):                     "secret",
+		filepath.Join(config.DataRoot, "pairing", "device.json"):          "secret",
+		filepath.Join(config.DataRoot, "mcp-tokens", "token.secret"):      "secret",
+		filepath.Join(config.DataRoot, "nested", "private.secret"):        "secret",
 		filepath.Join(config.LochoRoot, "laptop", "attachments.toml"):     "capability",
 		filepath.Join(config.LochoRoot, "laptop", "runtime.txt"):          "runtime",
 		filepath.Join(config.RuntimeRoot, "secrets", "hermes.env"):        "secret",
@@ -267,7 +270,7 @@ func TestBackupExcludesSecretsAndAttachmentCapabilities(t *testing.T) {
 	if !names["hermes/keep.txt"] || names["locho/laptop/runtime.txt"] {
 		t.Fatalf("ordinary runtime files missing from archive: %v", names)
 	}
-	for _, forbidden := range []string{"hermes/auth.json", "hermes/session.env", "locho/laptop/attachments.toml", "secrets/hermes.env", "hermes/logs/hermes.log"} {
+	for _, forbidden := range []string{"hermes/auth.json", "hermes/session.env", "hermes/pairing/device.json", "hermes/mcp-tokens/token.secret", "hermes/nested/private.secret", "locho/laptop/attachments.toml", "secrets/hermes.env", "hermes/logs/hermes.log"} {
 		if names[forbidden] {
 			t.Fatalf("sensitive archive member present: %s", forbidden)
 		}
@@ -446,6 +449,65 @@ func TestDurableBackupRestoresAcrossRuntimeRoots(t *testing.T) {
 	}
 }
 
+func TestDurableRestoreRemovesStaleFilesAndKeepsGeneratedState(t *testing.T) {
+	sourceConfig := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "source-runtime"))
+	for _, directory := range []string{sourceConfig.DataRoot, sourceConfig.MetaRoot, sourceConfig.BackupRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, contents := range map[string]string{
+		filepath.Join(sourceConfig.DataRoot, "workspace", "restored.md"): "restored",
+		filepath.Join(sourceConfig.MetaRoot, "managed", "state.json"):    "managed",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archive, err := CreateBackup(sourceConfig, "portable", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetConfig := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "target-runtime"))
+	for _, directory := range []string{targetConfig.DataRoot, targetConfig.MetaRoot, targetConfig.BackupRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, contents := range map[string]string{
+		filepath.Join(targetConfig.DataRoot, "stale.db"):      "stale",
+		filepath.Join(targetConfig.DataRoot, "config.yaml"):   "current-config",
+		filepath.Join(targetConfig.MetaRoot, "services.json"): "current-services",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archiveCopy := filepath.Join(targetConfig.BackupRoot, filepath.Base(archive.Archive))
+	data, err := os.ReadFile(archive.Archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archiveCopy, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreBackup(targetConfig, archiveCopy, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(targetConfig.DataRoot, "stale.db")); !os.IsNotExist(err) {
+		t.Fatalf("stale file survived durable restore: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(targetConfig.DataRoot, "config.yaml")); err != nil || string(data) != "current-config" {
+		t.Fatalf("generated config was not preserved: %q, %v", data, err)
+	}
+}
+
 func TestRestoreRejectsUnsafeArchiveBeforeChangingState(t *testing.T) {
 	config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
 	for _, directory := range []string{config.DataRoot, config.MetaRoot, config.BackupRoot, config.LochoRoot} {
@@ -480,6 +542,35 @@ func TestRestoreRejectsUnsafeArchiveBeforeChangingState(t *testing.T) {
 	}
 	if string(contents) != "current" {
 		t.Fatalf("current data changed after rejected archive: %q", contents)
+	}
+}
+
+func TestArchiveMemberAllowsSpacesAndRejectsDeepPaths(t *testing.T) {
+	if !safeArchiveMember("hermes/workspace/My Notes.md") {
+		t.Fatal("archive member with spaces was rejected")
+	}
+	deep := "hermes/" + strings.Repeat("nested/", maxArchivePathDepth) + "file.md"
+	if safeArchiveMember(deep) {
+		t.Fatal("overly deep archive member was accepted")
+	}
+}
+
+func TestRestoreRejectsMismatchedBackupDigest(t *testing.T) {
+	config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+	for _, directory := range []string{config.DataRoot, config.MetaRoot, config.BackupRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archive, err := CreateBackup(config, "digest", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archive.Archive, []byte("tampered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreBackup(config, archive.Archive, time.Now()); err == nil || !strings.Contains(err.Error(), "checksum") {
+		t.Fatalf("tampered archive error = %v", err)
 	}
 }
 
@@ -544,7 +635,7 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, expected := range []string{"locho-laptop:", "build:", "docker/locho.Dockerfile", "cap_drop: [ALL]", "no-new-privileges:true", "OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8932\""} {
+	for _, expected := range []string{"locho-laptop:", "build:", "docker/locho.Dockerfile", fmt.Sprintf("user: \"%d:%d\"", config.RuntimeUID, config.RuntimeGID), "cap_drop: [ALL]", "no-new-privileges:true", "OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8932\""} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("generated Compose missing %q:\n%s", expected, text)
 		}
@@ -583,7 +674,7 @@ func TestGeneratedAttachmentsContainWorkspaceUIWhenEnabled(t *testing.T) {
 				t.Fatal(err)
 			}
 			text := string(data)
-			for _, expected := range []string{"workspace-ui:", "docker/workspace-ui.Dockerfile", test.published, fmt.Sprintf("OPENLIA_WORKSPACE_UI_PORT: \"%d\"", test.port), "target: /workspace", "user: \"10000:10000\"", "cap_drop: [ALL]"} {
+			for _, expected := range []string{"workspace-ui:", "docker/workspace-ui.Dockerfile", test.published, fmt.Sprintf("OPENLIA_WORKSPACE_UI_PORT: \"%d\"", test.port), "target: /workspace", fmt.Sprintf("user: \"%d:%d\"", config.RuntimeUID, config.RuntimeGID), "cap_drop: [ALL]"} {
 				if !strings.Contains(text, expected) {
 					t.Fatalf("generated Compose missing %q:\n%s", expected, text)
 				}
@@ -620,6 +711,9 @@ func TestGeneratedAttachmentsContainOpenWebUI(t *testing.T) {
 	}
 	if err := GenerateAttachments(config); err != nil {
 		t.Fatal(err)
+	}
+	if info, err := os.Stat(config.OpenWebUIDataRoot); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("Open WebUI data root permissions = %v, want 0700", err)
 	}
 	data, err := os.ReadFile(config.GeneratedCompose)
 	if err != nil {

@@ -39,7 +39,10 @@ func WriteState(config Config, state string) error {
 	if state != stateNeverStarted && state != stateRunning && state != stateStopped {
 		return fmt.Errorf("invalid stack state")
 	}
-	return AtomicWriteFile(config.StateFile, []byte(state+"\n"), 0o600)
+	if err := AtomicWriteFile(config.StateFile, []byte(state+"\n"), 0o600); err != nil {
+		return err
+	}
+	return ensureRuntimeOwner(config.StateFile, config.RuntimeUID, config.RuntimeGID, 0o600)
 }
 
 // RuntimeMetadata preserves meta/runtime.json's existing schema and keys.
@@ -81,7 +84,11 @@ func WriteRuntimeMetadata(config Config, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	return AtomicWriteFile(config.MetaRoot+"/runtime.json", append(contents, '\n'), 0o600)
+	path := config.MetaRoot + "/runtime.json"
+	if err := AtomicWriteFile(path, append(contents, '\n'), 0o600); err != nil {
+		return err
+	}
+	return ensureRuntimeOwner(path, config.RuntimeUID, config.RuntimeGID, 0o600)
 }
 
 func RecordChange(config Config, action, status, backup, detail string, now time.Time) error {
@@ -97,7 +104,11 @@ func RecordChange(config Config, action, status, backup, detail string, now time
 	if err != nil {
 		return err
 	}
-	return AtomicWriteFile(config.MetaRoot+"/last-change.json", append(contents, '\n'), 0o600)
+	path := config.MetaRoot + "/last-change.json"
+	if err := AtomicWriteFile(path, append(contents, '\n'), 0o600); err != nil {
+		return err
+	}
+	return ensureRuntimeOwner(path, config.RuntimeUID, config.RuntimeGID, 0o600)
 }
 
 func utcTimestamp(value time.Time) string {
