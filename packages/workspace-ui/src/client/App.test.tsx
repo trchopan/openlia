@@ -80,6 +80,23 @@ describe("workspace application", () => {
     expect(screen.queryByLabelText("Password")).toBeNull();
   });
 
+  test("keeps workspace files visible when Git status is unavailable", async () => {
+    const baseApi = createMockWorkspaceApi();
+    const api: WorkspaceApi = {
+      ...baseApi,
+      async loadGitStatus() {
+        throw new Error("git_unavailable");
+      },
+    };
+
+    render(<App api={api} />);
+
+    expect(
+      await screen.findByRole("button", { name: "notes.md" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Version control unavailable")).toBeInTheDocument();
+  });
+
   test("automatically loads document from route path on initial load/reload", async () => {
     window.history.replaceState(null, "", "/files/notes.md");
     render(<App api={createMockWorkspaceApi()} />);

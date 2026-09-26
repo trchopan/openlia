@@ -207,7 +207,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         }
         const [treeResponse, gitResponse] = await Promise.all([
           api.loadTree(),
-          api.loadGitStatus(),
+          api.loadGitStatus().catch(() => null),
         ]);
         if (isActive && !isActive()) return;
         setTree(treeResponse.entries);
@@ -349,7 +349,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       setLoading(true);
       const [treeResponse, gitResponse] = await Promise.all([
         api.loadTree(),
-        api.loadGitStatus(),
+        api.loadGitStatus().catch(() => null),
       ]);
       setTree(treeResponse.entries);
       setTreeTruncated(treeResponse.truncated);
