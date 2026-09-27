@@ -231,4 +231,246 @@ messages:
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
+
+  test("opens Go To modal via header button and navigates to document", async () => {
+    render(<App api={createMockWorkspaceApi()} />);
+
+    // Click Go To button in header
+    const goToButton = await screen.findByRole("button", {
+      name: /Go to document or skill/i,
+    });
+    fireEvent.click(goToButton);
+
+    const input = await screen.findByPlaceholderText(
+      "Paste openlia:// link, or type file/skill name...",
+    );
+    expect(input).toBeInTheDocument();
+
+    // Paste openlia link
+    fireEvent.change(input, {
+      target: { value: "openlia://workspace/calendar/event.md" },
+    });
+
+    expect(screen.getByText("calendar/event.md")).toBeInTheDocument();
+
+    // Submit
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // The document should now be open
+    expect(
+      await screen.findByRole("heading", { name: "Calendar event" }),
+    ).toBeInTheDocument();
+  });
+
+  test("opens Go To modal via Cmd+P shortcut", async () => {
+    render(<App api={createMockWorkspaceApi()} />);
+
+    // Press Cmd+P
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+
+    expect(
+      await screen.findByPlaceholderText(
+        "Paste openlia:// link, or type file/skill name...",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test("protects dirty draft when navigating via Go To modal", async () => {
+    render(<App api={createMockWorkspaceApi()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("textbox", {
+      name: "Document editor",
+    });
+    fireEvent.change(editor, { target: { value: "unsaved changes" } });
+
+    // Open Go To modal and paste link
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+    const input = await screen.findByPlaceholderText(
+      "Paste openlia:// link, or type file/skill name...",
+    );
+    fireEvent.change(input, {
+      target: { value: "openlia://workspace/calendar/event.md" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // Dirty draft dialog should appear
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      "Keep your draft?",
+    );
+  });
+
+  test("navigates in-app when clicking openlia:// link in markdown preview", async () => {
+    window.history.replaceState(null, "", "/");
+    const baseApi = createMockWorkspaceApi();
+    const customApi: WorkspaceApi = {
+      ...baseApi,
+      async loadFile(requestedPath) {
+        if (requestedPath === "notes.md") {
+          const original = await baseApi.loadFile(requestedPath);
+          return {
+            ...original,
+            content: "[Check Calendar](openlia://workspace/calendar/event.md)",
+          };
+        }
+        return baseApi.loadFile(requestedPath);
+      },
+    };
+
+    render(<App api={customApi} />);
+    fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Preview" }));
+
+    // Click the markdown link in preview
+    const link = await screen.findByRole("link", { name: "Check Calendar" });
+    expect(link).toHaveAttribute(
+      "href",
+      "openlia://workspace/calendar/event.md",
+    );
+    fireEvent.click(link);
+
+    // Should navigate to calendar/event.md without opening a new tab
+    expect(
+      await screen.findByRole("heading", { name: "Calendar event" }),
+    ).toBeInTheDocument();
+  });
+
+  test("allows copying document link to clipboard from document view", async () => {
+    window.history.replaceState(null, "", "/");
+    let copiedText = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          copiedText = text;
+        },
+      },
+    });
+
+    render(<App api={createMockWorkspaceApi()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+
+    // Document toolbar should have the Copy Link button
+    const copyButton = await screen.findByRole("button", {
+      name: "Copy link (openlia://workspace/notes.md)",
+    });
+    expect(copyButton).toBeInTheDocument();
+
+    fireEvent.click(copyButton);
+    expect(copiedText).toBe("openlia://workspace/notes.md");
+  });
+
+  test("clicking Reveal in Tree clears filter and focuses the file", async () => {
+    window.history.replaceState(null, "", "/");
+    render(<App api={createMockWorkspaceApi()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+
+    // Put a filter that excludes notes.md
+    const filterInput = screen.getByPlaceholderText("Search paths");
+    fireEvent.change(filterInput, { target: { value: "calendar" } });
+    expect(filterInput).toHaveValue("calendar");
+
+    // Click Reveal in Tree
+    const revealBtn = await screen.findByRole("button", {
+      name: "Reveal in tree",
+    });
+    fireEvent.click(revealBtn);
+
+    // Filter should be cleared
+    expect(filterInput).toHaveValue("");
+    expect(
+      await screen.findByRole("button", { name: "notes.md" }),
+    ).toBeInTheDocument();
+  });
+
+  test("live updates file content when window regains focus and document is not dirty", async () => {
+    window.history.replaceState(null, "", "/");
+    let currentContent = "Original notes";
+    let currentRevision = "rev-1";
+
+    const baseApi = createMockWorkspaceApi();
+    const customApi: WorkspaceApi = {
+      ...baseApi,
+      async loadFile(requestedPath) {
+        if (requestedPath === "notes.md") {
+          return {
+            content: currentContent,
+            editable: true,
+            modified_at: new Date().toISOString(),
+            path: "notes.md",
+            revision: currentRevision,
+            schema: 1,
+            size: currentContent.length,
+          };
+        }
+        return baseApi.loadFile(requestedPath);
+      },
+    };
+
+    render(<App api={customApi} />);
+    fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+
+    expect(await screen.findByText("Original notes")).toBeInTheDocument();
+
+    // External agent updates the file on disk
+    currentContent = "Updated notes from agent";
+    currentRevision = "rev-2";
+
+    // Simulate window focus / tab revalidation
+    fireEvent(window, new Event("focus"));
+
+    // Content should update automatically without user refresh
+    await waitFor(() => {
+      expect(screen.getByText("Updated notes from agent")).toBeInTheDocument();
+    });
+  });
+
+  test("flags conflict on live update when user has unsaved draft changes", async () => {
+    window.history.replaceState(null, "", "/");
+    let currentContent = "Original notes";
+    let currentRevision = "rev-1";
+
+    const baseApi = createMockWorkspaceApi();
+    const customApi: WorkspaceApi = {
+      ...baseApi,
+      async loadFile(requestedPath) {
+        if (requestedPath === "notes.md") {
+          return {
+            content: currentContent,
+            editable: true,
+            modified_at: new Date().toISOString(),
+            path: "notes.md",
+            revision: currentRevision,
+            schema: 1,
+            size: currentContent.length,
+          };
+        }
+        return baseApi.loadFile(requestedPath);
+      },
+    };
+
+    render(<App api={customApi} />);
+    fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+
+    const editor = await screen.findByRole("textbox", {
+      name: "Document editor",
+    });
+    fireEvent.change(editor, { target: { value: "My unsaved user edits" } });
+
+    // External agent updates the file on disk
+    currentContent = "Agent edits from background";
+    currentRevision = "rev-2";
+
+    // Simulate window focus
+    fireEvent(window, new Event("focus"));
+
+    // User draft must NOT be overwritten, and conflict alert should be displayed
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "The file changed on disk. Your unsaved draft is preserved; review before saving.",
+      );
+    });
+    expect(editor).toHaveValue("My unsaved user edits");
+  });
 });

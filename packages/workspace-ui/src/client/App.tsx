@@ -9,10 +9,16 @@ import type {
   WorkspaceTreeEntry,
 } from "../shared/api";
 import { CreateSkillModal } from "./CreateSkillModal";
+import { GoToModal } from "./GoToModal";
 import { SkillDetailPane, type SkillSubTab } from "./SkillDetailPane";
 import { SkillsNavigator } from "./SkillsNavigator";
 import { ApiError, httpWorkspaceApi, type WorkspaceApi } from "./api";
 import { isChatgptExportPath } from "./chatgpt";
+import {
+  buildSkillLink,
+  buildWorkspaceLink,
+  resolveLinkTarget,
+} from "./openliaLinks";
 import {
   DirtyDraftDialog,
   DocumentInspector,
@@ -34,6 +40,43 @@ type PendingAction =
 
 function defaultView(): WorkspaceView {
   return "preview";
+}
+
+function areTreesEqual(
+  a: WorkspaceTreeEntry[],
+  b: WorkspaceTreeEntry[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const itemA = a[i];
+    const itemB = b[i];
+    if (!itemA || !itemB) return false;
+    if (itemA.path !== itemB.path || itemA.kind !== itemB.kind) return false;
+    if (itemA.kind === "file" && itemB.kind === "file") {
+      if (
+        itemA.size !== itemB.size ||
+        itemA.modified_at !== itemB.modified_at ||
+        itemA.editable !== itemB.editable
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function areGitEqual(
+  a: WorkspaceGitStatus | null,
+  b: WorkspaceGitStatus | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.configured === b.configured &&
+    a.branch === b.branch &&
+    a.dirty === b.dirty &&
+    a.status === b.status
+  );
 }
 
 function ErrorMessage({
@@ -184,6 +227,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   const [skillSaving, setSkillSaving] = useState(false);
   const [skillError, setSkillError] = useState("");
   const [isCreateSkillOpen, setIsCreateSkillOpen] = useState(false);
+  const [isGoToOpen, setIsGoToOpen] = useState(false);
+  const [revealToken, setRevealToken] = useState(0);
 
   // Auth & Navigation state
   const [authReady, setAuthReady] = useState(false);
@@ -204,12 +249,25 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   const fileRequestSequence = useRef(0);
   const skillRequestSequence = useRef(0);
   const initialPathOpened = useRef(false);
+  const isSyncingRef = useRef(false);
 
   const docDirty = file !== null && file.content !== draft;
   const skillDirty =
     selectedSkillFile !== null && selectedSkillFile.content !== skillDraft;
   const dirty = activeTab === "skills" ? skillDirty : docDirty;
   const diff = docDirty && file ? diffLines(file.content, draft) : [];
+
+  const currentLink =
+    activeTab === "skills"
+      ? selectedSkillDetail
+        ? buildSkillLink(
+            selectedSkillDetail.id,
+            selectedSkillFile?.path ?? undefined,
+          )
+        : undefined
+      : file
+        ? buildWorkspaceLink(file.path)
+        : undefined;
 
   const appStateRef = useRef({
     activeTab,
@@ -225,22 +283,20 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     skillDirty,
     view,
   });
-  useEffect(() => {
-    appStateRef.current = {
-      activeTab,
-      dirty,
-      docDirty,
-      file,
-      filter,
-      openFile,
-      openSkill,
-      save,
-      saveSkillFile,
-      selectedSkillFile,
-      skillDirty,
-      view,
-    };
-  });
+  appStateRef.current = {
+    activeTab,
+    dirty,
+    docDirty,
+    file,
+    filter,
+    openFile,
+    openSkill,
+    save,
+    saveSkillFile,
+    selectedSkillFile,
+    skillDirty,
+    view,
+  };
 
   const loadWorkspace = useCallback(
     async (isActive?: () => boolean) => {
@@ -308,6 +364,55 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     [api],
   );
 
+  const syncWorkspace = useCallback(async () => {
+    if (isSyncingRef.current) return;
+    if (typeof document !== "undefined" && document.hidden) return;
+    isSyncingRef.current = true;
+    try {
+      const { activeTab, docDirty, file } = appStateRef.current;
+      if (activeTab === "documents") {
+        const [treeRes, gitRes] = await Promise.all([
+          api.loadTree().catch(() => null),
+          api.loadGitStatus().catch(() => null),
+        ]);
+
+        if (treeRes) {
+          setTree((prev) =>
+            areTreesEqual(prev, treeRes.entries) ? prev : treeRes.entries,
+          );
+          setTreeTruncated((prev) =>
+            prev === treeRes.truncated ? prev : treeRes.truncated,
+          );
+        }
+
+        if (gitRes) {
+          setGit((prev) => (areGitEqual(prev, gitRes) ? prev : gitRes));
+        }
+
+        if (file) {
+          try {
+            const nextFile = await api.loadFile(file.path);
+            if (nextFile.revision !== file.revision) {
+              if (!docDirty) {
+                setFile(nextFile);
+                setDraft(nextFile.content);
+                setConflict("");
+              } else {
+                setConflict(
+                  "The file changed on disk. Your unsaved draft is preserved; review before saving.",
+                );
+              }
+            }
+          } catch {
+            // Ignore loadFile errors during background sync
+          }
+        }
+      }
+    } finally {
+      isSyncingRef.current = false;
+    }
+  }, [api]);
+
   useEffect(() => {
     let active = true;
     void loadWorkspace(() => active);
@@ -315,6 +420,27 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       active = false;
     };
   }, [loadWorkspace]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void syncWorkspace();
+    }, 4000);
+
+    function handleRevalidation() {
+      if (typeof document !== "undefined" && !document.hidden) {
+        void syncWorkspace();
+      }
+    }
+
+    window.addEventListener("focus", handleRevalidation);
+    document.addEventListener("visibilitychange", handleRevalidation);
+
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", handleRevalidation);
+      document.removeEventListener("visibilitychange", handleRevalidation);
+    };
+  }, [syncWorkspace]);
 
   useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
@@ -345,6 +471,21 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
     window.addEventListener("keydown", handleSaveShortcut);
     return () => window.removeEventListener("keydown", handleSaveShortcut);
+  }, []);
+
+  useEffect(() => {
+    function handleGoToShortcut(event: KeyboardEvent) {
+      if (
+        !(event.metaKey || event.ctrlKey) ||
+        (event.key.toLowerCase() !== "p" && event.key.toLowerCase() !== "k")
+      )
+        return;
+      event.preventDefault();
+      setIsGoToOpen((prev) => !prev);
+    }
+
+    window.addEventListener("keydown", handleGoToShortcut);
+    return () => window.removeEventListener("keydown", handleGoToShortcut);
   }, []);
 
   useEffect(() => {
@@ -646,6 +787,16 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     }
   }
 
+  function handleNavigateLink(href: string) {
+    const target = resolveLinkTarget(href, { skills, tree });
+    if (!target) return;
+    if (target.kind === "workspace") {
+      requestOpenFile(target.path);
+    } else {
+      requestOpenSkill(target.skillId, target.skillFile);
+    }
+  }
+
   async function openSkillFile(fileEntry: SkillFileEntry) {
     if (!selectedSkillId) return;
     if (skillDirty) {
@@ -899,6 +1050,14 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     );
   }
 
+  function handleRevealInTree() {
+    if (filter) {
+      handleFilterChange("");
+    }
+    setFilesOpen(true);
+    setRevealToken((prev) => prev + 1);
+  }
+
   if (!authReady)
     return (
       <main className="grid min-h-dvh place-items-center bg-base-300 p-4 text-base-content">
@@ -931,11 +1090,13 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       <WorkspaceHeader
         activeTab={activeTab}
         authRequired={authRequired}
+        currentLink={currentLink}
         dirty={dirty}
         file={activeTab === "skills" ? null : file}
         filesButtonRef={filesButtonRef}
         git={git}
         onOpenFiles={() => setFilesOpen(true)}
+        onOpenGoTo={() => setIsGoToOpen(true)}
         onSignOut={requestSignOut}
         onTabChange={requestTabChange}
       />
@@ -967,6 +1128,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             onFilterChange={handleFilterChange}
             onOpenFile={requestOpenFile}
             onRetry={() => void loadWorkspace()}
+            revealToken={revealToken}
             selectedPath={file?.path}
             truncated={treeTruncated}
             workspaceError={workspaceError}
@@ -984,7 +1146,9 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
               if (file) window.location.href = api.downloadUrl(file.path);
             }}
             onDraftChange={setDraft}
+            onNavigateLink={handleNavigateLink}
             onOpenDetails={openHeaderDetails}
+            onRevealInTree={file ? handleRevealInTree : undefined}
             onRetry={() => {
               const pathToRetry =
                 file?.path ??
@@ -1043,6 +1207,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
               isSaving={skillSaving || skillFileLoading}
               onDismissError={() => setSkillError("")}
               onDraftChange={setSkillDraft}
+              onNavigateLink={handleNavigateLink}
               onResetFile={() => {
                 if (selectedSkillFile) setSkillDraft(selectedSkillFile.content);
               }}
@@ -1119,6 +1284,15 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         isOpen={isCreateSkillOpen}
         onClose={() => setIsCreateSkillOpen(false)}
         onCreate={handleCreateSkill}
+      />
+
+      <GoToModal
+        isOpen={isGoToOpen}
+        onClose={() => setIsGoToOpen(false)}
+        onNavigateSkill={(id, skillFile) => requestOpenSkill(id, skillFile)}
+        onNavigateWorkspace={(path) => requestOpenFile(path)}
+        skills={skills}
+        tree={tree}
       />
     </main>
   );

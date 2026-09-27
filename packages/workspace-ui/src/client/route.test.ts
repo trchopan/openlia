@@ -153,6 +153,68 @@ describe("route helpers", () => {
     });
   });
 
+  test("parses openlia:// URLs directly", () => {
+    expect(parseRoute("openlia://workspace/projects/website.md")).toEqual({
+      filter: undefined,
+      path: "projects/website.md",
+      scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: "documents",
+      view: undefined,
+    });
+
+    expect(
+      parseRoute(
+        "openlia://workspace/calendar/2026-09-23%20lunch%20meeting.md?view=preview",
+      ),
+    ).toEqual({
+      filter: undefined,
+      path: "calendar/2026-09-23 lunch meeting.md",
+      scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: "documents",
+      view: "preview",
+    });
+
+    expect(parseRoute("openlia://skills/weekly-review")).toEqual({
+      filter: undefined,
+      path: undefined,
+      scenario: undefined,
+      skill: "weekly-review",
+      skillFile: undefined,
+      tab: "skills",
+      view: undefined,
+    });
+
+    expect(
+      parseRoute("openlia://skills/weekly-review/templates/weekly-review.md"),
+    ).toEqual({
+      filter: undefined,
+      path: undefined,
+      scenario: undefined,
+      skill: "weekly-review",
+      skillFile: "templates/weekly-review.md",
+      tab: "skills",
+      view: undefined,
+    });
+
+    expect(
+      parseRoute(
+        "openlia://skills/productivity/notion?skillFile=scripts/sync.py",
+      ),
+    ).toEqual({
+      filter: undefined,
+      path: undefined,
+      scenario: undefined,
+      skill: "productivity/notion",
+      skillFile: "scripts/sync.py",
+      tab: "skills",
+      view: undefined,
+    });
+  });
+
   test("builds clean URL from route object", () => {
     expect(buildRouteUrl({})).toBe("/");
     expect(buildRouteUrl({ path: "notes.md" })).toBe("/files/notes.md");
