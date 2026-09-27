@@ -62,6 +62,13 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 		return BootstrapResult{}, err
 	}
 	if config.WorkspaceUIAuthRequired {
+		sessionDir := filepath.Join(config.RuntimeRoot, "workspace-ui")
+		if err := EnsureDir(sessionDir, 0o700); err != nil {
+			return BootstrapResult{}, err
+		}
+		if err := ensureRuntimeOwner(sessionDir, config.RuntimeUID, config.RuntimeGID, 0o700); err != nil {
+			return BootstrapResult{}, err
+		}
 		info, err := os.Stat(config.WorkspaceUIPasswordHashFile)
 		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o444 {
 			return BootstrapResult{}, fmt.Errorf("workspace-ui password verifier must be a regular mode-0444 file")

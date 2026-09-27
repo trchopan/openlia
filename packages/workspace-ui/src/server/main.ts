@@ -25,6 +25,9 @@ const handler = createWorkspaceHandler({
   authRequired,
   passwordHashFile,
   publicOrigin: process.env.OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN,
+  sessionDatabasePath:
+    process.env.OPENLIA_WORKSPACE_UI_SESSION_DB ??
+    "/var/lib/openlia/sessions.sqlite",
   skillsRoot,
   staticRoot: join(import.meta.dir, "public"),
   workspaceRoot,

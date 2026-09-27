@@ -313,6 +313,7 @@ describe("workspace HTTP handler", () => {
     const cookie = login.headers.get("set-cookie");
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("SameSite=Strict");
+    expect(cookie).toContain("Max-Age=2592000");
     expect(cookie).not.toContain("Secure");
 
     const authenticated = await authenticatedHandler(
@@ -336,6 +337,63 @@ describe("workspace HTTP handler", () => {
       }),
     );
     expect(afterLogout.status).toBe(401);
+  });
+
+  test("persists sessions across server instances and invalidates them on password rotation", async () => {
+    const sessionDatabasePath = join(root, "auth", "sessions.sqlite");
+    const passwordHash = await Bun.password.hash(
+      "correct horse battery staple",
+      {
+        algorithm: "argon2id",
+        memoryCost: 32 * 1024,
+        timeCost: 2,
+      },
+    );
+    const firstHandler = createWorkspaceHandler({
+      authRequired: true,
+      passwordHash,
+      sessionDatabasePath,
+      workspaceRoot: root,
+    });
+    const login = await firstHandler(
+      new Request("http://localhost/api/auth/login", {
+        body: JSON.stringify({ password: "correct horse battery staple" }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }),
+    );
+    const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
+
+    const secondHandler = createWorkspaceHandler({
+      authRequired: true,
+      passwordHash,
+      sessionDatabasePath,
+      workspaceRoot: root,
+    });
+    const persisted = await secondHandler(
+      new Request("http://localhost/api/workspace/tree", {
+        headers: { Cookie: cookie },
+      }),
+    );
+    expect(persisted.status).toBe(200);
+
+    const rotatedHash = await Bun.password.hash("a different password", {
+      algorithm: "argon2id",
+      memoryCost: 32 * 1024,
+      timeCost: 2,
+    });
+    const rotatedHandler = createWorkspaceHandler({
+      authRequired: true,
+      passwordHash: rotatedHash,
+      sessionDatabasePath,
+      workspaceRoot: root,
+    });
+    const afterRotation = await rotatedHandler(
+      new Request("http://localhost/api/workspace/tree", {
+        headers: { Cookie: cookie },
+      }),
+    );
+    expect(afterRotation.status).toBe(401);
   });
 
   test("accepts an HTTPS origin forwarded to an HTTP upstream", async () => {
