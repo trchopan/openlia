@@ -759,7 +759,7 @@ func TestGeneratedAttachmentsContainWorkspaceUIWhenEnabled(t *testing.T) {
 				}
 			}
 			if test.host == "0.0.0.0" {
-				for _, expected := range []string{"OPENLIA_WORKSPACE_UI_AUTH_REQUIRED: \"true\"", "target: /run/openlia-secrets/workspace-ui-password.hash", "read_only: true"} {
+				for _, expected := range []string{"OPENLIA_WORKSPACE_UI_AUTH_REQUIRED: \"true\"", "OPENLIA_WORKSPACE_UI_SESSION_DB: /var/lib/openlia/sessions.sqlite", "target: /run/openlia-secrets/workspace-ui-password.hash", "target: /var/lib/openlia", "read_only: true"} {
 					if !strings.Contains(text, expected) {
 						t.Fatalf("generated public Workspace UI Compose missing %q:\n%s", expected, text)
 					}

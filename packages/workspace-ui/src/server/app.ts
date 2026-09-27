@@ -23,6 +23,7 @@ export interface WorkspaceHandlerOptions {
   authRequired?: boolean;
   passwordHash?: string | undefined;
   passwordHashFile?: string | undefined;
+  sessionDatabasePath?: string | undefined;
   publicOrigin?: string | undefined;
   secureCookies?: boolean | undefined;
 }
@@ -175,6 +176,7 @@ export function createWorkspaceHandler(
     passwordHash: options.passwordHash,
     passwordHashFile: options.passwordHashFile,
     required: options.authRequired ?? false,
+    sessionDatabasePath: options.sessionDatabasePath,
     secureCookies: options.secureCookies,
   });
 

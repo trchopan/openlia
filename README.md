@@ -572,10 +572,12 @@ preview, local diffs, downloads, Git status, and revision-checked atomic saves.
 It does not expose runtime secrets, the Docker socket, or Hermes sessions.
 
 All-interface mode uses password sessions with `HttpOnly` and `SameSite=Strict`
-cookies. Private HTTP is supported for a trusted LAN or VPN, but it does not
-encrypt passwords, sessions, or workspace contents; use HTTPS through a reverse
-proxy when the network is not fully trusted. `/health` remains public for
-container health checks, while workspace APIs require authentication.
+cookies. Sessions are stored in a dedicated SQLite database under the runtime
+root, use a seven-day idle timeout, and expire after thirty days. Private HTTP
+is supported for a trusted LAN or VPN, but it does not encrypt passwords,
+sessions, or workspace contents; use HTTPS through a reverse proxy when the
+network is not fully trusted. `/health` remains public for container health
+checks, while workspace APIs require authentication.
 
 When a service is mapped to the `openlia-browser` role, OpenLia registers its
 Streamable HTTP MCP endpoint at `/mcp` directly with Hermes and disables Hermes'

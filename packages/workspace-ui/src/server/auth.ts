@@ -1,19 +1,25 @@
 import { Buffer } from "node:buffer";
 import { createHash, randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { Database } from "bun:sqlite";
 
 const sessionCookie = "openlia_workspace_session";
-const idleTimeoutMs = 30 * 60 * 1000;
-const absoluteTimeoutMs = 8 * 60 * 60 * 1000;
+const defaultIdleTimeoutMs = 7 * 24 * 60 * 60 * 1000;
+const defaultAbsoluteTimeoutMs = 30 * 24 * 60 * 60 * 1000;
 const attemptWindowMs = 60 * 1000;
 const blockDurationMs = 30 * 1000;
 const maxFailures = 5;
 const maxAttemptEntries = 10_000;
 const maxSessionEntries = 1_024;
 
-interface Session {
-  createdAt: number;
-  lastSeenAt: number;
+interface SessionRow {
+  created_at: number;
+  last_seen_at: number;
+}
+
+interface AuthStateRow {
+  verifier_hash: string;
 }
 
 interface Attempt {
@@ -27,6 +33,9 @@ export interface AuthenticatorOptions {
   passwordHash?: string | undefined;
   passwordHashFile?: string | undefined;
   secureCookies?: boolean | undefined;
+  sessionDatabasePath?: string | undefined;
+  idleTimeoutMs?: number | undefined;
+  absoluteTimeoutMs?: number | undefined;
 }
 
 export type LoginResult =
@@ -38,13 +47,23 @@ export class Authenticator {
   readonly required: boolean;
   readonly secureCookies: boolean;
   private readonly passwordHash: string;
-  private readonly sessions = new Map<string, Session>();
+  private readonly database: Database | undefined;
+  private readonly idleTimeoutMs: number;
+  private readonly absoluteTimeoutMs: number;
   private readonly attempts = new Map<string, Attempt>();
   private verificationInProgress = false;
 
   constructor(options: AuthenticatorOptions) {
     this.required = options.required;
     this.secureCookies = options.secureCookies ?? false;
+    this.idleTimeoutMs = positiveTimeout(
+      options.idleTimeoutMs ?? defaultIdleTimeoutMs,
+      "idle session timeout",
+    );
+    this.absoluteTimeoutMs = positiveTimeout(
+      options.absoluteTimeoutMs ?? defaultAbsoluteTimeoutMs,
+      "absolute session timeout",
+    );
     this.passwordHash =
       options.passwordHash ??
       (options.passwordHashFile
@@ -54,6 +73,30 @@ export class Authenticator {
       throw new Error(
         "workspace-ui password verifier is missing or unsupported",
       );
+    }
+    if (this.required) {
+      const databasePath = options.sessionDatabasePath ?? ":memory:";
+      if (databasePath !== ":memory:") {
+        mkdirSync(dirname(databasePath), { mode: 0o700, recursive: true });
+      }
+      this.database = new Database(databasePath);
+      if (databasePath !== ":memory:") chmodSync(databasePath, 0o600);
+      this.database.exec(`
+        PRAGMA busy_timeout = 5000;
+        PRAGMA journal_mode = WAL;
+        CREATE TABLE IF NOT EXISTS auth_state (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          verifier_hash TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sessions (
+          token_hash TEXT PRIMARY KEY,
+          created_at INTEGER NOT NULL,
+          last_seen_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS sessions_last_seen_idx
+          ON sessions(last_seen_at);
+      `);
+      this.reconcileVerifier();
     }
   }
 
@@ -67,21 +110,32 @@ export class Authenticator {
 
   isAuthenticated(request: Request): boolean {
     if (!this.required) return true;
-    this.pruneSessions(Date.now());
+    const database = this.database;
+    if (!database) return false;
+    const now = Date.now();
+    this.pruneSessions(now);
     const token = readCookie(request.headers.get("cookie"));
     if (!token) return false;
     const key = digestToken(token);
-    const session = this.sessions.get(key);
+    const row = database
+      .query(
+        "SELECT created_at, last_seen_at FROM sessions WHERE token_hash = ?",
+      )
+      .get(key) as SessionRow | null;
+    const session = row
+      ? { createdAt: row.created_at, lastSeenAt: row.last_seen_at }
+      : undefined;
     if (!session) return false;
-    const now = Date.now();
     if (
-      now - session.lastSeenAt > idleTimeoutMs ||
-      now - session.createdAt > absoluteTimeoutMs
+      now - session.lastSeenAt > this.idleTimeoutMs ||
+      now - session.createdAt > this.absoluteTimeoutMs
     ) {
-      this.sessions.delete(key);
+      database.query("DELETE FROM sessions WHERE token_hash = ?").run(key);
       return false;
     }
-    session.lastSeenAt = now;
+    database
+      .query("UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?")
+      .run(now, key);
     return true;
   }
 
@@ -120,20 +174,59 @@ export class Authenticator {
       };
     }
     this.attempts.delete(clientKey);
+    const database = this.database;
+    if (!database) return { kind: "invalid" };
     const token = randomBytes(32).toString("base64url");
-    if (this.sessions.size >= maxSessionEntries) {
-      const oldest = this.sessions.keys().next().value;
-      if (oldest) this.sessions.delete(oldest);
-    }
-    this.sessions.set(digestToken(token), { createdAt: now, lastSeenAt: now });
+    const tokenHash = digestToken(token);
     this.pruneSessions(now);
+    const count = database
+      .query("SELECT COUNT(*) AS count FROM sessions")
+      .get() as { count: number };
+    if (count.count >= maxSessionEntries) {
+      database
+        .query(
+          "DELETE FROM sessions WHERE token_hash = (SELECT token_hash FROM sessions ORDER BY created_at ASC LIMIT 1)",
+        )
+        .run();
+    }
+    database
+      .query(
+        "INSERT INTO sessions (token_hash, created_at, last_seen_at) VALUES (?, ?, ?)",
+      )
+      .run(tokenHash, now, now);
     return { kind: "ok", cookie: this.cookie(token, secureCookies) };
   }
 
   logout(request: Request, secureCookies = this.secureCookies): string {
     const token = readCookie(request.headers.get("cookie"));
-    if (token) this.sessions.delete(digestToken(token));
+    if (token)
+      this.database
+        ?.query("DELETE FROM sessions WHERE token_hash = ?")
+        .run(digestToken(token));
     return this.clearCookie(secureCookies);
+  }
+
+  private reconcileVerifier(): void {
+    const database = this.database;
+    if (!database) return;
+    const verifierHash = digestToken(this.passwordHash);
+    const current = database
+      .query("SELECT verifier_hash FROM auth_state WHERE id = 1")
+      .get() as AuthStateRow | null;
+    if (current?.verifier_hash === verifierHash) return;
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      database.query("DELETE FROM sessions").run();
+      database
+        .query(
+          "INSERT INTO auth_state (id, verifier_hash) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET verifier_hash = excluded.verifier_hash",
+        )
+        .run(verifierHash);
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   private recordFailure(clientKey: string, now: number): void {
@@ -152,24 +245,26 @@ export class Authenticator {
   }
 
   private pruneSessions(now: number): void {
-    for (const [key, session] of this.sessions) {
-      if (
-        now - session.lastSeenAt > idleTimeoutMs ||
-        now - session.createdAt > absoluteTimeoutMs
-      )
-        this.sessions.delete(key);
-    }
+    this.database
+      ?.query("DELETE FROM sessions WHERE last_seen_at < ? OR created_at < ?")
+      .run(now - this.idleTimeoutMs, now - this.absoluteTimeoutMs);
   }
 
   private cookie(token: string, secureCookies: boolean): string {
     const secure = secureCookies ? "; Secure" : "";
-    return `${sessionCookie}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${absoluteTimeoutMs / 1000}${secure}`;
+    return `${sessionCookie}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${this.absoluteTimeoutMs / 1000}${secure}`;
   }
 
   private clearCookie(secureCookies: boolean): string {
     const secure = secureCookies ? "; Secure" : "";
     return `${sessionCookie}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure}`;
   }
+}
+
+function positiveTimeout(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0)
+    throw new Error(`${label} must be a positive integer`);
+  return value;
 }
 
 function digestToken(token: string): string {

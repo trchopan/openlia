@@ -117,6 +117,15 @@ func GenerateAttachmentsContext(ctx context.Context, config Config, composers ..
 	if err := EnsureDir(config.MetaRoot, 0o700); err != nil {
 		return err
 	}
+	if config.WorkspaceUIAuthRequired {
+		sessionDir := filepath.Join(config.RuntimeRoot, "workspace-ui")
+		if err := EnsureDir(sessionDir, 0o700); err != nil {
+			return err
+		}
+		if err := ensureRuntimeOwner(sessionDir, config.RuntimeUID, config.RuntimeGID, 0o700); err != nil {
+			return err
+		}
+	}
 	if len(composers) > 0 {
 		return generateAttachmentsWithCompose(ctx, config, composers[0])
 	}
@@ -294,6 +303,7 @@ func generateAttachmentsFile(config Config) error {
 	if config.WorkspaceUIHost != "" {
 		workspace, _ := json.Marshal(filepath.Join(config.DataRoot, "workspace"))
 		skills, _ := json.Marshal(filepath.Join(config.DataRoot, "skills"))
+		sessionDir, _ := json.Marshal(filepath.Join(config.RuntimeRoot, "workspace-ui"))
 		passwordHashFile, _ := json.Marshal(config.WorkspaceUIPasswordHashFile)
 		builder.WriteString("  workspace-ui:\n    image: \"${OPENLIA_WORKSPACE_UI_IMAGE:-openlia-workspace-ui:v0.1.0}\"\n")
 		builder.WriteString("    build:\n      context: ..\n      dockerfile: docker/workspace-ui.Dockerfile\n")
@@ -303,7 +313,7 @@ func generateAttachmentsFile(config Config) error {
 		builder.Write(quotedPublicOrigin)
 		builder.WriteString("\n")
 		if config.WorkspaceUIAuthRequired {
-			builder.WriteString("      OPENLIA_WORKSPACE_UI_AUTH_REQUIRED: \"true\"\n      OPENLIA_WORKSPACE_UI_PASSWORD_HASH_FILE: /run/openlia-secrets/workspace-ui-password.hash\n")
+			builder.WriteString("      OPENLIA_WORKSPACE_UI_AUTH_REQUIRED: \"true\"\n      OPENLIA_WORKSPACE_UI_PASSWORD_HASH_FILE: /run/openlia-secrets/workspace-ui-password.hash\n      OPENLIA_WORKSPACE_UI_SESSION_DB: /var/lib/openlia/sessions.sqlite\n")
 		}
 		builder.WriteString("    volumes:\n      - type: bind\n        source: ")
 		builder.Write(workspace)
@@ -314,6 +324,9 @@ func generateAttachmentsFile(config Config) error {
 			builder.WriteString("\n      - type: bind\n        source: ")
 			builder.Write(passwordHashFile)
 			builder.WriteString("\n        target: /run/openlia-secrets/workspace-ui-password.hash\n        read_only: true")
+			builder.WriteString("\n      - type: bind\n        source: ")
+			builder.Write(sessionDir)
+			builder.WriteString("\n        target: /var/lib/openlia")
 		}
 		builder.WriteString(fmt.Sprintf("\n    ports:\n      - %q\n    networks:\n      - openlia-private\n    healthcheck:\n      test: [\"CMD\", \"bun\", \"-e\", \"fetch('http://127.0.0.1:%d/health').then(r => { if (!r.ok) process.exit(1) })\"]\n      interval: 10s\n      timeout: 3s\n      retries: 5\n    deploy:\n      resources:\n        limits:\n          cpus: \"0.5\"\n          memory: 256M\n    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n", fmt.Sprintf("%s:%d:%d", workspaceUIHost, workspaceUIPort, workspaceUIPort), workspaceUIPort))
 	}
