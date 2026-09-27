@@ -1,7 +1,20 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { describe, expect, test } from "vitest";
 import type { WorkspaceTreeEntry } from "../shared/api";
-import { ChatgptPreview, FileNavigator, MarkdownPreview } from "./components";
+import {
+  ChatgptPreview,
+  CopyLinkButton,
+  DocumentPane,
+  FileNavigator,
+  MarkdownPreview,
+  WorkspaceHeader,
+} from "./components";
 
 describe("workspace presentation components", () => {
   test("renders safe GFM structures semantically", () => {
@@ -183,5 +196,159 @@ references:
     );
 
     expect(screen.getByRole("button", { name: "projects" })).toBeDisabled();
+  });
+});
+
+describe("CopyLinkButton and document copy integration", () => {
+  test("renders copy button and updates label to Copied! on click", async () => {
+    let copiedText = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          copiedText = text;
+        },
+      },
+    });
+
+    render(<CopyLinkButton link="openlia://workspace/tasks.md" />);
+    const button = screen.getByRole("button", {
+      name: /copy openlia link/i,
+    });
+    expect(button).toBeInTheDocument();
+
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(copiedText).toBe("openlia://workspace/tasks.md");
+      expect(screen.getByText("Copied!")).toBeInTheDocument();
+    });
+  });
+
+  test("WorkspaceHeader renders copy link button when currentLink is provided", async () => {
+    let copied = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          copied = text;
+        },
+      },
+    });
+
+    render(
+      <WorkspaceHeader
+        authRequired={false}
+        currentLink="openlia://workspace/tasks.md"
+        dirty={false}
+        file={{
+          content: "hello",
+          editable: true,
+          modified_at: "2026-09-22T00:00:00.000Z",
+          path: "tasks.md",
+          revision: "rev1",
+          schema: 1,
+          size: 5,
+        }}
+        filesButtonRef={{ current: null }}
+        git={null}
+        onOpenFiles={() => undefined}
+        onSignOut={() => undefined}
+      />,
+    );
+
+    const copyBtn = screen.getByRole("button", {
+      name: "Copy link: openlia://workspace/tasks.md",
+    });
+    expect(copyBtn).toBeInTheDocument();
+    fireEvent.click(copyBtn);
+    expect(copied).toBe("openlia://workspace/tasks.md");
+  });
+
+  test("DocumentPane renders copy link button in toolbar", async () => {
+    let copied = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          copied = text;
+        },
+      },
+    });
+
+    render(
+      <DocumentPane
+        conflict=""
+        diff={[]}
+        documentError=""
+        draft="hello"
+        file={{
+          content: "hello",
+          editable: true,
+          modified_at: "2026-09-22T00:00:00.000Z",
+          path: "tasks.md",
+          revision: "rev1",
+          schema: 1,
+          size: 5,
+        }}
+        fileLoading={false}
+        onCloseFiles={() => undefined}
+        onDownload={() => undefined}
+        onDraftChange={() => undefined}
+        onOpenDetails={() => undefined}
+        onRetry={() => undefined}
+        onSave={() => undefined}
+        onViewChange={() => undefined}
+        saving={false}
+        view="preview"
+      />,
+    );
+
+    const copyBtn = screen.getByRole("button", {
+      name: "Copy link (openlia://workspace/tasks.md)",
+    });
+    expect(copyBtn).toBeInTheDocument();
+    fireEvent.click(copyBtn);
+    expect(copied).toBe("openlia://workspace/tasks.md");
+  });
+
+  test("DocumentPane renders Reveal in Tree button and fires callback", () => {
+    let revealed = false;
+    render(
+      <DocumentPane
+        conflict=""
+        diff={[]}
+        documentError=""
+        draft="hello"
+        file={{
+          content: "hello",
+          editable: true,
+          modified_at: "2026-09-22T00:00:00.000Z",
+          path: "tasks.md",
+          revision: "rev1",
+          schema: 1,
+          size: 5,
+        }}
+        fileLoading={false}
+        onCloseFiles={() => undefined}
+        onDownload={() => undefined}
+        onDraftChange={() => undefined}
+        onOpenDetails={() => undefined}
+        onRevealInTree={() => {
+          revealed = true;
+        }}
+        onRetry={() => undefined}
+        onSave={() => undefined}
+        onViewChange={() => undefined}
+        saving={false}
+        view="preview"
+      />,
+    );
+
+    const revealBtn = screen.getByRole("button", {
+      name: "Reveal in tree",
+    });
+    expect(revealBtn).toBeInTheDocument();
+    fireEvent.click(revealBtn);
+    expect(revealed).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
 import type { WorkspaceView } from "./components";
+import { parseSkillRemainder } from "./openliaLinks";
 
 export type MainTab = "documents" | "skills";
 
@@ -42,8 +43,24 @@ export function parseRoute(
   let path: string | undefined;
   let skill: string | undefined;
   let tab: MainTab | undefined;
+  let parsedSkillFile: string | undefined;
 
-  if (pathname.startsWith("/files/")) {
+  if (url.protocol === "openlia:") {
+    const host = url.host.toLowerCase();
+    const raw = pathname.replace(/^\/+/, "");
+    if (host === "workspace") {
+      if (raw) path = safeDecodeURIComponent(raw);
+      tab = "documents";
+    } else if (host === "skills") {
+      if (raw) {
+        const decoded = safeDecodeURIComponent(raw);
+        const parsed = parseSkillRemainder(decoded);
+        skill = parsed.skillId || undefined;
+        parsedSkillFile = parsed.skillFile;
+      }
+      tab = "skills";
+    }
+  } else if (pathname.startsWith("/files/")) {
     const raw = pathname.slice("/files/".length);
     if (raw) path = safeDecodeURIComponent(raw);
     tab = "documents";
@@ -78,7 +95,7 @@ export function parseRoute(
   }
 
   const skillFileParam = url.searchParams.get("skillFile");
-  const skillFile = skillFileParam ? skillFileParam.trim() : undefined;
+  const skillFile = skillFileParam ? skillFileParam.trim() : parsedSkillFile;
 
   if (!path) {
     const fallbackPath =

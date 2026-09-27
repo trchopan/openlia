@@ -185,6 +185,26 @@ textarea {
   color: var(--color-primary-content);
 }
 
+.workspace-tree-file-highlight {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+  animation: workspace-tree-pulse 2s ease-out;
+}
+
+@keyframes workspace-tree-pulse {
+  0% {
+    box-shadow: 0 0 0 0
+      color-mix(in oklab, var(--color-primary) 60%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px
+      color-mix(in oklab, var(--color-primary) 20%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
 .workspace-split-pane {
   display: grid;
   min-height: 0;

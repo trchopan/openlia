@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode, RefObject } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { FrontmatterBlock } from "./FrontmatterBlock";
 import { parseMarkdownFrontmatter } from "./frontmatter";
@@ -15,6 +15,7 @@ import type {
   WorkspaceGitStatus,
   WorkspaceTreeEntry,
 } from "../shared/api";
+import { buildWorkspaceLink, copyToClipboard } from "./openliaLinks";
 
 export type WorkspaceView = "edit" | "preview" | "info";
 
@@ -107,26 +108,124 @@ function StatusBadge({
   return <span className={`badge badge-${tone} gap-1.5`}>{children}</span>;
 }
 
+export function CopyLinkButton({
+  link,
+  label = "Copy Link",
+  copiedLabel = "Copied!",
+  className = "btn btn-outline btn-sm gap-1.5",
+  title = "Copy openlia link to clipboard",
+  iconOnly = false,
+  size = "sm",
+  onClick,
+}: {
+  link: string;
+  label?: string | undefined;
+  copiedLabel?: string | undefined;
+  className?: string | undefined;
+  title?: string | undefined;
+  iconOnly?: boolean | undefined;
+  size?: "xs" | "sm" | undefined;
+  onClick?: (() => void) | undefined;
+}) {
+  const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const ok = await copyToClipboard(link);
+    if (ok) {
+      setCopied(true);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      timeoutRef.current = setTimeout(() => {
+        setCopied(false);
+      }, 2000);
+    }
+    onClick?.();
+  };
+
+  return (
+    <button
+      aria-label={copied ? "Link copied to clipboard" : title}
+      className={`${className} ${size === "xs" ? "btn-xs" : ""}`}
+      onClick={handleCopy}
+      title={copied ? "Copied!" : title}
+      type="button"
+    >
+      {copied ? (
+        <svg
+          className={
+            size === "xs" ? "h-3 w-3 text-success" : "h-3.5 w-3.5 text-success"
+          }
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          viewBox="0 0 24 24"
+        >
+          <title>Checkmark icon</title>
+          <path
+            d="M5 13l4 4L19 7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ) : (
+        <svg
+          className={
+            size === "xs" ? "h-3 w-3 opacity-70" : "h-3.5 w-3.5 opacity-70"
+          }
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          viewBox="0 0 24 24"
+        >
+          <title>Copy link icon</title>
+          <path
+            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+      {!iconOnly && <span>{copied ? copiedLabel : label}</span>}
+    </button>
+  );
+}
+
 export function WorkspaceHeader({
   activeTab = "documents",
   authRequired,
+  currentLink,
   dirty,
   filesButtonRef,
   file,
   git,
   onOpenFiles,
+  onOpenGoTo,
   onSignOut,
   onTabChange,
 }: {
-  activeTab?: "documents" | "skills";
+  activeTab?: "documents" | "skills" | undefined;
   authRequired: boolean;
+  currentLink?: string | undefined;
   dirty: boolean;
   filesButtonRef: RefObject<HTMLButtonElement | null>;
   file: WorkspaceFile | null;
   git: WorkspaceGitStatus | null;
   onOpenFiles: () => void;
+  onOpenGoTo?: (() => void) | undefined;
   onSignOut: () => void;
-  onTabChange?: (tab: "documents" | "skills") => void;
+  onTabChange?: ((tab: "documents" | "skills") => void) | undefined;
 }) {
   const gitText = git?.configured
     ? `${git.branch ?? "Git"}${git.dirty ? " / changes" : " / clean"}`
@@ -174,10 +273,21 @@ export function WorkspaceHeader({
         <p className="workspace-eyebrow">
           OPENLIA / {activeTab === "skills" ? "SKILLS" : "WORKSPACE"}
         </p>
-        <h1 className="workspace-title" title={file?.path}>
-          {file?.path.split("/").at(-1) ??
-            (activeTab === "skills" ? "Skills" : "Workspace")}
-        </h1>
+        <div className="flex items-center gap-1.5">
+          <h1 className="workspace-title" title={file?.path}>
+            {file?.path.split("/").at(-1) ??
+              (activeTab === "skills" ? "Skills" : "Workspace")}
+          </h1>
+          {currentLink && (
+            <CopyLinkButton
+              className="btn btn-ghost btn-xs btn-square text-base-content/60 hover:text-base-content"
+              iconOnly
+              link={currentLink}
+              size="xs"
+              title={`Copy link: ${currentLink}`}
+            />
+          )}
+        </div>
         {file?.path?.includes("/") && (
           <p className="workspace-path" title={file.path}>
             {file.path}
@@ -185,6 +295,34 @@ export function WorkspaceHeader({
         )}
       </div>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        {onOpenGoTo && (
+          <button
+            aria-label="Go to document or skill (Cmd+P or Ctrl+P)"
+            className="btn btn-ghost btn-sm gap-1.5 text-base-content/80 hover:text-base-content"
+            onClick={onOpenGoTo}
+            title="Go To (Cmd+P or Ctrl+P)"
+            type="button"
+          >
+            <svg
+              className="h-3.5 w-3.5 opacity-70"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              viewBox="0 0 24 24"
+            >
+              <title>Search icon</title>
+              <path
+                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span className="hidden sm:inline">Go To</span>
+            <kbd className="kbd kbd-xs hidden md:inline-flex bg-base-200/80 text-[10px]">
+              ⌘P
+            </kbd>
+          </button>
+        )}
         <StatusBadge tone={dirty ? "warning" : "success"}>
           {dirty ? "Unsaved" : file ? "Saved" : "Ready"}
         </StatusBadge>
@@ -214,6 +352,7 @@ export function FileNavigator({
   onFilterChange,
   onOpenFile,
   onRetry,
+  revealToken = 0,
   selectedPath,
   truncated,
   workspaceError,
@@ -226,16 +365,19 @@ export function FileNavigator({
   onFilterChange: (value: string) => void;
   onOpenFile: (path: string) => void;
   onRetry: () => void;
+  revealToken?: number | undefined;
   selectedPath: string | undefined;
   truncated: boolean;
   workspaceError: string;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [highlightedPath, setHighlightedPath] = useState<string | null>(null);
   const nodes = useMemo(() => buildTree(entries), [entries]);
   const initializedTree = useRef(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef(onClose);
   const filesHeadingId = useId();
+  const fileButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   closeRef.current = onClose;
 
@@ -263,6 +405,37 @@ export function FileNavigator({
       return next;
     });
   }, [selectedPath]);
+
+  useEffect(() => {
+    if (!revealToken || !selectedPath) return;
+    const parts = selectedPath.split("/");
+    const ancestors = parts
+      .slice(0, -1)
+      .map((_, index) => parts.slice(0, index + 1).join("/"));
+    setCollapsed((current) => {
+      const next = new Set(current);
+      for (const ancestor of ancestors) next.delete(ancestor);
+      return next;
+    });
+
+    setHighlightedPath(selectedPath);
+    const timer = setTimeout(() => {
+      setHighlightedPath(null);
+    }, 2000);
+
+    const raf = requestAnimationFrame(() => {
+      const el = fileButtonRefs.current.get(selectedPath);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.focus({ preventScroll: true });
+      }
+    });
+
+    return () => {
+      clearTimeout(timer);
+      cancelAnimationFrame(raf);
+    };
+  }, [revealToken, selectedPath]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -347,8 +520,15 @@ export function FileNavigator({
                 </>
               ) : (
                 <button
+                  ref={(el) => {
+                    if (el) {
+                      fileButtonRefs.current.set(node.path, el);
+                    } else {
+                      fileButtonRefs.current.delete(node.path);
+                    }
+                  }}
                   aria-current={selectedPath === node.path ? "page" : undefined}
-                  className={`workspace-tree-row workspace-tree-file ${selectedPath === node.path ? "workspace-tree-file-selected" : ""}`}
+                  className={`workspace-tree-row workspace-tree-file ${selectedPath === node.path ? "workspace-tree-file-selected" : ""} ${highlightedPath === node.path ? "workspace-tree-file-highlight" : ""}`}
                   onClick={() => onOpenFile(node.path)}
                   style={{ paddingInlineStart: `${depth * 12 + 28}px` }}
                   title={node.path}
@@ -480,22 +660,68 @@ export function FileNavigator({
   );
 }
 
-const markdownComponents = {
-  a: ({ children, ...props }: ComponentProps<"a">) => (
-    <a {...props} rel="noreferrer noopener" target="_blank">
-      {children}
-    </a>
-  ),
-  input: ({ checked, ...props }: ComponentProps<"input">) => (
-    <input {...props} checked={checked} disabled type="checkbox" />
-  ),
-};
+export function transformMarkdownUrl(url: string): string {
+  if (url.startsWith("openlia://") || url.startsWith("/")) {
+    return url;
+  }
+  return defaultUrlTransform(url);
+}
 
-export function MarkdownPreview({ content }: { content: string }) {
+export function MarkdownPreview({
+  content,
+  onNavigateLink,
+}: {
+  content: string;
+  onNavigateLink?: ((href: string) => void) | undefined;
+}) {
   const { frontmatter, rawYaml, body } = useMemo(
     () => parseMarkdownFrontmatter(content),
     [content],
   );
+
+  const customComponents = useMemo(() => {
+    return {
+      a: ({ children, href, onClick, ...props }: ComponentProps<"a">) => {
+        const isInternal =
+          href &&
+          (href.startsWith("openlia://") ||
+            href.startsWith("/files/") ||
+            href.startsWith("/skills/"));
+
+        if (isInternal && onNavigateLink) {
+          return (
+            <a
+              {...props}
+              href={href}
+              onClick={(e) => {
+                e.preventDefault();
+                onClick?.(e);
+                onNavigateLink(href);
+              }}
+              title={props.title || "Open in Workspace UI"}
+            >
+              {children}
+            </a>
+          );
+        }
+
+        return (
+          <a
+            {...props}
+            href={href}
+            onClick={onClick}
+            rel="noreferrer noopener"
+            target="_blank"
+          >
+            {children}
+          </a>
+        );
+      },
+      input: ({ checked, ...props }: ComponentProps<"input">) => (
+        <input {...props} checked={checked} disabled type="checkbox" />
+      ),
+    };
+  }, [onNavigateLink]);
 
   if (!content)
     return (
@@ -510,8 +736,9 @@ export function MarkdownPreview({ content }: { content: string }) {
         <FrontmatterBlock data={frontmatter} rawYaml={rawYaml} />
       )}
       <ReactMarkdown
-        components={markdownComponents}
+        components={customComponents}
         remarkPlugins={[remarkGfm]}
+        urlTransform={transformMarkdownUrl}
       >
         {body}
       </ReactMarkdown>
@@ -605,7 +832,13 @@ function RawChatPreview({ content }: { content: string }) {
   );
 }
 
-export function ChatgptPreview({ content }: { content: string }) {
+export function ChatgptPreview({
+  content,
+  onNavigateLink,
+}: {
+  content: string;
+  onNavigateLink?: ((href: string) => void) | undefined;
+}) {
   const chat = parseChatgptExport(content);
   if (!chat) return <RawChatPreview content={content} />;
   return (
@@ -621,7 +854,10 @@ export function ChatgptPreview({ content }: { content: string }) {
             key={`${message.turn ?? "message"}-${message.role}-${message.content.slice(0, 80)}`}
           >
             <div className="workspace-chat-message-label">{message.role}</div>
-            <MarkdownPreview content={presentationContent(message.content)} />
+            <MarkdownPreview
+              content={presentationContent(message.content)}
+              onNavigateLink={onNavigateLink}
+            />
           </section>
         ))}
       </div>
@@ -686,6 +922,21 @@ export function DocumentInspector({
               </dt>
               <dd className="mt-1 font-medium">
                 {new Date(file.modified_at).toLocaleString()}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-base-content/50">
+                Workspace Link
+              </dt>
+              <dd className="mt-1 flex items-center justify-between gap-2 break-all font-mono text-xs text-base-content/80">
+                <span>{buildWorkspaceLink(file.path)}</span>
+                <CopyLinkButton
+                  className="btn btn-ghost btn-xs btn-square shrink-0 text-base-content/60 hover:text-base-content"
+                  iconOnly
+                  link={buildWorkspaceLink(file.path)}
+                  size="xs"
+                  title={`Copy ${buildWorkspaceLink(file.path)}`}
+                />
               </dd>
             </div>
           </dl>
@@ -774,11 +1025,13 @@ export function DocumentPane({
   onDownload,
   onDraftChange,
   onOpenDetails,
+  onRevealInTree,
   onRetry,
   onSave,
   saving,
   view,
   onViewChange,
+  onNavigateLink,
 }: {
   conflict: string;
   detailsOpen?: boolean;
@@ -791,11 +1044,13 @@ export function DocumentPane({
   onDownload: () => void;
   onDraftChange: (value: string) => void;
   onOpenDetails: () => void;
+  onRevealInTree?: (() => void) | undefined;
   onRetry: () => void;
   onSave: () => void;
   saving: boolean;
   view: WorkspaceView;
   onViewChange: (view: WorkspaceView) => void;
+  onNavigateLink?: ((href: string) => void) | undefined;
 }) {
   const dirty = file !== null && file.content !== draft;
   const canEdit = Boolean(file?.editable);
@@ -807,9 +1062,18 @@ export function DocumentPane({
         <>
           <div className="workspace-document-toolbar">
             <div className="min-w-0 flex-1">
-              <p className="workspace-document-name" title={file.path}>
-                {file.path}
-              </p>
+              <div className="flex items-center gap-1.5">
+                <p className="workspace-document-name" title={file.path}>
+                  {file.path}
+                </p>
+                <CopyLinkButton
+                  className="btn btn-ghost btn-xs btn-square text-base-content/60 hover:text-base-content"
+                  iconOnly
+                  link={buildWorkspaceLink(file.path)}
+                  size="xs"
+                  title={`Copy link: ${buildWorkspaceLink(file.path)}`}
+                />
+              </div>
               {!canEdit && (
                 <p className="text-xs text-warning">
                   {isChatExport ? "Read-only chat export" : "Read only"}
@@ -852,6 +1116,36 @@ export function DocumentPane({
             )}
             {/* Desktop actions */}
             <div className="hidden sm:flex shrink-0 items-center gap-2">
+              {onRevealInTree && (
+                <button
+                  aria-label="Reveal in tree"
+                  className="btn btn-outline btn-sm gap-1.5"
+                  onClick={onRevealInTree}
+                  title="Reveal in tree"
+                  type="button"
+                >
+                  <svg
+                    className="h-3.5 w-3.5 opacity-70"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    viewBox="0 0 24 24"
+                  >
+                    <title>Tree target icon</title>
+                    <path
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  <span>Reveal in Tree</span>
+                </button>
+              )}
+              <CopyLinkButton
+                className="btn btn-outline btn-sm gap-1.5"
+                link={buildWorkspaceLink(file.path)}
+                title={`Copy link (${buildWorkspaceLink(file.path)})`}
+              />
               <button
                 className="btn btn-outline btn-sm"
                 onClick={onDownload}
@@ -889,6 +1183,23 @@ export function DocumentPane({
                   </svg>
                 </button>
                 <ul className="dropdown-content menu z-30 rounded-box border border-base-content/10 bg-base-100 p-1 shadow-lg text-xs w-36">
+                  {onRevealInTree && (
+                    <li>
+                      <button onClick={onRevealInTree} type="button">
+                        Reveal in Tree
+                      </button>
+                    </li>
+                  )}
+                  <li>
+                    <button
+                      onClick={() =>
+                        void copyToClipboard(buildWorkspaceLink(file.path))
+                      }
+                      type="button"
+                    >
+                      Copy Link
+                    </button>
+                  </li>
                   <li>
                     <button onClick={onOpenDetails} type="button">
                       {detailsOpen ? "Hide Details" : "Show Details"}
@@ -914,9 +1225,7 @@ export function DocumentPane({
                 <p className="font-semibold">
                   This file changed after you opened it.
                 </p>
-                <p className="text-sm">
-                  Your draft is safe. Review it before saving again.
-                </p>
+                <p className="text-sm">{conflict}</p>
               </div>
             </div>
           )}
@@ -940,7 +1249,7 @@ export function DocumentPane({
               className="workspace-preview-pane"
             >
               <div className="workspace-pane-label">Conversation</div>
-              <ChatgptPreview content={draft} />
+              <ChatgptPreview content={draft} onNavigateLink={onNavigateLink} />
             </section>
           ) : view === "edit" ? (
             <EditorPane
@@ -952,7 +1261,10 @@ export function DocumentPane({
           ) : (
             <section aria-label="Preview" className="workspace-preview-pane">
               <div className="workspace-pane-label">Preview</div>
-              <MarkdownPreview content={draft} />
+              <MarkdownPreview
+                content={draft}
+                onNavigateLink={onNavigateLink}
+              />
             </section>
           )}
         </>

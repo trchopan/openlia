@@ -201,6 +201,93 @@ describe("SkillDetailPane", () => {
     fireEvent.click(saveBtn);
     expect(handleSave).toHaveBeenCalled();
   });
+
+  it("copies skill link when header copy button is clicked", async () => {
+    let copiedText = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          copiedText = text;
+        },
+      },
+    });
+
+    render(
+      <SkillDetailPane
+        activeSubTab="instructions"
+        draftContent="# Notion"
+        isSaving={false}
+        onDraftChange={vi.fn()}
+        onResetFile={vi.fn()}
+        onSaveFile={vi.fn()}
+        onSelectFile={vi.fn()}
+        onSubTabChange={vi.fn()}
+        onToggleEnable={vi.fn()}
+        onTogglePin={vi.fn()}
+        onViewChange={vi.fn()}
+        selectedFile={null}
+        skill={sampleDetail}
+        view="preview"
+      />,
+    );
+
+    const copyBtn = screen.getByRole("button", {
+      name: "Copy link (openlia://skills/productivity/notion)",
+    });
+    expect(copyBtn).toBeDefined();
+    fireEvent.click(copyBtn);
+    expect(copiedText).toBe("openlia://skills/productivity/notion");
+  });
+
+  it("copies skill file link when file copy button is clicked in files tab", async () => {
+    let copiedText = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          copiedText = text;
+        },
+      },
+    });
+
+    render(
+      <SkillDetailPane
+        activeSubTab="files"
+        draftContent="echo 'hello'"
+        isSaving={false}
+        onDraftChange={vi.fn()}
+        onResetFile={vi.fn()}
+        onSaveFile={vi.fn()}
+        onSelectFile={vi.fn()}
+        onSubTabChange={vi.fn()}
+        onToggleEnable={vi.fn()}
+        onTogglePin={vi.fn()}
+        onViewChange={vi.fn()}
+        selectedFile={{
+          content: "echo 'hello'",
+          editable: true,
+          id: sampleDetail.id,
+          modified_at: "2026-09-22T00:00:00.000Z",
+          path: "scripts/run.sh",
+          revision: "rev1",
+          schema: 1,
+          size: 12,
+        }}
+        skill={sampleDetail}
+        view="edit"
+      />,
+    );
+
+    const copyFileBtn = screen.getByRole("button", {
+      name: "Copy link (openlia://skills/productivity/notion/scripts/run.sh)",
+    });
+    expect(copyFileBtn).toBeDefined();
+    fireEvent.click(copyFileBtn);
+    expect(copiedText).toBe(
+      "openlia://skills/productivity/notion/scripts/run.sh",
+    );
+  });
 });
 
 describe("CreateSkillModal", () => {

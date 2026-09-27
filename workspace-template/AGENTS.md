@@ -37,6 +37,13 @@ records and preserve them unless the user explicitly asks for a change.
 - Keep generated reports separate from source notes and label their source.
 - Never place credentials, OAuth files, private keys, or raw service exports here.
 
+## Workspace and skill links
+
+When referencing or providing links to workspace documents, notes, or skills in user-facing responses:
+- Use `openlia://workspace/<path>` for files and directories in the workspace (e.g. `openlia://workspace/goals/career.md` or `openlia://workspace/projects/website.md`).
+- Use `openlia://skills/<path>` for skills or skill files (e.g. `openlia://skills/inbox-triage` or `openlia://skills/weekly-review/SKILL.md`).
+This allows the user to open the referenced documents directly in the Workspace UI.
+
 ## Approval boundary
 
 Reading and analysis are safe defaults. Creating or changing a workspace record

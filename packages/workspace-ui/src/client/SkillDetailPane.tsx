@@ -3,8 +3,13 @@ import type {
   SkillFileEntry,
   SkillFileResponse,
 } from "../shared/api";
-import { MarkdownPreview, type WorkspaceView } from "./components";
+import {
+  CopyLinkButton,
+  MarkdownPreview,
+  type WorkspaceView,
+} from "./components";
 import { CodeEditor } from "./CodeEditor";
+import { buildSkillLink } from "./openliaLinks";
 
 export type SkillSubTab = "instructions" | "files" | "overview";
 
@@ -25,6 +30,7 @@ export interface SkillDetailPaneProps {
   onViewChange: (view: WorkspaceView) => void;
   error?: string;
   onDismissError?: () => void;
+  onNavigateLink?: (href: string) => void;
 }
 
 export function SkillDetailPane({
@@ -44,6 +50,7 @@ export function SkillDetailPane({
   onViewChange,
   error,
   onDismissError,
+  onNavigateLink,
 }: SkillDetailPaneProps) {
   const isDirty =
     selectedFile !== null && selectedFile.content !== draftContent;
@@ -93,6 +100,12 @@ export function SkillDetailPane({
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            <CopyLinkButton
+              className="btn btn-outline btn-sm gap-1.5"
+              link={buildSkillLink(skill.id)}
+              title={`Copy link (${buildSkillLink(skill.id)})`}
+            />
+
             <button
               aria-label={skill.pinned ? "Unpin skill" : "Pin skill"}
               className={`btn btn-circle btn-sm ${
@@ -247,7 +260,10 @@ export function SkillDetailPane({
                 </div>
               ) : (
                 <div className="h-full w-full overflow-y-auto p-6">
-                  <MarkdownPreview content={draftContent} />
+                  <MarkdownPreview
+                    content={draftContent}
+                    onNavigateLink={onNavigateLink}
+                  />
                 </div>
               )}
             </div>
@@ -293,6 +309,13 @@ export function SkillDetailPane({
                   <div className="flex items-center justify-between border-b border-base-content/10 px-4 py-2 text-xs">
                     <div className="flex items-center gap-2">
                       <span className="font-mono">{selectedFile.path}</span>
+                      <CopyLinkButton
+                        className="btn btn-ghost btn-xs btn-square text-base-content/60 hover:text-base-content"
+                        iconOnly
+                        link={buildSkillLink(skill.id, selectedFile.path)}
+                        size="xs"
+                        title={`Copy link: ${buildSkillLink(skill.id, selectedFile.path)}`}
+                      />
                       {isDirty && (
                         <span className="badge badge-warning badge-xs">
                           Unsaved
@@ -300,6 +323,12 @@ export function SkillDetailPane({
                       )}
                     </div>
                     <div className="flex items-center gap-2">
+                      <CopyLinkButton
+                        className="btn btn-outline btn-xs gap-1"
+                        link={buildSkillLink(skill.id, selectedFile.path)}
+                        size="xs"
+                        title={`Copy link (${buildSkillLink(skill.id, selectedFile.path)})`}
+                      />
                       {isDirty && (
                         <button
                           className="btn btn-ghost btn-xs"
@@ -457,6 +486,21 @@ export function SkillDetailPane({
                 </div>
               </div>
             )}
+
+            {/* Skill Link Card */}
+            <div className="card border border-base-content/10 bg-base-100 p-4 shadow-sm">
+              <h3 className="text-sm font-semibold text-base-content/70">
+                Skill Link
+              </h3>
+              <div className="mt-2 flex items-center justify-between gap-2 rounded bg-base-200/50 p-2 text-xs font-mono">
+                <span className="truncate">{buildSkillLink(skill.id)}</span>
+                <CopyLinkButton
+                  className="btn btn-outline btn-xs gap-1 shrink-0"
+                  link={buildSkillLink(skill.id)}
+                  size="xs"
+                />
+              </div>
+            </div>
           </div>
         )}
       </div>

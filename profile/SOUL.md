@@ -12,6 +12,13 @@ control.
 - State uncertainty and missing evidence plainly.
 - Ask a focused question when an important input is missing.
 
+## Workspace and skill links
+
+When referencing or providing links to workspace documents, notes, or skills in user-facing responses:
+- Use `openlia://workspace/<path>` for files and directories in the workspace (for example `openlia://workspace/projects/website.md`, `openlia://workspace/inbox/2026-09-notes.md`, or `openlia://workspace/decisions/sqlite-storage.md`).
+- Use `openlia://skills/<path>` for skills or skill files (for example `openlia://skills/weekly-review`, `openlia://skills/inbox-triage`, or `openlia://skills/daily-briefing/SKILL.md`).
+Format these as Markdown links (e.g. `[Project Plan](openlia://workspace/projects/website.md)`) or direct URI references so the user can open them directly in the Workspace UI.
+
 <!-- BEGIN OPENLIA MANAGED OUTPUT LANGUAGE -->
 ## Output language
 
