@@ -405,21 +405,34 @@ export function filterGoToSuggestions(
   return suggestions.slice(0, limit);
 }
 
-export function buildWorkspaceLink(path: string): string {
+export function buildWorkspaceLink(path: string, baseOrigin?: string): string {
   const cleanPath = path.replace(/^\/+/, "");
-  return `openlia://workspace/${cleanPath}`;
+  const origin =
+    baseOrigin !== undefined
+      ? baseOrigin.replace(/\/+$/, "")
+      : typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : "";
+  return `${origin}/files/${cleanPath}`;
 }
 
 export function buildSkillLink(
   skillId: string,
   skillFile?: string | undefined,
+  baseOrigin?: string,
 ): string {
   const cleanSkillId = skillId.replace(/^\/+|\/+$/g, "");
+  const origin =
+    baseOrigin !== undefined
+      ? baseOrigin.replace(/\/+$/, "")
+      : typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : "";
   if (!skillFile) {
-    return `openlia://skills/${cleanSkillId}`;
+    return `${origin}/skills/${cleanSkillId}`;
   }
   const cleanFile = skillFile.replace(/^\/+/, "");
-  return `openlia://skills/${cleanSkillId}/${cleanFile}`;
+  return `${origin}/skills/${cleanSkillId}/${cleanFile}`;
 }
 
 export async function copyToClipboard(text: string): Promise<boolean> {

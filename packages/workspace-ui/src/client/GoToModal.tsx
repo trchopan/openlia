@@ -151,7 +151,7 @@ export function GoToModal({
                 setSelectedIndex(-1);
               }}
               onKeyDown={handleKeyDown}
-              placeholder="Paste openlia:// link, or type file/skill name..."
+              placeholder="Paste link or path, or type file/skill name..."
               ref={inputRef}
               spellCheck={false}
               type="text"

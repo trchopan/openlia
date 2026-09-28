@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { SkillDetail, SkillSummary } from "../shared/api";
 import { CreateSkillModal } from "./CreateSkillModal";
+import { buildSkillLink } from "./openliaLinks";
 import { SkillDetailPane } from "./SkillDetailPane";
 import { SkillsNavigator } from "./SkillsNavigator";
 
@@ -232,12 +233,13 @@ describe("SkillDetailPane", () => {
       />,
     );
 
+    const expectedSkillLink = buildSkillLink(sampleDetail.id);
     const copyBtn = screen.getByRole("button", {
-      name: "Copy link (openlia://skills/productivity/notion)",
+      name: `Copy link (${expectedSkillLink})`,
     });
     expect(copyBtn).toBeDefined();
     fireEvent.click(copyBtn);
-    expect(copiedText).toBe("openlia://skills/productivity/notion");
+    expect(copiedText).toBe(expectedSkillLink);
   });
 
   it("copies skill file link when file copy button is clicked in files tab", async () => {
@@ -279,14 +281,13 @@ describe("SkillDetailPane", () => {
       />,
     );
 
+    const expectedFileLink = buildSkillLink(sampleDetail.id, "scripts/run.sh");
     const copyFileBtn = screen.getByRole("button", {
-      name: "Copy link (openlia://skills/productivity/notion/scripts/run.sh)",
+      name: `Copy link (${expectedFileLink})`,
     });
     expect(copyFileBtn).toBeDefined();
     fireEvent.click(copyFileBtn);
-    expect(copiedText).toBe(
-      "openlia://skills/productivity/notion/scripts/run.sh",
-    );
+    expect(copiedText).toBe(expectedFileLink);
   });
 });
 

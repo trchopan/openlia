@@ -268,7 +268,7 @@ func generateAttachmentsFile(config Config) error {
 	}
 
 	var builder strings.Builder
-	hasHermesEnv := config.APIEnabled || config.OpenWebUIHost != "" || config.ExternalNetwork != "" || browserURL != "" || len(allServices) > 0
+	hasHermesEnv := config.APIEnabled || config.OpenWebUIHost != "" || config.ExternalNetwork != "" || browserURL != "" || config.WorkspaceUIPublicOrigin != "" || len(allServices) > 0
 	hasGeneratedServices := hasHermesEnv || config.WorkspaceUIHost != "" || config.OpenWebUIHost != "" || len(hosts.Hosts) > 0
 	if !hasGeneratedServices {
 		builder.WriteString("services: {}\n")
@@ -282,6 +282,9 @@ func generateAttachmentsFile(config Config) error {
 			builder.WriteString("    environment:\n")
 			if config.APIEnabled || config.OpenWebUIHost != "" {
 				builder.WriteString("      API_SERVER_ENABLED: \"true\"\n      API_SERVER_HOST: \"0.0.0.0\"\n")
+			}
+			if config.WorkspaceUIPublicOrigin != "" {
+				fmt.Fprintf(&builder, "      OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN: %q\n", config.WorkspaceUIPublicOrigin)
 			}
 			if browserURL != "" {
 				fmt.Fprintf(&builder, "      OPENLIA_BROWSER_MCP_URL: %q\n", browserURL)

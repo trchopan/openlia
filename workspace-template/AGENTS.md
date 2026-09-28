@@ -40,9 +40,10 @@ records and preserve them unless the user explicitly asks for a change.
 ## Workspace and skill links
 
 When referencing or providing links to workspace documents, notes, or skills in user-facing responses:
-- Use `openlia://workspace/<path>` for files and directories in the workspace (e.g. `openlia://workspace/goals/career.md` or `openlia://workspace/projects/website.md`).
-- Use `openlia://skills/<path>` for skills or skill files (e.g. `openlia://skills/inbox-triage` or `openlia://skills/weekly-review/SKILL.md`).
-This allows the user to open the referenced documents directly in the Workspace UI.
+- Format links as standard web URLs so they are directly clickable in chat applications (such as Telegram, Open WebUI, and desktop/mobile browsers).
+- Workspace documents: `[Label](<origin>/files/<path>)` (e.g. `[Career Goal](https://workspace.example.com/files/goals/career.md)` or `[Career Goal](/files/goals/career.md)`).
+- Skills: `[Label](<origin>/skills/<skill-id>)` (e.g. `[Inbox Triage](https://workspace.example.com/skills/inbox-triage)`).
+- Prepend the public origin (`OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN`) when configured, or use root-relative paths (`/files/<path>` and `/skills/<path>`). Do not use custom non-standard schemes like `openlia://`.
 
 ## Approval boundary
 
