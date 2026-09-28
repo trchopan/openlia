@@ -20,6 +20,7 @@ import {
   resolveLinkTarget,
 } from "./openliaLinks";
 import {
+  DeleteFileDialog,
   DirtyDraftDialog,
   DocumentInspector,
   DocumentPane,
@@ -204,6 +205,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   const [loading, setLoading] = useState(true);
   const [fileLoading, setFileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [workspaceError, setWorkspaceError] = useState("");
   const [documentError, setDocumentError] = useState("");
   const [conflict, setConflict] = useState("");
@@ -246,6 +248,11 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     () => initialRoute.current.view ?? defaultView(),
   );
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const [pendingDelete, setPendingDelete] = useState<{
+    dirty: boolean;
+    path: string;
+    revision: string;
+  } | null>(null);
   const fileRequestSequence = useRef(0);
   const skillRequestSequence = useRef(0);
   const initialPathOpened = useRef(false);
@@ -403,8 +410,26 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
                 );
               }
             }
-          } catch {
-            // Ignore loadFile errors during background sync
+          } catch (caught) {
+            if (caught instanceof ApiError && caught.status === 404) {
+              if (!docDirty) {
+                setFile(null);
+                setDraft("");
+                setConflict("");
+                setDocumentError("This document was deleted elsewhere.");
+                navigateRoute(
+                  {
+                    filter: appStateRef.current.filter || undefined,
+                    tab: "documents",
+                  },
+                  { replace: true },
+                );
+              } else {
+                setConflict(
+                  "This file was deleted elsewhere. Your unsaved draft is preserved.",
+                );
+              }
+            }
           }
         }
       }
@@ -661,6 +686,15 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     else void performSignOut();
   }
 
+  function requestDelete() {
+    if (!file || deleting) return;
+    setPendingDelete({
+      dirty: docDirty,
+      path: file.path,
+      revision: file.revision,
+    });
+  }
+
   function requestTabChange(nextTab: MainTab) {
     if (nextTab === activeTab) return;
     if (dirty) {
@@ -846,6 +880,69 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       return false;
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function deleteFile(): Promise<void> {
+    const pending = pendingDelete;
+    if (!pending || deleting) return;
+    setDeleting(true);
+    setDocumentError("");
+    setConflict("");
+    try {
+      await api.deleteFile(pending.path, pending.revision);
+      setPendingDelete(null);
+      if (file?.path === pending.path) {
+        setFile(null);
+        setDraft("");
+        setConflict("");
+        setDocumentError("");
+        setDetailsOpen(false);
+        setView(defaultView());
+        const currentRoute =
+          typeof window !== "undefined" ? parseRoute(window.location) : {};
+        navigateRoute(
+          {
+            filter: filter || undefined,
+            scenario: currentRoute.scenario,
+            tab: "documents",
+          },
+          { replace: true },
+        );
+      }
+      const [treeResponse, nextGit] = await Promise.all([
+        api.loadTree().catch(() => null),
+        api.loadGitStatus().catch(() => null),
+      ]);
+      if (treeResponse) {
+        setTree(treeResponse.entries);
+        setTreeTruncated(treeResponse.truncated);
+      }
+      if (nextGit) setGit(nextGit);
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        setPendingDelete(null);
+        handleUnauthorized();
+      } else if (caught instanceof ApiError && caught.status === 404) {
+        setPendingDelete(null);
+        setFile(null);
+        setDraft("");
+        setConflict("");
+        setDocumentError("This document no longer exists.");
+        const treeResponse = await api.loadTree().catch(() => null);
+        if (treeResponse) {
+          setTree(treeResponse.entries);
+          setTreeTruncated(treeResponse.truncated);
+        }
+        navigateRoute({ tab: "documents" }, { replace: true });
+      } else if (caught instanceof ApiError && caught.status === 409) {
+        setPendingDelete(null);
+        setConflict("The file changed elsewhere. Reload it before deleting.");
+      } else {
+        setDocumentError("The document could not be deleted. Try again.");
+      }
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -1142,6 +1239,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             file={file}
             fileLoading={fileLoading}
             onCloseFiles={() => setFilesOpen(true)}
+            onDelete={requestDelete}
             onDownload={() => {
               if (file) window.location.href = api.downloadUrl(file.path);
             }}
@@ -1158,6 +1256,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
               if (pathToRetry) void openFile(pathToRetry, { keepView: true });
             }}
             onSave={() => void save()}
+            deleting={deleting}
             onViewChange={handleViewChange}
             saving={saving}
             view={view}
@@ -1276,6 +1375,16 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           onDiscard={discardAndContinue}
           onSave={() => void saveAndContinue()}
           saving={saving || skillSaving}
+        />
+      )}
+
+      {pendingDelete && (
+        <DeleteFileDialog
+          deleting={deleting}
+          dirty={pendingDelete.dirty}
+          filePath={pendingDelete.path}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => void deleteFile()}
         />
       )}
 

@@ -27,6 +27,12 @@ export interface WorkspaceWriteResponse extends WorkspaceFileMetadata {
   revision: string;
 }
 
+export interface WorkspaceDeleteResponse {
+  schema: 1;
+  ok: true;
+  path: string;
+}
+
 export interface WorkspaceGitStatus {
   schema: 1;
   configured: boolean;
@@ -45,6 +51,11 @@ export interface WorkspaceErrorResponse {
 export interface WorkspaceWriteRequest {
   path: string;
   content: string;
+  expected_revision: string;
+}
+
+export interface WorkspaceDeleteRequest {
+  path: string;
   expected_revision: string;
 }
 

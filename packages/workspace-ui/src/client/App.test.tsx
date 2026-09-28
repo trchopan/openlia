@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
@@ -50,6 +51,53 @@ describe("workspace application", () => {
       "This file changed after you opened it.",
     );
     expect(editor).toHaveValue("draft");
+  });
+
+  test("confirms and deletes the selected document", async () => {
+    render(<App api={createMockWorkspaceApi()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete file" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      'permanently delete "notes.md"',
+    );
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Delete",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Choose a document to begin" }),
+      ).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    expect(screen.queryByRole("button", { name: "notes.md" })).toBeNull();
+    expect(window.location.pathname).toBe("/");
+  });
+
+  test("requires explicit discard before deleting a dirty document", async () => {
+    render(<App api={createMockWorkspaceApi()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("textbox", {
+      name: "Document editor",
+    });
+    fireEvent.change(editor, { target: { value: "unsaved" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete file" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      "Deleting it will discard the draft",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Discard and delete" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Choose a document to begin" }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByDisplayValue("unsaved")).toBeNull();
   });
 
   test("protects a dirty draft before switching documents", async () => {

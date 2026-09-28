@@ -19,6 +19,7 @@ import type {
   WorkspaceFile,
   WorkspaceGitStatus,
   WorkspaceTreeResponse,
+  WorkspaceDeleteResponse,
   WorkspaceWriteResponse,
 } from "../shared/api";
 
@@ -278,7 +279,12 @@ export class WorkspaceService {
         "file_too_large",
       );
     }
-    const contents = readFileSync(absolute);
+    let contents: Uint8Array;
+    try {
+      contents = readFileSync(absolute);
+    } catch (error) {
+      throw this.mapFilesystemError(error, "workspace file was not found");
+    }
     if (contents.includes(0)) {
       throw new WorkspaceError(
         "binary files are not editable",
@@ -419,6 +425,61 @@ export class WorkspaceService {
       revision: revision(contents),
       ...this.fileMetadata(absolute, path),
     };
+  }
+
+  delete(pathValue: unknown, expectedValue: unknown): WorkspaceDeleteResponse {
+    const path = validateRelativePath(pathValue);
+    const absolute = this.assertNoSymlink(path);
+    let info: Stats;
+    try {
+      info = lstatSync(absolute);
+    } catch (error) {
+      throw this.mapFilesystemError(error, "workspace file was not found");
+    }
+    if (!info.isFile())
+      throw new WorkspaceError(
+        "workspace path is not a regular file",
+        400,
+        "not_a_file",
+      );
+
+    let contents: Uint8Array;
+    try {
+      contents = readFileSync(absolute);
+    } catch (error) {
+      throw this.mapFilesystemError(error, "workspace file was not found");
+    }
+    const currentRevision = revision(contents);
+    if (
+      typeof expectedValue !== "string" ||
+      expectedValue !== currentRevision
+    ) {
+      throw new WorkspaceError(
+        "revision conflict",
+        409,
+        "revision_conflict",
+        currentRevision,
+      );
+    }
+
+    try {
+      const beforeDelete = readFileSync(absolute);
+      const beforeDeleteRevision = revision(beforeDelete);
+      if (beforeDeleteRevision !== currentRevision) {
+        throw new WorkspaceError(
+          "revision conflict",
+          409,
+          "revision_conflict",
+          beforeDeleteRevision,
+        );
+      }
+      unlinkSync(absolute);
+    } catch (error) {
+      if (error instanceof WorkspaceError) throw error;
+      throw this.mapFilesystemError(error, "workspace file was not found");
+    }
+
+    return { schema: 1, ok: true, path };
   }
 
   download(pathValue: unknown): {
