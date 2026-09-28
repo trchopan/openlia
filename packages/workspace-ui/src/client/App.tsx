@@ -4,6 +4,7 @@ import type {
   SkillFileEntry,
   SkillFileResponse,
   SkillSummary,
+  WorkspaceActivityResponse,
   WorkspaceFile,
   WorkspaceGitStatus,
   WorkspaceTreeEntry,
@@ -209,6 +210,10 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   const [workspaceError, setWorkspaceError] = useState("");
   const [documentError, setDocumentError] = useState("");
   const [conflict, setConflict] = useState("");
+  const [activity, setActivity] = useState<WorkspaceActivityResponse | null>(
+    null,
+  );
+  const [activityLoading, setActivityLoading] = useState(false);
 
   // Skills state
   const [skills, setSkills] = useState<SkillSummary[]>([]);
@@ -321,13 +326,17 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           return;
         }
 
-        const [treeResponse, gitResponse, skillsResponse] = await Promise.all([
-          api.loadTree(),
-          api.loadGitStatus().catch(() => null),
-          api
-            .loadSkills()
-            .catch(() => ({ categories: [], schema: 1 as const, skills: [] })),
-        ]);
+        const [treeResponse, gitResponse, skillsResponse, activityResponse] =
+          await Promise.all([
+            api.loadTree(),
+            api.loadGitStatus().catch(() => null),
+            api.loadSkills().catch(() => ({
+              categories: [],
+              schema: 1 as const,
+              skills: [],
+            })),
+            api.loadActivity().catch(() => null),
+          ]);
         if (isActive && !isActive()) return;
 
         setTree(treeResponse.entries);
@@ -335,6 +344,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         setGit(gitResponse);
         setSkills(skillsResponse.skills);
         setSkillCategories(skillsResponse.categories);
+        setActivity(activityResponse);
         setNeedsLogin(false);
         setAuthReady(true);
 
@@ -378,9 +388,10 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     try {
       const { activeTab, docDirty, file } = appStateRef.current;
       if (activeTab === "documents") {
-        const [treeRes, gitRes] = await Promise.all([
+        const [treeRes, gitRes, activityRes] = await Promise.all([
           api.loadTree().catch(() => null),
           api.loadGitStatus().catch(() => null),
+          api.loadActivity().catch(() => null),
         ]);
 
         if (treeRes) {
@@ -394,6 +405,10 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
         if (gitRes) {
           setGit((prev) => (areGitEqual(prev, gitRes) ? prev : gitRes));
+        }
+
+        if (activityRes) {
+          setActivity(activityRes);
         }
 
         if (file) {
@@ -613,18 +628,21 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       setPassword("");
       setNeedsLogin(false);
       setLoading(true);
-      const [treeResponse, gitResponse, skillsResponse] = await Promise.all([
-        api.loadTree(),
-        api.loadGitStatus().catch(() => null),
-        api
-          .loadSkills()
-          .catch(() => ({ categories: [], schema: 1 as const, skills: [] })),
-      ]);
+      const [treeResponse, gitResponse, skillsResponse, activityResponse] =
+        await Promise.all([
+          api.loadTree(),
+          api.loadGitStatus().catch(() => null),
+          api
+            .loadSkills()
+            .catch(() => ({ categories: [], schema: 1 as const, skills: [] })),
+          api.loadActivity().catch(() => null),
+        ]);
       setTree(treeResponse.entries);
       setTreeTruncated(treeResponse.truncated);
       setGit(gitResponse);
       setSkills(skillsResponse.skills);
       setSkillCategories(skillsResponse.categories);
+      setActivity(activityResponse);
       setWorkspaceError("");
 
       if (!initialPathOpened.current) {
@@ -761,6 +779,29 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   }
 
   function requestOpenFile(path: string) {
+    if (!path) {
+      if (!file) {
+        setFilesOpen(false);
+        return;
+      }
+      if (dirty) {
+        setPendingAction({ kind: "open", path: "" });
+      } else {
+        setFile(null);
+        setDraft("");
+        setConflict("");
+        setDocumentError("");
+        setFilesOpen(false);
+        const currentRoute =
+          typeof window !== "undefined" ? parseRoute(window.location) : {};
+        navigateRoute({
+          filter: filter || undefined,
+          scenario: currentRoute.scenario,
+          tab: "documents",
+        });
+      }
+      return;
+    }
     if (path === file?.path) {
       setFilesOpen(false);
       return;
@@ -861,11 +902,15 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     try {
       const response = await api.saveFile(file.path, draft, file.revision);
       setFile({ ...file, ...response, content: draft });
-      const treeResponse = await api.loadTree();
+      const [treeResponse, nextGit, nextActivity] = await Promise.all([
+        api.loadTree(),
+        api.loadGitStatus().catch(() => null),
+        api.loadActivity().catch(() => null),
+      ]);
       setTree(treeResponse.entries);
       setTreeTruncated(treeResponse.truncated);
-      const nextGit = await api.loadGitStatus().catch(() => null);
       if (nextGit) setGit(nextGit);
+      if (nextActivity) setActivity(nextActivity);
       return true;
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
@@ -910,15 +955,17 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           { replace: true },
         );
       }
-      const [treeResponse, nextGit] = await Promise.all([
+      const [treeResponse, nextGit, nextActivity] = await Promise.all([
         api.loadTree().catch(() => null),
         api.loadGitStatus().catch(() => null),
+        api.loadActivity().catch(() => null),
       ]);
       if (treeResponse) {
         setTree(treeResponse.entries);
         setTreeTruncated(treeResponse.truncated);
       }
       if (nextGit) setGit(nextGit);
+      if (nextActivity) setActivity(nextActivity);
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         setPendingDelete(null);
@@ -1224,6 +1271,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             }}
             onFilterChange={handleFilterChange}
             onOpenFile={requestOpenFile}
+            onOpenActivity={() => requestOpenFile("")}
             onRetry={() => void loadWorkspace()}
             revealToken={revealToken}
             selectedPath={file?.path}
@@ -1231,6 +1279,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             workspaceError={workspaceError}
           />
           <DocumentPane
+            activity={activity}
+            activityLoading={activityLoading}
             conflict={conflict}
             detailsOpen={detailsOpen}
             diff={diff}
@@ -1246,6 +1296,15 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             onDraftChange={setDraft}
             onNavigateLink={handleNavigateLink}
             onOpenDetails={openHeaderDetails}
+            onOpenFile={requestOpenFile}
+            onRefreshActivity={() => {
+              setActivityLoading(true);
+              api
+                .loadActivity()
+                .then((res) => setActivity(res))
+                .catch(() => {})
+                .finally(() => setActivityLoading(false));
+            }}
             onRevealInTree={file ? handleRevealInTree : undefined}
             onRetry={() => {
               const pathToRetry =

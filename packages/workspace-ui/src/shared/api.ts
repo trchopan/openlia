@@ -41,6 +41,34 @@ export interface WorkspaceGitStatus {
   status?: string;
 }
 
+export interface WorkspaceCommitChange {
+  path: string;
+  status: "added" | "modified" | "deleted" | "renamed";
+}
+
+export interface WorkspaceCommit {
+  hash: string;
+  shortHash: string;
+  author: string;
+  message: string;
+  timestamp: string;
+  files: WorkspaceCommitChange[];
+}
+
+export interface WorkspaceUncommittedChange {
+  path: string;
+  status: "added" | "modified" | "deleted" | "untracked";
+}
+
+export interface WorkspaceActivityResponse {
+  schema: 1;
+  gitConfigured: boolean;
+  branch?: string | undefined;
+  uncommitted: WorkspaceUncommittedChange[];
+  commits: WorkspaceCommit[];
+  recentFiles: WorkspaceFileMetadata[];
+}
+
 export interface WorkspaceErrorResponse {
   schema: 1;
   ok: false;

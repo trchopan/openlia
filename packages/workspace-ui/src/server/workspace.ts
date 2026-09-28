@@ -16,10 +16,15 @@ import {
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type {
+  WorkspaceActivityResponse,
+  WorkspaceCommit,
+  WorkspaceCommitChange,
+  WorkspaceDeleteResponse,
   WorkspaceFile,
+  WorkspaceFileMetadata,
   WorkspaceGitStatus,
   WorkspaceTreeResponse,
-  WorkspaceDeleteResponse,
+  WorkspaceUncommittedChange,
   WorkspaceWriteResponse,
 } from "../shared/api";
 
@@ -538,6 +543,138 @@ export class WorkspaceService {
       branch,
       dirty: lines.some((line) => /^\s*[MADRCU?!]/.test(line)),
     };
+  }
+
+  async activity(limit = 20): Promise<WorkspaceActivityResponse> {
+    const gitDir = join(this.workspaceRoot, ".git");
+    const gitConfigured = existsSync(gitDir);
+    let branch: string | undefined;
+    const uncommitted: WorkspaceUncommittedChange[] = [];
+    const commits: WorkspaceCommit[] = [];
+
+    if (gitConfigured) {
+      const statusResult = Bun.spawnSync(
+        ["git", "-C", this.workspaceRoot, "status", "--short", "--branch"],
+        {
+          stderr: "pipe",
+          stdout: "pipe",
+        },
+      );
+      if (statusResult.exitCode === 0) {
+        const statusOutput = new TextDecoder()
+          .decode(statusResult.stdout)
+          .trim();
+        const lines = statusOutput ? statusOutput.split("\n") : [];
+        if (lines[0]?.startsWith("##")) {
+          branch = lines[0]
+            .replace(/^##\s*/, "")
+            .split("...")[0]
+            ?.trim();
+        }
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i]?.trimEnd();
+          if (!line) continue;
+          const statusChar = line.slice(0, 2).trim();
+          const filePath = line
+            .slice(3)
+            .trim()
+            .replace(/^"(.*)"$/, "$1");
+          if (protectedPath(filePath) || hiddenFromNavigator(filePath))
+            continue;
+          let status: WorkspaceUncommittedChange["status"] = "modified";
+          if (statusChar === "??" || statusChar === "A") status = "added";
+          else if (statusChar === "D") status = "deleted";
+          else if (
+            statusChar === "M" ||
+            statusChar === "MM" ||
+            statusChar === "AM"
+          )
+            status = "modified";
+          else status = "untracked";
+          uncommitted.push({ path: filePath, status });
+        }
+      }
+
+      const logResult = Bun.spawnSync(
+        [
+          "git",
+          "-C",
+          this.workspaceRoot,
+          "log",
+          `-n${limit}`,
+          "--name-status",
+          "--format=openlia-commit:%H%x00%h%x00%an%x00%aI%x00%s",
+        ],
+        {
+          stderr: "pipe",
+          stdout: "pipe",
+        },
+      );
+      if (logResult.exitCode === 0) {
+        const logOutput = new TextDecoder().decode(logResult.stdout);
+        const rawBlocks = logOutput.split("openlia-commit:").filter(Boolean);
+        for (const block of rawBlocks) {
+          const lines = block.split("\n");
+          const header = lines[0];
+          if (!header) continue;
+          const [hash, shortHash, author, timestamp, message] =
+            header.split("\0");
+          if (!hash || !shortHash || !message || !timestamp) continue;
+          const files: WorkspaceCommitChange[] = [];
+          for (let j = 1; j < lines.length; j++) {
+            const line = lines[j]?.trim();
+            if (!line) continue;
+            const parts = line.split(/\t+/);
+            const statusType = parts[0]?.trim();
+            const filePath = (parts[1] || "").replace(/^"(.*)"$/, "$1");
+            if (!statusType || !filePath) continue;
+            if (protectedPath(filePath) || hiddenFromNavigator(filePath))
+              continue;
+            let fileStatus: WorkspaceCommitChange["status"] = "modified";
+            if (statusType.startsWith("A")) fileStatus = "added";
+            else if (statusType.startsWith("D")) fileStatus = "deleted";
+            else if (statusType.startsWith("R")) fileStatus = "renamed";
+            files.push({ path: filePath, status: fileStatus });
+          }
+          commits.push({
+            author: author || "Unknown",
+            files,
+            hash,
+            message,
+            shortHash,
+            timestamp,
+          });
+        }
+      }
+    }
+
+    const tree = this.tree();
+    const filesOnly: WorkspaceFileMetadata[] = [];
+    for (const entry of tree.entries) {
+      if (entry.kind === "file") {
+        filesOnly.push({
+          editable: entry.editable,
+          modified_at: entry.modified_at,
+          path: entry.path,
+          size: entry.size,
+        });
+      }
+    }
+    filesOnly.sort(
+      (a, b) =>
+        new Date(b.modified_at).getTime() - new Date(a.modified_at).getTime(),
+    );
+    const recentFiles = filesOnly.slice(0, limit);
+
+    const response: WorkspaceActivityResponse = {
+      commits,
+      gitConfigured,
+      recentFiles,
+      schema: 1,
+      uncommitted,
+    };
+    if (branch !== undefined) response.branch = branch;
+    return response;
   }
 
   private fileMetadata(path: string, relativePath: string) {

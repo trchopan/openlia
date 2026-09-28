@@ -10,7 +10,9 @@ import {
   presentationContent,
   type ChatExport,
 } from "./chatgpt";
+import { ActivitySection } from "./ActivitySection";
 import type {
+  WorkspaceActivityResponse,
   WorkspaceFile,
   WorkspaceGitStatus,
   WorkspaceTreeEntry,
@@ -271,12 +273,13 @@ export function WorkspaceHeader({
 
       <div className="min-w-0 flex-1">
         <p className="workspace-eyebrow">
-          OPENLIA / {activeTab === "skills" ? "SKILLS" : "WORKSPACE"}
+          OPENLIA /{" "}
+          {activeTab === "skills" ? "SKILLS" : file ? "WORKSPACE" : "ACTIVITY"}
         </p>
         <div className="flex items-center gap-1.5">
           <h1 className="workspace-title" title={file?.path}>
             {file?.path.split("/").at(-1) ??
-              (activeTab === "skills" ? "Skills" : "Workspace")}
+              (activeTab === "skills" ? "Skills" : "Activity")}
           </h1>
           {currentLink && (
             <CopyLinkButton
@@ -351,6 +354,7 @@ export function FileNavigator({
   onClose,
   onFilterChange,
   onOpenFile,
+  onOpenActivity,
   onRetry,
   revealToken = 0,
   selectedPath,
@@ -364,6 +368,7 @@ export function FileNavigator({
   onClose: () => void;
   onFilterChange: (value: string) => void;
   onOpenFile: (path: string) => void;
+  onOpenActivity?: (() => void) | undefined;
   onRetry: () => void;
   revealToken?: number | undefined;
   selectedPath: string | undefined;
@@ -652,7 +657,40 @@ export function FileNavigator({
               </p>
             </div>
           ) : (
-            <div className="mt-4">{renderNodes(nodes)}</div>
+            <div className="mt-4">
+              {!query && (
+                <div className="mb-2 border-b border-base-content/10 pb-2">
+                  <button
+                    aria-current={!selectedPath ? "page" : undefined}
+                    className={`workspace-tree-row workspace-tree-file ${
+                      !selectedPath ? "workspace-tree-file-selected" : ""
+                    }`}
+                    onClick={() => {
+                      if (onOpenActivity) onOpenActivity();
+                      else onOpenFile("");
+                    }}
+                    type="button"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      className="h-3.5 w-3.5 opacity-70 shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M13 10V3L4 14h7v7l9-11h-7z"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    <span className="font-semibold truncate">Activity</span>
+                  </button>
+                </div>
+              )}
+              {renderNodes(nodes)}
+            </div>
           )}
         </div>
       </aside>
@@ -1023,7 +1061,7 @@ export function DocumentPane({
   documentError,
   file,
   fileLoading,
-  onCloseFiles,
+  onCloseFiles: _onCloseFiles,
   onDelete,
   onDownload,
   onDraftChange,
@@ -1036,6 +1074,10 @@ export function DocumentPane({
   view,
   onViewChange,
   onNavigateLink,
+  activity,
+  activityLoading,
+  onOpenFile,
+  onRefreshActivity,
 }: {
   conflict: string;
   detailsOpen?: boolean;
@@ -1057,6 +1099,10 @@ export function DocumentPane({
   view: WorkspaceView;
   onViewChange: (view: WorkspaceView) => void;
   onNavigateLink?: ((href: string) => void) | undefined;
+  activity?: WorkspaceActivityResponse | null | undefined;
+  activityLoading?: boolean | undefined;
+  onOpenFile?: ((path: string) => void) | undefined;
+  onRefreshActivity?: (() => void) | undefined;
 }) {
   const dirty = file !== null && file.content !== draft;
   const canEdit = Boolean(file?.editable);
@@ -1292,41 +1338,28 @@ export function DocumentPane({
             </section>
           )}
         </>
-      ) : (
+      ) : documentError ? (
         <div className="workspace-empty-document">
-          {documentError ? (
-            <div className="max-w-md w-full p-4">
-              <div className="alert alert-error rounded-lg" role="alert">
-                <span>{documentError}</span>
-                <button
-                  className="btn btn-error btn-sm"
-                  onClick={onRetry}
-                  type="button"
-                >
-                  Retry
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="max-w-sm">
-              <p className="workspace-eyebrow">READY WHEN YOU ARE</p>
-              <h2 className="mt-2 text-2xl font-bold tracking-tight">
-                Choose a document to begin
-              </h2>
-              <p className="mt-3 text-sm leading-6 text-base-content/60">
-                Browse the workspace files, then edit and preview a document
-                side by side.
-              </p>
+          <div className="max-w-md w-full p-4">
+            <div className="alert alert-error rounded-lg" role="alert">
+              <span>{documentError}</span>
               <button
-                className="btn btn-primary mt-6 xl:hidden"
-                onClick={onCloseFiles}
+                className="btn btn-error btn-sm"
+                onClick={onRetry}
                 type="button"
               >
-                Browse files
+                Retry
               </button>
             </div>
-          )}
+          </div>
         </div>
+      ) : (
+        <ActivitySection
+          activity={activity ?? null}
+          loading={activityLoading ?? false}
+          onOpenFile={onOpenFile ?? (() => {})}
+          onRefresh={onRefreshActivity}
+        />
       )}
     </section>
   );

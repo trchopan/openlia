@@ -157,7 +157,7 @@ references:
     const treeButtons = within(navigator)
       .getAllByRole("button")
       .map((button) => button.textContent?.replace(/[▾▸]/, ""));
-    expect(treeButtons).toEqual(["Close", "alpha", "root.md"]);
+    expect(treeButtons).toEqual(["Close", "Activity", "alpha", "root.md"]);
     expect(screen.getByLabelText("zeta, empty folder")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "alpha" }));
