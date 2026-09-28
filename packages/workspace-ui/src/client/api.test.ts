@@ -71,4 +71,31 @@ describe("HTTP workspace API", () => {
       }),
     );
   });
+
+  test("sends deletes through the HTTP contract", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            path: "notes.md",
+            schema: 1,
+          }),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await httpWorkspaceApi.deleteFile("notes.md", "sha256:before");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workspace/file",
+      expect.objectContaining({
+        method: "DELETE",
+        body: JSON.stringify({
+          expected_revision: "sha256:before",
+          path: "notes.md",
+        }),
+      }),
+    );
+  });
 });

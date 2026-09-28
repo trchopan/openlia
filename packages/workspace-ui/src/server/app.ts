@@ -7,6 +7,7 @@ import type {
   SkillTogglePinRequest,
   SkillWriteRequest,
   WorkspaceErrorResponse,
+  WorkspaceDeleteRequest,
   WorkspaceWriteRequest,
 } from "../shared/api";
 import { Authenticator } from "./auth";
@@ -39,6 +40,7 @@ const contentTypes: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 const maxLoginRequestBytes = 16 * 1024;
+const maxDeleteRequestBytes = 8 * 1024;
 
 function securityHeaders(): Record<string, string> {
   return {
@@ -318,6 +320,32 @@ export function createWorkspaceHandler(
             writeRequest.content,
             writeRequest.expected_revision,
           ),
+        );
+      }
+      if (
+        request.method === "DELETE" &&
+        url.pathname === "/api/workspace/file"
+      ) {
+        if (!sameOrigin(request, url, publicOrigin))
+          return json(
+            { schema: 1, ok: false, error: "origin_not_allowed" },
+            403,
+          );
+        const bodyResult = await readJson(request, maxDeleteRequestBytes);
+        if (bodyResult.tooLarge)
+          return json(
+            { schema: 1, ok: false, error: "request_too_large" },
+            413,
+          );
+        const body: unknown = bodyResult.value;
+        if (!isObject(body))
+          return json(
+            { schema: 1, ok: false, error: "request_body_must_be_json" },
+            400,
+          );
+        const deleteRequest = body as Partial<WorkspaceDeleteRequest>;
+        return json(
+          service.delete(deleteRequest.path, deleteRequest.expected_revision),
         );
       }
       if (request.method === "GET" && url.pathname === "/api/skills/list") {

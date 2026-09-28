@@ -10,6 +10,7 @@ import type { WorkspaceTreeEntry } from "../shared/api";
 import {
   ChatgptPreview,
   CopyLinkButton,
+  DeleteFileDialog,
   DocumentPane,
   FileNavigator,
   MarkdownPreview,
@@ -296,11 +297,13 @@ describe("CopyLinkButton and document copy integration", () => {
         }}
         fileLoading={false}
         onCloseFiles={() => undefined}
+        onDelete={() => undefined}
         onDownload={() => undefined}
         onDraftChange={() => undefined}
         onOpenDetails={() => undefined}
         onRetry={() => undefined}
         onSave={() => undefined}
+        deleting={false}
         onViewChange={() => undefined}
         saving={false}
         view="preview"
@@ -334,6 +337,7 @@ describe("CopyLinkButton and document copy integration", () => {
         }}
         fileLoading={false}
         onCloseFiles={() => undefined}
+        onDelete={() => undefined}
         onDownload={() => undefined}
         onDraftChange={() => undefined}
         onOpenDetails={() => undefined}
@@ -342,6 +346,7 @@ describe("CopyLinkButton and document copy integration", () => {
         }}
         onRetry={() => undefined}
         onSave={() => undefined}
+        deleting={false}
         onViewChange={() => undefined}
         saving={false}
         view="preview"
@@ -354,5 +359,64 @@ describe("CopyLinkButton and document copy integration", () => {
     expect(revealBtn).toBeInTheDocument();
     fireEvent.click(revealBtn);
     expect(revealed).toBe(true);
+  });
+
+  test("DocumentPane renders a delete action and fires callback", () => {
+    let deleted = false;
+    render(
+      <DocumentPane
+        conflict=""
+        deleting={false}
+        diff={[]}
+        documentError=""
+        draft="hello"
+        file={{
+          content: "hello",
+          editable: true,
+          modified_at: "2026-09-22T00:00:00.000Z",
+          path: "tasks.md",
+          revision: "rev1",
+          schema: 1,
+          size: 5,
+        }}
+        fileLoading={false}
+        onCloseFiles={() => undefined}
+        onDelete={() => {
+          deleted = true;
+        }}
+        onDownload={() => undefined}
+        onDraftChange={() => undefined}
+        onOpenDetails={() => undefined}
+        onRetry={() => undefined}
+        onSave={() => undefined}
+        onViewChange={() => undefined}
+        saving={false}
+        view="preview"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete file" }));
+    expect(deleted).toBe(true);
+  });
+
+  test("DeleteFileDialog describes and confirms discarding a dirty draft", () => {
+    let confirmed = false;
+    render(
+      <DeleteFileDialog
+        deleting={false}
+        dirty
+        filePath="tasks.md"
+        onCancel={() => undefined}
+        onConfirm={() => {
+          confirmed = true;
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      "Deleting it will discard the draft",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Discard and delete" }));
+    expect(confirmed).toBe(true);
   });
 });

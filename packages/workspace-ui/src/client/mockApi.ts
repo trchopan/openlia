@@ -3,6 +3,7 @@ import type {
   AuthSessionResponse,
   SkillDetail,
   WorkspaceErrorResponse,
+  WorkspaceDeleteResponse,
   WorkspaceFile,
   WorkspaceFileMetadata,
   WorkspaceGitStatus,
@@ -58,7 +59,7 @@ export function createMockWorkspaceApi({
   let saveCount = 0;
   let authenticated = scenario !== "auth";
   let conflictPending = scenario === "conflict";
-  const entries: WorkspaceTreeEntry[] = [
+  let entries: WorkspaceTreeEntry[] = [
     { kind: "directory", path: "calendar" },
     {
       ...metadata(
@@ -325,6 +326,24 @@ export function createMockWorkspaceApi({
         schema: 1,
       };
       return response;
+    },
+    async deleteFile(
+      requestedPath,
+      expectedRevision,
+    ): Promise<WorkspaceDeleteResponse> {
+      requireAuthentication();
+      const currentContent = fileContents[requestedPath];
+      if (currentContent === undefined) throw error(404, "not_found");
+      const currentRevision = fileRevisions[requestedPath] ?? revision;
+      if (expectedRevision !== currentRevision) {
+        throw error(409, "revision_conflict", currentRevision);
+      }
+      delete fileContents[requestedPath];
+      delete fileRevisions[requestedPath];
+      entries = entries.filter(
+        (entry) => !(entry.kind === "file" && entry.path === requestedPath),
+      );
+      return { ok: true, path: requestedPath, schema: 1 };
     },
     async loadGitStatus(): Promise<WorkspaceGitStatus> {
       requireAuthentication();

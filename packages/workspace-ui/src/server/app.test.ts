@@ -185,6 +185,104 @@ describe("workspace HTTP handler", () => {
     });
   });
 
+  test("deletes a file, updates the tree, and rejects stale deletes", async () => {
+    const path = join(root, "note.md");
+    writeFileSync(path, "before");
+    const readResponse = await request("/api/workspace/file?path=note.md");
+    const document = (await readResponse.json()) as { revision: string };
+
+    const deleteBody = JSON.stringify({
+      expected_revision: document.revision,
+      path: "note.md",
+    });
+    const deleteResponse = await request("/api/workspace/file", {
+      body: deleteBody,
+      headers: { "Content-Type": "application/json" },
+      method: "DELETE",
+    });
+    expect(deleteResponse.status).toBe(200);
+    expect(await deleteResponse.json()).toEqual({
+      ok: true,
+      path: "note.md",
+      schema: 1,
+    });
+    expect(() => readFileSync(path)).toThrow();
+
+    const deletedTreeResponse = await request("/api/workspace/tree");
+    const deletedTree = (await deletedTreeResponse.json()) as {
+      entries: Array<{ path: string }>;
+    };
+    expect(deletedTree.entries.some((entry) => entry.path === "note.md")).toBe(
+      false,
+    );
+
+    writeFileSync(path, "changed");
+    const staleResponse = await request("/api/workspace/file", {
+      body: deleteBody,
+      headers: { "Content-Type": "application/json" },
+      method: "DELETE",
+    });
+    expect(staleResponse.status).toBe(409);
+    expect(await staleResponse.json()).toMatchObject({
+      error: "revision_conflict",
+    });
+  });
+
+  test("protects delete requests with authentication and same-origin checks", async () => {
+    writeFileSync(join(root, "note.md"), "before");
+    const body = JSON.stringify({
+      expected_revision: revision(new TextEncoder().encode("before")),
+      path: "note.md",
+    });
+
+    const originResponse = await request("/api/workspace/file", {
+      body,
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://untrusted.example",
+      },
+      method: "DELETE",
+    });
+    expect(originResponse.status).toBe(403);
+    expect(await originResponse.json()).toMatchObject({
+      error: "origin_not_allowed",
+    });
+
+    const protectedResponse = await request("/api/workspace/file", {
+      body: JSON.stringify({
+        expected_revision: revision(new TextEncoder().encode("secret")),
+        path: ".env",
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "DELETE",
+    });
+    expect(protectedResponse.status).toBe(403);
+
+    const authRoot = mkdtempSync(join(tmpdir(), "openlia-workspace-ui-auth-"));
+    try {
+      const passwordHash = await Bun.password.hash("test-password", {
+        algorithm: "argon2id",
+        memoryCost: 32 * 1024,
+        timeCost: 2,
+      });
+      const authHandler = createWorkspaceHandler({
+        authRequired: true,
+        passwordHash,
+        workspaceRoot: authRoot,
+      });
+      const authResponse = await authHandler(
+        new Request("http://localhost/api/workspace/file", {
+          body,
+          headers: { "Content-Type": "application/json" },
+          method: "DELETE",
+        }),
+      );
+      expect(authResponse.status).toBe(401);
+    } finally {
+      rmSync(authRoot, { force: true, recursive: true });
+    }
+  });
+
   test("rejects protected paths and cross-origin writes", async () => {
     const protectedResponse = await request("/api/workspace/file?path=.env");
     expect(protectedResponse.status).toBe(403);

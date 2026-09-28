@@ -8,6 +8,7 @@ import type {
   SkillSuccessResponse,
   SkillWriteResponse,
   WorkspaceErrorResponse,
+  WorkspaceDeleteResponse,
   WorkspaceFile,
   WorkspaceFileMetadata,
   WorkspaceGitStatus,
@@ -39,6 +40,10 @@ export interface WorkspaceApi {
     content: string,
     expectedRevision: string,
   ): Promise<WorkspaceWriteResponse>;
+  deleteFile(
+    path: string,
+    expectedRevision: string,
+  ): Promise<WorkspaceDeleteResponse>;
   loadGitStatus(): Promise<WorkspaceGitStatus>;
   downloadUrl(path: string): string;
 
@@ -168,6 +173,17 @@ function isWorkspaceWriteResponse(
   );
 }
 
+function isWorkspaceDeleteResponse(
+  value: unknown,
+): value is WorkspaceDeleteResponse {
+  return (
+    isObject(value) &&
+    value.schema === 1 &&
+    value.ok === true &&
+    typeof value.path === "string"
+  );
+}
+
 function isWorkspaceGitStatus(value: unknown): value is WorkspaceGitStatus {
   return (
     isObject(value) &&
@@ -263,6 +279,19 @@ export const httpWorkspaceApi: WorkspaceApi = {
         }),
         headers: { "Content-Type": "application/json" },
         method: "PUT",
+      },
+    ),
+  deleteFile: (path, expectedRevision) =>
+    requestJson<WorkspaceDeleteResponse>(
+      "/api/workspace/file",
+      isWorkspaceDeleteResponse,
+      {
+        body: JSON.stringify({
+          expected_revision: expectedRevision,
+          path,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "DELETE",
       },
     ),
   loadGitStatus: () =>
