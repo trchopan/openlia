@@ -98,4 +98,47 @@ describe("HTTP workspace API", () => {
       }),
     );
   });
+
+  test("loads and validates workspace activity through the HTTP contract", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            branch: "main",
+            commits: [
+              {
+                author: "Tester",
+                files: [{ path: "notes.md", status: "modified" }],
+                hash: "1234567890abcdef",
+                message: "update notes",
+                shortHash: "1234567",
+                timestamp: "2026-09-28T00:00:00.000Z",
+              },
+            ],
+            gitConfigured: true,
+            recentFiles: [
+              {
+                editable: true,
+                modified_at: "2026-09-28T00:00:00.000Z",
+                path: "notes.md",
+                size: 10,
+              },
+            ],
+            schema: 1,
+            uncommitted: [{ path: "draft.md", status: "added" }],
+          }),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const activity = await httpWorkspaceApi.loadActivity();
+    expect(activity.gitConfigured).toBe(true);
+    expect(activity.commits.length).toBe(1);
+    expect(activity.uncommitted.length).toBe(1);
+    expect(activity.recentFiles.length).toBe(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workspace/activity",
+      undefined,
+    );
+  });
 });

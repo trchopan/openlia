@@ -2,6 +2,7 @@ import type {
   AuthLoginResponse,
   AuthSessionResponse,
   SkillDetail,
+  WorkspaceActivityResponse,
   WorkspaceErrorResponse,
   WorkspaceDeleteResponse,
   WorkspaceFile,
@@ -352,6 +353,76 @@ export function createMockWorkspaceApi({
         configured: true,
         dirty: fileContents[path] !== "Hello",
         schema: 1,
+      };
+    },
+    async loadActivity(): Promise<WorkspaceActivityResponse> {
+      requireAuthentication();
+      if (scenario === "empty") {
+        return {
+          branch: "main",
+          commits: [],
+          gitConfigured: true,
+          recentFiles: [],
+          schema: 1,
+          uncommitted: [],
+        };
+      }
+      const isDirty = fileContents[path] !== "Hello";
+      const recentFiles: WorkspaceFileMetadata[] = entries
+        .filter(
+          (e): e is WorkspaceFileMetadata & { kind: "file" } =>
+            e.kind === "file",
+        )
+        .map((f) => ({
+          editable: f.editable,
+          modified_at: f.modified_at,
+          path: f.path,
+          size: f.size,
+        }))
+        .sort(
+          (a, b) =>
+            new Date(b.modified_at).getTime() -
+            new Date(a.modified_at).getTime(),
+        );
+
+      return {
+        branch: "main",
+        commits: [
+          {
+            author: "OpenLia Agent",
+            files: [
+              { path: "notes.md", status: "modified" },
+              { path: "tasks/task.md", status: "added" },
+            ],
+            hash: "a1b2c3d4e5f67890123456789abcdef012345678",
+            message: "chore: update daily notes and task plan",
+            shortHash: "a1b2c3d",
+            timestamp: "2026-09-24T18:30:00.000Z",
+          },
+          {
+            author: "OpenLia Agent",
+            files: [{ path: "projects/project.md", status: "modified" }],
+            hash: "f6e5d4c3b2a10987654321fedcba09876543210f",
+            message: "backup: project status milestone",
+            shortHash: "f6e5d4c",
+            timestamp: "2026-09-23T11:15:00.000Z",
+          },
+          {
+            author: "OpenLia Agent",
+            files: [
+              { path: "calendar/event.md", status: "added" },
+              { path: "notes.md", status: "added" },
+            ],
+            hash: "123456789abcdef0123456789abcdef012345678",
+            message: "chore: initialize OpenLia workspace",
+            shortHash: "1234567",
+            timestamp: "2026-09-22T00:00:00.000Z",
+          },
+        ],
+        gitConfigured: true,
+        recentFiles,
+        schema: 1,
+        uncommitted: isDirty ? [{ path, status: "modified" }] : [],
       };
     },
     downloadUrl(requestedPath) {

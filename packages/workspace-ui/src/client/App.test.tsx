@@ -14,6 +14,7 @@ import { buildWorkspaceLink } from "./openliaLinks";
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, "", "/");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -57,7 +58,7 @@ describe("workspace application", () => {
     render(<App api={createMockWorkspaceApi()} />);
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete file" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete file" }));
     expect(await screen.findByRole("dialog")).toHaveTextContent(
       'permanently delete "notes.md"',
     );
@@ -69,7 +70,7 @@ describe("workspace application", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole("heading", { name: "Choose a document to begin" }),
+        screen.getByRole("heading", { name: "Recent Changes" }),
       ).toBeInTheDocument(),
     );
     await waitFor(() => expect(window.location.pathname).toBe("/"));
@@ -94,7 +95,7 @@ describe("workspace application", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole("heading", { name: "Choose a document to begin" }),
+        screen.getByRole("heading", { name: "Recent Changes" }),
       ).toBeInTheDocument(),
     );
     expect(screen.queryByDisplayValue("unsaved")).toBeNull();
@@ -202,7 +203,7 @@ describe("workspace application", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole("heading", { name: "Choose a document to begin" }),
+        screen.getByRole("heading", { name: "Recent Changes" }),
       ).toBeInTheDocument(),
     );
   });
@@ -302,7 +303,8 @@ messages:
       },
     });
 
-    expect(screen.getByText("calendar/event.md")).toBeInTheDocument();
+    const modal = screen.getByRole("dialog");
+    expect(within(modal).getByText("calendar/event.md")).toBeInTheDocument();
 
     // Submit
     fireEvent.keyDown(input, { key: "Enter" });
@@ -521,5 +523,41 @@ messages:
       );
     });
     expect(editor).toHaveValue("My unsaved user edits");
+  });
+
+  test("renders the Activity section on initial page and allows opening files", async () => {
+    render(<App api={createMockWorkspaceApi()} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Recent Changes" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Git Commit History (3)")).toBeInTheDocument();
+    expect(
+      screen.getByText("Recently Modified Documents (4)"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("chore: update daily notes and task plan"),
+    ).toBeInTheDocument();
+
+    // Click on Open for tasks/task.md in the recently modified files list
+    const openButtons = screen.getAllByRole("button", { name: "Open" });
+    const firstOpenButton = openButtons[0];
+    expect(firstOpenButton).toBeDefined();
+    if (firstOpenButton) {
+      fireEvent.click(firstOpenButton);
+    }
+
+    // Document view should be opened
+    expect(
+      await screen.findByRole("article", { name: "Markdown preview" }),
+    ).toBeInTheDocument();
+
+    // Now click the Activity button in FileNavigator to return to Activity
+    const activityButton = screen.getByRole("button", { name: "Activity" });
+    fireEvent.click(activityButton);
+
+    expect(
+      await screen.findByRole("heading", { name: "Recent Changes" }),
+    ).toBeInTheDocument();
   });
 });

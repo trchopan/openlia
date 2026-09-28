@@ -7,6 +7,7 @@ import type {
   SkillsListResponse,
   SkillSuccessResponse,
   SkillWriteResponse,
+  WorkspaceActivityResponse,
   WorkspaceErrorResponse,
   WorkspaceDeleteResponse,
   WorkspaceFile,
@@ -45,6 +46,7 @@ export interface WorkspaceApi {
     expectedRevision: string,
   ): Promise<WorkspaceDeleteResponse>;
   loadGitStatus(): Promise<WorkspaceGitStatus>;
+  loadActivity(): Promise<WorkspaceActivityResponse>;
   downloadUrl(path: string): string;
 
   loadSkills(): Promise<SkillsListResponse>;
@@ -195,6 +197,20 @@ function isWorkspaceGitStatus(value: unknown): value is WorkspaceGitStatus {
   );
 }
 
+function isWorkspaceActivityResponse(
+  value: unknown,
+): value is WorkspaceActivityResponse {
+  return (
+    isObject(value) &&
+    value.schema === 1 &&
+    typeof value.gitConfigured === "boolean" &&
+    (value.branch === undefined || typeof value.branch === "string") &&
+    Array.isArray(value.uncommitted) &&
+    Array.isArray(value.commits) &&
+    Array.isArray(value.recentFiles)
+  );
+}
+
 function isSkillsListResponse(value: unknown): value is SkillsListResponse {
   return (
     isObject(value) &&
@@ -298,6 +314,11 @@ export const httpWorkspaceApi: WorkspaceApi = {
     requestJson<WorkspaceGitStatus>(
       "/api/workspace/git/status",
       isWorkspaceGitStatus,
+    ),
+  loadActivity: () =>
+    requestJson<WorkspaceActivityResponse>(
+      "/api/workspace/activity",
+      isWorkspaceActivityResponse,
     ),
   downloadUrl: (path) =>
     `/api/workspace/download?${new URLSearchParams({ path })}`,

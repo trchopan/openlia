@@ -292,6 +292,16 @@ export function createWorkspaceHandler(
       ) {
         return json(await service.gitStatus());
       }
+      if (
+        request.method === "GET" &&
+        url.pathname === "/api/workspace/activity"
+      ) {
+        const limitParam = url.searchParams.get("limit");
+        const limit = limitParam
+          ? Math.max(1, Math.min(100, Number(limitParam) || 20))
+          : 20;
+        return json(await service.activity(limit));
+      }
       if (request.method === "PUT" && url.pathname === "/api/workspace/file") {
         if (!sameOrigin(request, url, publicOrigin))
           return json(
