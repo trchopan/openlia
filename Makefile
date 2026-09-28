@@ -97,7 +97,7 @@ clean-logs:
 	rm -rf .playwright-mcp/ /tmp/openlia_verify/
 
 deploy-dev: skills-test
-	OPENLIA_CONFIG=$$HOME/.config/openlia/dev/openlia_dev.toml ./openlia deploy
+	OPENLIA_CONFIG=$$HOME/.config/openlia/dev/config.toml ./openlia deploy
 
 deploy-prod: skills-test
 	OPENLIA_CONFIG=$$HOME/.config/openlia/config.toml ./openlia update openlia
