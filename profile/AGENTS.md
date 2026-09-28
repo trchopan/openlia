@@ -22,8 +22,10 @@ installation may contain only starter data.
 - Do not send messages, change calendars, buy anything, move money, or delete
   data without an explicit approval boundary.
 - When referencing or linking to workspace documents or skills in user communications,
-  use `openlia://workspace/<path>` for workspace files and `openlia://skills/<path>`
-  for skills or skill files so they can be opened directly in the Workspace UI.
+  format them as standard web URLs (`<origin>/files/<path>` and `<origin>/skills/<path>`)
+  using `OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN` when configured, or root-relative paths
+  (`/files/<path>` and `/skills/<path>`), so they can be opened directly across chat
+  clients and browsers without using non-standard URI schemes like `openlia://`.
 
 Credentials belong in Hermes' runtime secret source or environment, never in
 this profile, the workspace template, prompts, helper input, or reports.

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
 import type { WorkspaceApi } from "./api";
 import { createMockWorkspaceApi } from "./mockApi";
+import { buildWorkspaceLink } from "./openliaLinks";
 
 afterEach(() => {
   cleanup();
@@ -242,13 +243,15 @@ messages:
     fireEvent.click(goToButton);
 
     const input = await screen.findByPlaceholderText(
-      "Paste openlia:// link, or type file/skill name...",
+      "Paste link or path, or type file/skill name...",
     );
     expect(input).toBeInTheDocument();
 
-    // Paste openlia link
+    // Paste web link
     fireEvent.change(input, {
-      target: { value: "openlia://workspace/calendar/event.md" },
+      target: {
+        value: "https://workspace.example.com/files/calendar/event.md",
+      },
     });
 
     expect(screen.getByText("calendar/event.md")).toBeInTheDocument();
@@ -270,7 +273,7 @@ messages:
 
     expect(
       await screen.findByPlaceholderText(
-        "Paste openlia:// link, or type file/skill name...",
+        "Paste link or path, or type file/skill name...",
       ),
     ).toBeInTheDocument();
   });
@@ -287,10 +290,10 @@ messages:
     // Open Go To modal and paste link
     fireEvent.keyDown(window, { key: "p", metaKey: true });
     const input = await screen.findByPlaceholderText(
-      "Paste openlia:// link, or type file/skill name...",
+      "Paste link or path, or type file/skill name...",
     );
     fireEvent.change(input, {
-      target: { value: "openlia://workspace/calendar/event.md" },
+      target: { value: "/files/calendar/event.md" },
     });
     fireEvent.keyDown(input, { key: "Enter" });
 
@@ -300,7 +303,7 @@ messages:
     );
   });
 
-  test("navigates in-app when clicking openlia:// link in markdown preview", async () => {
+  test("navigates in-app when clicking link in markdown preview", async () => {
     window.history.replaceState(null, "", "/");
     const baseApi = createMockWorkspaceApi();
     const customApi: WorkspaceApi = {
@@ -310,7 +313,7 @@ messages:
           const original = await baseApi.loadFile(requestedPath);
           return {
             ...original,
-            content: "[Check Calendar](openlia://workspace/calendar/event.md)",
+            content: "[Check Calendar](/files/calendar/event.md)",
           };
         }
         return baseApi.loadFile(requestedPath);
@@ -323,10 +326,7 @@ messages:
 
     // Click the markdown link in preview
     const link = await screen.findByRole("link", { name: "Check Calendar" });
-    expect(link).toHaveAttribute(
-      "href",
-      "openlia://workspace/calendar/event.md",
-    );
+    expect(link).toHaveAttribute("href", "/files/calendar/event.md");
     fireEvent.click(link);
 
     // Should navigate to calendar/event.md without opening a new tab
@@ -350,14 +350,15 @@ messages:
     render(<App api={createMockWorkspaceApi()} />);
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
 
+    const expectedLink = buildWorkspaceLink("notes.md");
     // Document toolbar should have the Copy Link button
     const copyButton = await screen.findByRole("button", {
-      name: "Copy link (openlia://workspace/notes.md)",
+      name: `Copy link (${expectedLink})`,
     });
     expect(copyButton).toBeInTheDocument();
 
     fireEvent.click(copyButton);
-    expect(copiedText).toBe("openlia://workspace/notes.md");
+    expect(copiedText).toBe(expectedLink);
   });
 
   test("clicking Reveal in Tree clears filter and focuses the file", async () => {

@@ -15,9 +15,11 @@ control.
 ## Workspace and skill links
 
 When referencing or providing links to workspace documents, notes, or skills in user-facing responses:
-- Use `openlia://workspace/<path>` for files and directories in the workspace (for example `openlia://workspace/projects/website.md`, `openlia://workspace/inbox/2026-09-notes.md`, or `openlia://workspace/decisions/sqlite-storage.md`).
-- Use `openlia://skills/<path>` for skills or skill files (for example `openlia://skills/weekly-review`, `openlia://skills/inbox-triage`, or `openlia://skills/daily-briefing/SKILL.md`).
-Format these as Markdown links (e.g. `[Project Plan](openlia://workspace/projects/website.md)`) or direct URI references so the user can open them directly in the Workspace UI.
+- Format links as standard web URLs so they can be clicked directly in chat applications (such as Telegram, Open WebUI, and desktop/mobile browsers).
+- Workspace documents: `[Label](<origin>/files/<path>)` (for example, `[Project Plan](https://workspace.example.com/files/projects/website.md)` or `[Inbox Notes](/files/inbox/2026-09-notes.md)`).
+- Skills: `[Label](<origin>/skills/<skill-id>)` or `[Label](<origin>/skills/<skill-id>/<file>)` (for example, `[Weekly Review](https://workspace.example.com/skills/weekly-review)`).
+- If the public web origin is configured (via `OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN` or known from runtime context), prepend it to the link path (e.g. `https://workspace.example.com/files/<path>`). If no public origin is available, use the root-relative path `/files/<path>` or `/skills/<path>`.
+- Do not use custom non-standard URI schemes like `openlia://` because external chat apps and mobile devices cannot open them.
 
 <!-- BEGIN OPENLIA MANAGED OUTPUT LANGUAGE -->
 ## Output language

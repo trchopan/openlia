@@ -1235,3 +1235,31 @@ listen_port = 2222
 		t.Fatalf("generated Compose must not configure OPENAI_BASE_URL:\n%s", composeText)
 	}
 }
+
+func TestReconcileAttachments_WorkspaceUIPublicOrigin(t *testing.T) {
+	repo := t.TempDir()
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	config := testConfig(repo, runtimeRoot)
+	if err := os.MkdirAll(filepath.Join(repo, "docker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config.WorkspaceUIHost = "127.0.0.1"
+	config.WorkspaceUIPort = 8089
+	config.WorkspaceUIPublicOrigin = "https://workspace.example.test"
+
+	if err := EnsureDir(config.LochoRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := generateAttachmentsFile(config); err != nil {
+		t.Fatalf("generateAttachmentsFile failed: %v", err)
+	}
+	composeBytes, err := os.ReadFile(config.GeneratedCompose)
+	if err != nil {
+		t.Fatalf("failed to read generated compose: %v", err)
+	}
+	composeText := string(composeBytes)
+	expectedHermesEnv := "OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN: \"https://workspace.example.test\""
+	if !strings.Contains(composeText, expectedHermesEnv) {
+		t.Fatalf("compose missing Hermes OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN:\n%s", composeText)
+	}
+}

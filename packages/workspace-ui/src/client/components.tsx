@@ -113,7 +113,7 @@ export function CopyLinkButton({
   label = "Copy Link",
   copiedLabel = "Copied!",
   className = "btn btn-outline btn-sm gap-1.5",
-  title = "Copy openlia link to clipboard",
+  title = "Copy link to clipboard",
   iconOnly = false,
   size = "sm",
   onClick,
@@ -686,7 +686,9 @@ export function MarkdownPreview({
           href &&
           (href.startsWith("openlia://") ||
             href.startsWith("/files/") ||
-            href.startsWith("/skills/"));
+            href.startsWith("/skills/") ||
+            ((href.startsWith("http://") || href.startsWith("https://")) &&
+              (href.includes("/files/") || href.includes("/skills/"))));
 
         if (isInternal && onNavigateLink) {
           return (

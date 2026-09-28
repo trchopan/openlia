@@ -320,28 +320,52 @@ describe("filterGoToSuggestions", () => {
 });
 
 describe("buildWorkspaceLink and buildSkillLink", () => {
-  test("buildWorkspaceLink normalizes path and prepends openlia://workspace/", () => {
-    expect(buildWorkspaceLink("tasks.md")).toBe("openlia://workspace/tasks.md");
+  test("buildWorkspaceLink normalizes path and formats as web URL", () => {
+    const origin =
+      typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : "";
+    expect(buildWorkspaceLink("tasks.md")).toBe(`${origin}/files/tasks.md`);
     expect(buildWorkspaceLink("/projects/roadmap.md")).toBe(
-      "openlia://workspace/projects/roadmap.md",
+      `${origin}/files/projects/roadmap.md`,
     );
     expect(buildWorkspaceLink("///nested/doc.txt")).toBe(
-      "openlia://workspace/nested/doc.txt",
+      `${origin}/files/nested/doc.txt`,
     );
+    expect(
+      buildWorkspaceLink("tasks.md", "https://workspace.example.com"),
+    ).toBe("https://workspace.example.com/files/tasks.md");
+    expect(buildWorkspaceLink("tasks.md", "")).toBe("/files/tasks.md");
   });
 
-  test("buildSkillLink formats skill link and optional skill file", () => {
+  test("buildSkillLink formats skill link and optional skill file as web URL", () => {
+    const origin =
+      typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : "";
     expect(buildSkillLink("agent-browser")).toBe(
-      "openlia://skills/agent-browser",
+      `${origin}/skills/agent-browser`,
     );
     expect(buildSkillLink("/system/developer/")).toBe(
-      "openlia://skills/system/developer",
+      `${origin}/skills/system/developer`,
     );
     expect(buildSkillLink("agent-browser", "templates/example.md")).toBe(
-      "openlia://skills/agent-browser/templates/example.md",
+      `${origin}/skills/agent-browser/templates/example.md`,
     );
     expect(buildSkillLink("agent-browser", "/scripts/run.sh")).toBe(
-      "openlia://skills/agent-browser/scripts/run.sh",
+      `${origin}/skills/agent-browser/scripts/run.sh`,
+    );
+    expect(
+      buildSkillLink(
+        "agent-browser",
+        "templates/example.md",
+        "https://workspace.example.com",
+      ),
+    ).toBe(
+      "https://workspace.example.com/skills/agent-browser/templates/example.md",
+    );
+    expect(buildSkillLink("agent-browser", undefined, "")).toBe(
+      "/skills/agent-browser",
     );
   });
 });

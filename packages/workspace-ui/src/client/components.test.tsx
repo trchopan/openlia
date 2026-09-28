@@ -15,6 +15,7 @@ import {
   MarkdownPreview,
   WorkspaceHeader,
 } from "./components";
+import { buildWorkspaceLink } from "./openliaLinks";
 
 describe("workspace presentation components", () => {
   test("renders safe GFM structures semantically", () => {
@@ -211,15 +212,16 @@ describe("CopyLinkButton and document copy integration", () => {
       },
     });
 
-    render(<CopyLinkButton link="openlia://workspace/tasks.md" />);
+    const expectedLink = buildWorkspaceLink("tasks.md");
+    render(<CopyLinkButton link={expectedLink} />);
     const button = screen.getByRole("button", {
-      name: /copy openlia link/i,
+      name: /copy link/i,
     });
     expect(button).toBeInTheDocument();
 
     fireEvent.click(button);
     await waitFor(() => {
-      expect(copiedText).toBe("openlia://workspace/tasks.md");
+      expect(copiedText).toBe(expectedLink);
       expect(screen.getByText("Copied!")).toBeInTheDocument();
     });
   });
@@ -235,10 +237,11 @@ describe("CopyLinkButton and document copy integration", () => {
       },
     });
 
+    const expectedLink = buildWorkspaceLink("tasks.md");
     render(
       <WorkspaceHeader
         authRequired={false}
-        currentLink="openlia://workspace/tasks.md"
+        currentLink={expectedLink}
         dirty={false}
         file={{
           content: "hello",
@@ -257,11 +260,11 @@ describe("CopyLinkButton and document copy integration", () => {
     );
 
     const copyBtn = screen.getByRole("button", {
-      name: "Copy link: openlia://workspace/tasks.md",
+      name: `Copy link: ${expectedLink}`,
     });
     expect(copyBtn).toBeInTheDocument();
     fireEvent.click(copyBtn);
-    expect(copied).toBe("openlia://workspace/tasks.md");
+    expect(copied).toBe(expectedLink);
   });
 
   test("DocumentPane renders copy link button in toolbar", async () => {
@@ -275,6 +278,7 @@ describe("CopyLinkButton and document copy integration", () => {
       },
     });
 
+    const expectedLink = buildWorkspaceLink("tasks.md");
     render(
       <DocumentPane
         conflict=""
@@ -304,11 +308,11 @@ describe("CopyLinkButton and document copy integration", () => {
     );
 
     const copyBtn = screen.getByRole("button", {
-      name: "Copy link (openlia://workspace/tasks.md)",
+      name: `Copy link (${expectedLink})`,
     });
     expect(copyBtn).toBeInTheDocument();
     fireEvent.click(copyBtn);
-    expect(copied).toBe("openlia://workspace/tasks.md");
+    expect(copied).toBe(expectedLink);
   });
 
   test("DocumentPane renders Reveal in Tree button and fires callback", () => {

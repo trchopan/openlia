@@ -77,7 +77,7 @@ describe("GoToModal", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(
       screen.getByPlaceholderText(
-        "Paste openlia:// link, or type file/skill name...",
+        "Paste link or path, or type file/skill name...",
       ),
     ).toBeInTheDocument();
   });
@@ -99,10 +99,12 @@ describe("GoToModal", () => {
     );
 
     const input = screen.getByPlaceholderText(
-      "Paste openlia:// link, or type file/skill name...",
+      "Paste link or path, or type file/skill name...",
     );
     fireEvent.change(input, {
-      target: { value: "openlia://workspace/projects/website.md" },
+      target: {
+        value: "https://workspace.example.com/files/projects/website.md",
+      },
     });
 
     expect(screen.getByText("Document")).toBeInTheDocument();
@@ -132,7 +134,7 @@ describe("GoToModal", () => {
     );
 
     const input = screen.getByPlaceholderText(
-      "Paste openlia:// link, or type file/skill name...",
+      "Paste link or path, or type file/skill name...",
     );
     fireEvent.change(input, {
       target: { value: "openlia://skills/weekly-review" },
@@ -165,7 +167,7 @@ describe("GoToModal", () => {
     );
 
     const input = screen.getByPlaceholderText(
-      "Paste openlia:// link, or type file/skill name...",
+      "Paste link or path, or type file/skill name...",
     );
     fireEvent.change(input, { target: { value: "career" } });
 
@@ -196,7 +198,7 @@ describe("GoToModal", () => {
     );
 
     const input = screen.getByPlaceholderText(
-      "Paste openlia:// link, or type file/skill name...",
+      "Paste link or path, or type file/skill name...",
     );
     fireEvent.keyDown(input, { key: "Escape" });
 
