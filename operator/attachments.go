@@ -257,7 +257,10 @@ func generateAttachmentsFile(config Config) error {
 	registryBytes, marshalErr := json.MarshalIndent(registry, "", "  ")
 	if marshalErr == nil {
 		if ensureErr := EnsureDir(config.DataRoot, 0o700); ensureErr == nil {
-			_ = AtomicWriteFile(filepath.Join(config.DataRoot, "services.json"), append(registryBytes, '\n'), 0o600)
+			path := filepath.Join(config.DataRoot, "services.json")
+			if err := AtomicWriteFile(path, append(registryBytes, '\n'), 0o600); err == nil {
+				_ = ensureHermesReadable(path)
+			}
 		}
 		if ensureErr := EnsureDir(config.MetaRoot, 0o700); ensureErr == nil {
 			_ = AtomicWriteFile(filepath.Join(config.MetaRoot, "services.json"), append(registryBytes, '\n'), 0o600)
