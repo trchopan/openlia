@@ -1197,6 +1197,11 @@ listen_port = 2222
 	if len(registry.Services) != 4 {
 		t.Fatalf("services.json contains %d services, want 4", len(registry.Services))
 	}
+	if info, err := os.Stat(dataRegistryPath); err != nil {
+		t.Fatalf("failed to stat data services.json: %v", err)
+	} else if info.Mode().Perm() != 0o600 {
+		t.Fatalf("services.json mode = %o, want 600", info.Mode().Perm())
+	}
 
 	// Ensure secret tokens NEVER leak into registry or compose file
 	for _, forbidden := range []string{"supersecrettoken1", "supersecrettoken2", "supersecrettoken3", "supersecrettoken4"} {
