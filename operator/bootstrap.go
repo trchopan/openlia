@@ -58,6 +58,13 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 			return BootstrapResult{}, err
 		}
 	}
+	if config.LochoHostEnabled {
+		for _, path := range []string{config.LochoHostRoot, config.LochoHostStateRoot} {
+			if err := ensureLochoHostDirectory(path, config.RuntimeUID, config.RuntimeGID); err != nil {
+				return BootstrapResult{}, err
+			}
+		}
+	}
 	if err := ensureSecretDirectory(config); err != nil {
 		return BootstrapResult{}, err
 	}

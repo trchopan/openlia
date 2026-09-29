@@ -126,6 +126,41 @@ func TestRunDispatchesBrowser(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesLochoHost(t *testing.T) {
+	t.Setenv("OPENLIA_CONFIG", filepath.Join(t.TempDir(), "missing.toml"))
+	if code := Run([]string{"locho-host", "share"}, fstest.MapFS{}); code != ExitPrereq {
+		t.Fatalf("locho-host dispatch exit code = %d, want %d", code, ExitPrereq)
+	}
+}
+
+func TestWriteExclusiveFileDoesNotOverwrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "attachments.toml")
+	if err := writeExclusiveFile(path, []byte("first\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeExclusiveFile(path, []byte("second\n"), 0o600); err == nil {
+		t.Fatal("existing attachment file was overwritten")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "first\n" {
+		t.Fatalf("attachment file = %q, %v", data, err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("attachment file mode = %v, %v", info, err)
+	}
+}
+
+func TestAttachmentHostIDValidation(t *testing.T) {
+	if hostID, err := attachmentHostID("host_id = \"host-1\"\n"); err != nil || hostID != "host-1" {
+		t.Fatalf("host ID = %q, %v", hostID, err)
+	}
+	for _, value := range []string{"", "host_id = unquoted\n", "listen_host = \"127.0.0.1\"\n"} {
+		if _, err := attachmentHostID(value); err == nil {
+			t.Fatalf("invalid attachment config was accepted: %q", value)
+		}
+	}
+}
+
 func TestSkillSourceAddDoesNotPersistEnvironmentToken(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	t.Setenv("OPENLIA_CONFIG", path)

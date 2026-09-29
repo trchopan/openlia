@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,6 +71,8 @@ func Run(args []string, assets fs.FS) int {
 		return commandInstructions(options, remaining[1:])
 	case "workspace-ui":
 		return commandWorkspaceUI(options, remaining[1:])
+	case "locho-host":
+		return commandLochoHost(options, remaining[1:])
 	case "browser":
 		return commandOpenLIABrowser(options, remaining[1:], assets)
 	default:
@@ -144,6 +147,7 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	openWebUI := set.Bool("open-webui", false, "enable Open WebUI chat interface")
 	openWebUIHost := set.String("open-webui-host", "", "Open WebUI host bind address")
 	openWebUIPort := set.Int("open-webui-port", 8090, "Open WebUI host port")
+	lochoHost := set.Bool("locho-host", false, "enable a Locho host for Workspace UI and Open WebUI")
 	workspaceGitRemote := set.String("workspace-git-remote", "", "HTTPS GitHub repository for workspace backup")
 	workspaceGitBranch := set.String("workspace-git-branch", "", "workspace Git branch")
 	workspaceGitSchedule := set.String("workspace-git-schedule", "", "workspace Git automatic pull schedule")
@@ -220,6 +224,14 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	if hasArgument(args, "--open-webui-port") {
 		config.OpenWebUIPort = *openWebUIPort
 	}
+	if hasArgument(args, "--locho-host") {
+		config.LochoHostEnabled = *lochoHost
+		if *lochoHost {
+			config.WorkspaceUIHost = "127.0.0.1"
+			config.OpenWebUIHost = "127.0.0.1"
+			config.OpenWebUIAuth = true
+		}
+	}
 	if *workspaceGitRemote != "" {
 		config.WorkspaceGit.Enabled = true
 		config.WorkspaceGit.Remote = *workspaceGitRemote
@@ -243,6 +255,26 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 			return fail(options, ExitUsage, err.Error(), nil)
 		}
 	}
+	if config.LochoHostEnabled && config.WorkspaceUIPasswordHash == "" {
+		if options.NonInteractive {
+			return fail(options, ExitUsage, "--locho-host requires an interactive Workspace UI password setup", nil)
+		}
+		first, err := readWorkspaceUIPassword("New workspace-ui password: ")
+		if err != nil {
+			return fail(options, ExitUsage, err.Error(), nil)
+		}
+		second, err := readWorkspaceUIPassword("Repeat workspace-ui password: ")
+		if err != nil {
+			return fail(options, ExitUsage, err.Error(), nil)
+		}
+		if first != second {
+			return fail(options, ExitUsage, "workspace-ui passwords do not match", nil)
+		}
+		config.WorkspaceUIPasswordHash, err = hashWorkspaceUIPassword(first)
+		if err != nil {
+			return fail(options, ExitUsage, err.Error(), nil)
+		}
+	}
 	if err := validateConfig(config); err != nil {
 		return fail(options, ExitUsage, err.Error(), nil)
 	}
@@ -257,7 +289,7 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	deployment := newDeployment(config)
 	ctx, cancel := remoteContext()
 	defer cancel()
-	if config.WorkspaceUIHost == "0.0.0.0" {
+	if workspaceUIPasswordRequired(config) {
 		if err := provisionWorkspaceUIPassword(ctx, deployment, config); err != nil {
 			return fail(options, ExitFailure, "workspace-ui password provisioning failed: "+err.Error(), nil)
 		}
@@ -395,7 +427,7 @@ func commandLifecycle(options Options, action string, args []string) int {
 	ctx, cancel := remoteContext()
 	defer cancel()
 	deployment := newDeployment(config)
-	if config.WorkspaceUIHost == "0.0.0.0" {
+	if workspaceUIPasswordRequired(config) {
 		if err := provisionWorkspaceUIPassword(ctx, deployment, config); err != nil {
 			return fail(options, ExitFailure, "workspace-ui password provisioning failed: "+err.Error(), nil)
 		}
@@ -629,7 +661,7 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 	ctx, cancel := remoteContext()
 	defer cancel()
 	deployment := newDeployment(config)
-	if config.WorkspaceUIHost == "0.0.0.0" {
+	if workspaceUIPasswordRequired(config) {
 		if err := provisionWorkspaceUIPassword(ctx, deployment, config); err != nil {
 			return fail(options, ExitFailure, "workspace-ui password provisioning failed: "+err.Error(), nil)
 		}
@@ -1422,6 +1454,94 @@ func commandAttachments(options Options, args []string) int {
 		return rotateRemoteFile(options, "attachments:"+host, source)
 	}
 	return fail(options, ExitUsage, "attachments requires list, map, or rotate", nil)
+}
+
+func commandLochoHost(options Options, args []string) int {
+	if len(args) == 0 || args[0] != "share" {
+		return fail(options, ExitUsage, "locho-host requires share", nil)
+	}
+	set := newFlagSet("locho-host share")
+	output := set.String("output", "openlia-attachments.toml", "local attachments.toml output path")
+	if err := set.Parse(args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return ExitOK
+		}
+		return ExitUsage
+	}
+	if set.NArg() != 0 || *output == "" {
+		return fail(options, ExitUsage, "locho-host share accepts only --output PATH", nil)
+	}
+	config, code := configOrError(options)
+	if code != ExitOK {
+		return code
+	}
+	ctx, cancel := remoteContext()
+	defer cancel()
+	raw, err := newDeployment(config).operation(ctx, "locho-host", nil, "share")
+	if err != nil {
+		return fail(options, ExitFailure, "could not generate Locho attachment configuration: "+err.Error(), nil)
+	}
+	attachmentConfig := string(raw)
+	hostID, err := attachmentHostID(attachmentConfig)
+	if err != nil || !strings.Contains(attachmentConfig, "capability = \"workspace-ui:tcp:") || !strings.Contains(attachmentConfig, "capability = \"open-webui:tcp:") {
+		return fail(options, ExitFailure, "Locho returned an invalid attachment configuration", nil)
+	}
+	if err := writeExclusiveFile(*output, []byte(attachmentConfig), 0o600); err != nil {
+		return fail(options, ExitFailure, "could not write attachment configuration: "+err.Error(), nil)
+	}
+	payload := map[string]any{
+		"schema":   1,
+		"ok":       true,
+		"action":   "locho-host-share",
+		"output":   *output,
+		"host_id":  hostID,
+		"services": []string{"workspace-ui", "open-webui"},
+	}
+	return writeResult(options, payload, fmt.Sprintf("Locho attachment configuration written to %s; run: locho attach --config %s", *output, *output))
+}
+
+func attachmentHostID(config string) (string, error) {
+	for _, line := range strings.Split(config, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok || strings.TrimSpace(key) != "host_id" {
+			continue
+		}
+		hostID, err := strconv.Unquote(strings.TrimSpace(value))
+		if err != nil || hostID == "" || strings.ContainsAny(hostID, "\r\n") {
+			return "", fmt.Errorf("invalid host_id")
+		}
+		return hostID, nil
+	}
+	return "", fmt.Errorf("missing host_id")
+}
+
+func writeExclusiveFile(path string, contents []byte, mode os.FileMode) error {
+	parent := filepath.Dir(path)
+	temporary, err := os.CreateTemp(parent, ".openlia-attachments-*")
+	if err != nil {
+		return err
+	}
+	temporaryName := temporary.Name()
+	defer func() {
+		_ = temporary.Close()
+		_ = os.Remove(temporaryName)
+	}()
+	if err := temporary.Chmod(mode); err != nil {
+		return err
+	}
+	if _, err := temporary.Write(contents); err != nil {
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := os.Link(temporaryName, path); err != nil {
+		return err
+	}
+	return nil
 }
 
 func commandBackup(options Options, args []string) int {

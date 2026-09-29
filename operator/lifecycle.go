@@ -80,6 +80,15 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 		return DeployResult{}, fmt.Errorf("Compose configuration validation failed")
 	}
 	if options.Action == "deploy" {
+		if options.Component == "locho" && config.LochoHostEnabled && (!compose.ServiceRunning(ctx, "workspace-ui") || !compose.ServiceRunning(ctx, "open-webui")) {
+			return DeployResult{}, fmt.Errorf("locho-host requires running workspace-ui and open-webui services; run openlia deploy first")
+		}
+		if config.LochoHostEnabled && options.Component == "workspace-ui" && !compose.ServiceRunning(ctx, "open-webui") {
+			return DeployResult{}, fmt.Errorf("workspace-ui update requires running open-webui while locho-host is enabled; run openlia deploy first")
+		}
+		if config.LochoHostEnabled && options.Component == "open-webui" && !compose.ServiceRunning(ctx, "workspace-ui") {
+			return DeployResult{}, fmt.Errorf("open-webui update requires running workspace-ui while locho-host is enabled; run openlia deploy first")
+		}
 		if options.Component == "all" || options.Component == "hermes" {
 			if _, err := compose.Run(ctx, "build", "hermes"); err != nil {
 				_ = RecordChange(config, options.Action, "failed", backup, "Hermes image build failed", now)
@@ -156,6 +165,13 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 			args = []string{"up", "-d"}
 			args = append(args, append([]string{"--no-deps"}, services...)...)
 		}
+		lochoHostWasRunning := false
+		workspaceUIBefore, openWebUIBefore := "", ""
+		if config.LochoHostEnabled {
+			lochoHostWasRunning = compose.ServiceRunning(ctx, "locho-host")
+			workspaceUIBefore = composeContainerID(ctx, compose, "workspace-ui")
+			openWebUIBefore = composeContainerID(ctx, compose, "open-webui")
+		}
 		if res, err := compose.Run(ctx, args...); err != nil {
 			msg := strings.TrimSpace(string(res.Stderr))
 			if msg == "" {
@@ -163,6 +179,20 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 			}
 			_ = RecordChange(config, options.Action, "failed", backup, "Compose start failed: "+msg, now)
 			return DeployResult{}, fmt.Errorf("Compose start failed (%s): %w", msg, err)
+		}
+		reconcileLochoHost := config.LochoHostEnabled && (options.Component == "workspace-ui" || options.Component == "open-webui")
+		if config.LochoHostEnabled && options.Component == "all" && lochoHostWasRunning && options.Action != "restart" {
+			reconcileLochoHost = workspaceUIBefore != composeContainerID(ctx, compose, "workspace-ui") || openWebUIBefore != composeContainerID(ctx, compose, "open-webui")
+		}
+		if reconcileLochoHost {
+			if res, err := compose.Run(ctx, "up", "-d", "--no-deps", "--force-recreate", "locho-host"); err != nil {
+				msg := strings.TrimSpace(string(res.Stderr))
+				if msg == "" {
+					msg = strings.TrimSpace(string(res.Stdout))
+				}
+				_ = RecordChange(config, options.Action, "failed", backup, "Locho host reconciliation failed: "+msg, now)
+				return DeployResult{}, fmt.Errorf("Locho host reconciliation failed (%s): %w", msg, err)
+			}
 		}
 		if (options.Component == "all" || options.Component == "hermes") && !workspaceUIStartedAfterHermes {
 			// Normalize the bind-mounted workspace through the container user, not a
@@ -221,6 +251,14 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 	return DeployResult{OK: true, Action: options.Action, State: state, Backup: backup}, nil
 }
 
+func composeContainerID(ctx context.Context, compose Compose, service string) string {
+	result, err := compose.Run(ctx, "ps", "-q", service)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(result.Stdout))
+}
+
 // deploymentReady avoids running the full diagnostic health check on every
 // two-second poll. The full check still runs once after the services are up.
 func deploymentReady(ctx context.Context, config Config, compose Compose, component string) bool {
@@ -275,7 +313,19 @@ func deploymentReady(ctx context.Context, config Config, compose Compose, compon
 			return false
 		}
 	}
+	if config.LochoHostEnabled && (component == "all" || component == "locho" || component == "workspace-ui" || component == "open-webui") && !lochoHostHealthy(ctx, config, compose) {
+		return false
+	}
 	return true
+}
+
+func lochoHostHealthy(ctx context.Context, config Config, compose Compose) bool {
+	if !config.LochoHostEnabled || !compose.ServiceRunning(ctx, "locho-host") {
+		return false
+	}
+	command := fmt.Sprintf("set -eu; set -- $(getent ahostsv4 workspace-ui); workspace_ip=\"$1\"; set -- $(getent ahostsv4 open-webui); open_webui_ip=\"$1\"; grep -F \"endpoint = \\\"$workspace_ip:%d\\\"\" /var/lib/openlia-locho-host/locho.toml >/dev/null; grep -F \"endpoint = \\\"$open_webui_ip:8080\\\"\" /var/lib/openlia-locho-host/locho.toml >/dev/null; curl --fail --silent --show-error --max-time 5 http://workspace-ui:%d/health >/dev/null; curl --fail --silent --show-error --max-time 5 http://open-webui:8080/health >/dev/null", config.WorkspaceUIPort, config.WorkspaceUIPort)
+	_, err := compose.Run(ctx, "exec", "-T", "locho-host", "sh", "-c", command)
+	return err == nil
 }
 
 func workspaceUIHealthy(ctx context.Context, config Config, compose Compose) bool {
@@ -445,6 +495,15 @@ func Healthcheck(ctx context.Context, config Config, compose Compose, allowStopp
 			} else {
 				add("service:"+service, false, "not_running")
 			}
+		}
+	}
+	if config.LochoHostEnabled {
+		if state == stateStopped && allowStopped {
+			add("locho_host_upstreams", true, "stopped")
+		} else if lochoHostHealthy(ctx, config, compose) {
+			add("locho_host_upstreams", true, "workspace-ui_and_open-webui_reachable")
+		} else {
+			add("locho_host_upstreams", false, "unreachable_or_stale")
 		}
 	}
 	hermesRunning := compose.ServiceRunning(ctx, "hermes")

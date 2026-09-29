@@ -37,6 +37,9 @@ type Config struct {
 	FallbackProviders           []FallbackProviderConfig
 	HermesImage                 string
 	LochoImage                  string
+	LochoVersion                string
+	LochoX8664SHA256            string
+	LochoARM64SHA256            string
 	EnabledSkills               []string
 	SkillsConfigured            bool
 	SkillSources                []SkillSourceConfig
@@ -55,6 +58,10 @@ type Config struct {
 	OpenWebUIImage              string
 	OpenWebUIAuth               bool
 	OpenWebUIDataRoot           string
+	LochoHostEnabled            bool
+	LochoHostRoot               string
+	LochoHostConfig             string
+	LochoHostStateRoot          string
 	RuntimeUID                  int
 	RuntimeGID                  int
 	ServiceRoles                map[string]string
@@ -188,12 +195,16 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		SkillsEnvRoot:           getOr(values, "OPENLIA_SKILLS_ENV_ROOT", filepath.Join(runtimeRoot, "skill-envs")),
 		HermesImage:             getOr(values, "OPENLIA_HERMES_IMAGE", "openlia-hermes:v2026.9.14"),
 		LochoImage:              getOr(values, "OPENLIA_LOCHO_IMAGE", "openlia-locho:v1.2.0-beta.1"),
+		LochoVersion:            getOr(values, "OPENLIA_LOCHO_VERSION", "1.2.0-beta.1"),
+		LochoX8664SHA256:        getOr(values, "OPENLIA_LOCHO_X86_64_SHA256", "9d257c856f0a9c8220285db45c28c6227dfa76017d160f74490cfef7bd784ad4"),
+		LochoARM64SHA256:        getOr(values, "OPENLIA_LOCHO_ARM64_SHA256", "1c0e67b130734467783e5e48a69d3003d218a4da624ba5841f3c5e6840f19c18"),
 		ExternalNetwork:         values["OPENLIA_EXTERNAL_NETWORK"],
 		APIHost:                 getOr(values, "OPENLIA_API_HOST", "127.0.0.1"),
 		WorkspaceUIPort:         8089,
 		WorkspaceUIPublicOrigin: values["OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN"],
 		RuntimeUID:              runtimeUID,
 		RuntimeGID:              runtimeGID,
+		LochoHostRoot:           filepath.Join(runtimeRoot, "locho-host"),
 	}
 	if err := validateOutputLanguage(config.OutputLanguage); err != nil {
 		return Config{}, fmt.Errorf("OPENLIA_OUTPUT_LANGUAGE: %w", err)
@@ -248,6 +259,11 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 	config.OpenWebUIImage = getOr(values, "OPENLIA_OPEN_WEBUI_IMAGE", "ghcr.io/open-webui/open-webui:main")
 	config.OpenWebUIAuth = openWebUIAuth
 	config.OpenWebUIDataRoot = getOr(values, "OPENLIA_OPEN_WEBUI_DATA_ROOT", filepath.Join(runtimeRoot, "open-webui"))
+	if config.LochoHostEnabled, err = boolValue(values, "OPENLIA_LOCHO_HOST_ENABLED", false); err != nil {
+		return Config{}, err
+	}
+	config.LochoHostConfig = filepath.Join(config.LochoHostRoot, "locho.toml")
+	config.LochoHostStateRoot = filepath.Join(config.LochoHostRoot, "state")
 	if err := validateOpenWebUI(config.OpenWebUIHost, config.OpenWebUIPort); err != nil {
 		return Config{}, err
 	}
@@ -306,9 +322,6 @@ func validateWorkspaceUI(host string, port int, authRequired bool, passwordHashF
 	}
 	if port < 1 || port > 65535 {
 		return fmt.Errorf("workspace-ui.port must be between 1 and 65535")
-	}
-	if authRequired && host != "0.0.0.0" {
-		return fmt.Errorf("workspace-ui authentication is only required for host 0.0.0.0")
 	}
 	if host == "0.0.0.0" && !authRequired {
 		return fmt.Errorf("workspace-ui authentication is required when host is 0.0.0.0")
@@ -390,6 +403,14 @@ func (c Config) ValidatePaths() error {
 	if c.RuntimeUID < 0 || c.RuntimeGID < 0 {
 		return fmt.Errorf("runtime UID/GID must be non-negative")
 	}
+	if c.LochoVersion == "" {
+		return fmt.Errorf("Locho version is required")
+	}
+	for name, checksum := range map[string]string{"x86-64": c.LochoX8664SHA256, "arm64": c.LochoARM64SHA256} {
+		if len(checksum) != 64 || strings.Trim(checksum, "0123456789abcdef") != "" {
+			return fmt.Errorf("Locho %s checksum must be 64 lowercase hexadecimal characters", name)
+		}
+	}
 	if err := validateOutputLanguage(c.OutputLanguage); err != nil {
 		return fmt.Errorf("output language: %w", err)
 	}
@@ -418,6 +439,20 @@ func (c Config) ValidatePaths() error {
 	}
 	if err := validateOpenWebUI(c.OpenWebUIHost, c.OpenWebUIPort); err != nil {
 		return err
+	}
+	if c.LochoHostEnabled {
+		if c.WorkspaceUIHost != "127.0.0.1" || c.OpenWebUIHost != "127.0.0.1" {
+			return fmt.Errorf("locho-host requires workspace-ui and open-webui to bind to 127.0.0.1")
+		}
+		if !c.WorkspaceUIAuthRequired {
+			return fmt.Errorf("locho-host requires Workspace UI authentication")
+		}
+		if c.WorkspaceUIPort == c.OpenWebUIPort {
+			return fmt.Errorf("locho-host requires different Workspace UI and Open WebUI ports")
+		}
+		if !c.OpenWebUIAuth {
+			return fmt.Errorf("locho-host requires Open WebUI authentication")
+		}
 	}
 	if err := validateFallbackProviders(c.FallbackProviders); err != nil {
 		return err
@@ -472,6 +507,22 @@ func (c Config) ValidatePaths() error {
 			label string
 			path  string
 		}{"open-webui-data-root", c.OpenWebUIDataRoot})
+	}
+	if c.LochoHostEnabled {
+		paths = append(paths,
+			struct {
+				label string
+				path  string
+			}{"locho-host-root", c.LochoHostRoot},
+			struct {
+				label string
+				path  string
+			}{"locho-host-config", c.LochoHostConfig},
+			struct {
+				label string
+				path  string
+			}{"locho-host-state-root", c.LochoHostStateRoot},
+		)
 	}
 	if err := validateSkillSources(c.SkillSources); err != nil {
 		return err

@@ -126,6 +126,9 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"HERMES_TIMEZONE=" + shellQuote(remote.Config.Timezone),
 		"OPENLIA_HERMES_IMAGE=" + shellQuote(remote.Config.HermesImage),
 		"OPENLIA_LOCHO_IMAGE=" + shellQuote(remote.Config.LochoImage),
+		"OPENLIA_LOCHO_VERSION=" + shellQuote(remote.Config.LochoVersion),
+		"OPENLIA_LOCHO_X86_64_SHA256=" + shellQuote(remote.Config.LochoX8664SHA256),
+		"OPENLIA_LOCHO_ARM64_SHA256=" + shellQuote(remote.Config.LochoARM64SHA256),
 		"HERMES_BASE_TAG=" + shellQuote(remote.Config.HermesTag),
 		"HERMES_BASE_DIGEST=" + shellQuote(remote.Config.HermesDigest),
 		"OPENLIA_API_ENABLED=" + shellQuote(strconv.FormatBool(remote.Config.APIEnabled)),
@@ -133,12 +136,13 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"OPENLIA_WORKSPACE_UI_HOST=" + shellQuote(remote.Config.WorkspaceUIHost),
 		"OPENLIA_WORKSPACE_UI_PORT=" + shellQuote(strconv.Itoa(remote.Config.WorkspaceUIPort)),
 		"OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN=" + shellQuote(remote.Config.WorkspaceUIPublicOrigin),
-		"OPENLIA_WORKSPACE_UI_AUTH_REQUIRED=" + shellQuote(strconv.FormatBool(remote.Config.WorkspaceUIHost == "0.0.0.0")),
+		"OPENLIA_WORKSPACE_UI_AUTH_REQUIRED=" + shellQuote(strconv.FormatBool(workspaceUIPasswordRequired(remote.Config))),
 		"OPENLIA_WORKSPACE_UI_PASSWORD_HASH_FILE=" + shellQuote(remote.rootPath("runtime", "secrets", "workspace-ui-password.hash")),
 		"OPENLIA_OPEN_WEBUI_HOST=" + shellQuote(remote.Config.OpenWebUIHost),
 		"OPENLIA_OPEN_WEBUI_PORT=" + shellQuote(strconv.Itoa(remote.Config.OpenWebUIPort)),
 		"OPENLIA_OPEN_WEBUI_IMAGE=" + shellQuote(remote.Config.OpenWebUIImage),
 		"OPENLIA_OPEN_WEBUI_AUTH=" + shellQuote(strconv.FormatBool(remote.Config.OpenWebUIAuth)),
+		"OPENLIA_LOCHO_HOST_ENABLED=" + shellQuote(strconv.FormatBool(remote.Config.LochoHostEnabled)),
 		"OPENLIA_DATA_ROOT=" + shellQuote(remote.rootPath("runtime", "hermes")),
 		"OPENLIA_SYSTEM_SKILLS_ROOT=" + shellQuote(remote.rootPath("runtime", "system-skills")),
 		"OPENLIA_LOCHO_ROOT=" + shellQuote(remote.rootPath("runtime", "locho")),
@@ -182,7 +186,7 @@ func (remote Remote) operation(ctx context.Context, script string, input []byte,
 
 func remoteOperationReadOnly(script string, args []string) bool {
 	switch filepath.ToSlash(script) {
-	case "healthcheck", "skill-status":
+	case "healthcheck", "skill-status", "locho-host":
 		return true
 	case "instructions":
 		return len(args) > 0 && (args[0] == "status" || args[0] == "diff")
@@ -245,6 +249,8 @@ func operatorArguments(operation string, args []string) ([]string, bool) {
 		command = "backup"
 	case "attachments":
 		command = "attachments"
+	case "locho-host":
+		command = "locho-host"
 	case "auth":
 		command = "auth"
 	case "deploy":
@@ -481,6 +487,9 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"HERMES_TIMEZONE=" + config.Timezone,
 		"OPENLIA_HERMES_IMAGE=" + config.HermesImage,
 		"OPENLIA_LOCHO_IMAGE=" + config.LochoImage,
+		"OPENLIA_LOCHO_VERSION=" + config.LochoVersion,
+		"OPENLIA_LOCHO_X86_64_SHA256=" + config.LochoX8664SHA256,
+		"OPENLIA_LOCHO_ARM64_SHA256=" + config.LochoARM64SHA256,
 		"HERMES_BASE_TAG=" + config.HermesTag,
 		"HERMES_BASE_DIGEST=" + config.HermesDigest,
 		"OPENLIA_API_ENABLED=" + strconv.FormatBool(config.APIEnabled),
@@ -488,12 +497,13 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_WORKSPACE_UI_HOST=" + config.WorkspaceUIHost,
 		"OPENLIA_WORKSPACE_UI_PORT=" + strconv.Itoa(config.WorkspaceUIPort),
 		"OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN=" + config.WorkspaceUIPublicOrigin,
-		"OPENLIA_WORKSPACE_UI_AUTH_REQUIRED=" + strconv.FormatBool(config.WorkspaceUIHost == "0.0.0.0"),
+		"OPENLIA_WORKSPACE_UI_AUTH_REQUIRED=" + strconv.FormatBool(workspaceUIPasswordRequired(config)),
 		"OPENLIA_WORKSPACE_UI_PASSWORD_HASH_FILE=" + filepath.Join(config.InstallRoot, "runtime", "secrets", "workspace-ui-password.hash"),
 		"OPENLIA_OPEN_WEBUI_HOST=" + config.OpenWebUIHost,
 		"OPENLIA_OPEN_WEBUI_PORT=" + strconv.Itoa(config.OpenWebUIPort),
 		"OPENLIA_OPEN_WEBUI_IMAGE=" + config.OpenWebUIImage,
 		"OPENLIA_OPEN_WEBUI_AUTH=" + strconv.FormatBool(config.OpenWebUIAuth),
+		"OPENLIA_LOCHO_HOST_ENABLED=" + strconv.FormatBool(config.LochoHostEnabled),
 		"OPENLIA_DATA_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "hermes"),
 		"OPENLIA_SYSTEM_SKILLS_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "system-skills"),
 		"OPENLIA_LOCHO_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "locho"),
