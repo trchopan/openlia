@@ -73,7 +73,7 @@ bun-build:
 lint:
 	bun run format:check
 	bun run lint
-	gofmt -d main.go cli operator cmd
+	gofmt -d main.go cli operator cmd internal
 	bash -n docker/*.sh profile/cron/scripts/*.sh
 	shellcheck docker/*.sh profile/cron/scripts/*.sh
 

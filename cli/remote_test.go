@@ -59,6 +59,44 @@ func TestOperationCommandIncludesOutputLanguage(t *testing.T) {
 	}
 }
 
+func TestOperationCommandIncludesEnabledTools(t *testing.T) {
+	config := defaultConfig()
+	config.Target = "operator@example.test"
+	config.EnabledTools = []string{"pdf", "media-transcripts"}
+	command := (Remote{Config: config}).operationCommand("ops/deploy.sh")
+	if !strings.Contains(command, "OPENLIA_ENABLED_TOOLS='pdf,media-transcripts'") {
+		t.Fatalf("operation command does not include enabled tools: %s", command)
+	}
+	if !strings.Contains(strings.Join(operationEnvironment(config, "/tmp/release"), "\n"), "OPENLIA_ENABLED_TOOLS=pdf,media-transcripts") {
+		t.Fatal("local environment does not transport enabled tools")
+	}
+}
+
+func TestOperationCommandUsesProjectScopedManagedHermesImage(t *testing.T) {
+	first := defaultConfig()
+	first.Target = "operator@example.test"
+	first.Project = "first"
+	first.EnabledTools = []string{"pdf"}
+	second := first
+	second.Project = "second"
+	firstCommand := (Remote{Config: first}).operationCommand("ops/deploy.sh")
+	secondCommand := (Remote{Config: second}).operationCommand("ops/deploy.sh")
+	firstImage := hermesImage(first)
+	secondImage := hermesImage(second)
+	if firstImage == secondImage || !strings.Contains(firstCommand, "OPENLIA_HERMES_IMAGE='"+firstImage+"'") || !strings.Contains(secondCommand, "OPENLIA_HERMES_IMAGE='"+secondImage+"'") {
+		t.Fatalf("project-scoped Hermes images were not transported: first=%s second=%s", firstCommand, secondCommand)
+	}
+	if !strings.Contains(firstCommand, "DEBIAN_SNAPSHOT='20260505T000000Z'") {
+		t.Fatalf("managed Debian snapshot was not transported: %s", firstCommand)
+	}
+
+	custom := first
+	custom.HermesImage = "registry.example.test/openlia-hermes:custom"
+	if got := hermesImage(custom); got != custom.HermesImage {
+		t.Fatalf("custom Hermes image was replaced: got %q", got)
+	}
+}
+
 func TestOperationCommandPrefersTargetOperatorWithLegacyFallback(t *testing.T) {
 	config := defaultConfig()
 	config.Target = "operator@example.test"

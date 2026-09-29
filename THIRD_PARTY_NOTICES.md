@@ -15,6 +15,7 @@ replacement for the license files shipped by those projects or images.
 | Bun | `1.2.22`; architecture-specific SHA-256 values are recorded in [`docker/Dockerfile`](docker/Dockerfile) | MIT, with additional bundled component licenses | [Upstream licensing information](https://github.com/oven-sh/bun/blob/main/LICENSE.md) |
 | uv | `0.8.14`; architecture-specific SHA-256 values are recorded in [`docker/Dockerfile`](docker/Dockerfile) | MIT and Apache-2.0 | [MIT License](https://github.com/astral-sh/uv/blob/0.8.14/LICENSE-MIT) and [Apache License 2.0](https://github.com/astral-sh/uv/blob/0.8.14/LICENSE-APACHE) |
 | PyYAML | `6.0.2` | MIT | [Upstream license](https://github.com/yaml/pyyaml/blob/6.0.2/LICENSE) |
+| yt-dlp | `2026.8.19`; universal wheel SHA-256 is recorded in [`docker/yt-dlp-requirements.txt`](docker/yt-dlp-requirements.txt) | Unlicense | [Upstream repository](https://github.com/yt-dlp/yt-dlp) |
 
 OpenLia has no external Go modules. The Python dependency above is declared in
 [`profile/skills/claim-review/requirements.txt`](profile/skills/claim-review/requirements.txt)
@@ -30,12 +31,17 @@ The derived images use these pinned base images:
   `sha256:109e2c65005bf160609e4ba6acf7783752f8502ad218e298253428690b9eaa4b`.
 
 The Dockerfiles install distribution packages including `ca-certificates`,
-`curl`, `git`, `hledger`, `passwd`, `tzdata`, `unzip`, and `xz-utils`. These
-packages and their transitive dependencies have package-specific licenses and
-copyright notices. The exact package versions are resolved by the Debian image
-at build time rather than pinned individually in this repository. For a built
-image, inspect the package metadata and files under `/usr/share/doc/*/copyright`
-and consult [Debian's license information](https://www.debian.org/legal/licenses/).
+`curl`, `git`, `hledger`, `passwd`, `tzdata`, `unzip`, and `xz-utils`. Optional
+tool capabilities may also install Poppler, LibreOffice Writer and Calc
+headless packages,
+Tesseract OCR and English language data, FFmpeg, and yt-dlp. These packages and
+their transitive dependencies have package-specific licenses and copyright
+notices. The optional image build resolves Debian packages from the dated
+`20260505T000000Z` snapshot configured in `docker/compose.yaml`, making package
+resolution reproducible for that snapshot. For a built image, inspect the
+package metadata and files under
+`/usr/share/doc/*/copyright` and consult the distribution's license
+information.
 
 ## Bundled and Transitive Notices
 

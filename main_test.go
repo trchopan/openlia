@@ -2,6 +2,7 @@ package main
 
 import (
 	"io/fs"
+	"strings"
 	"testing"
 )
 
@@ -12,6 +13,9 @@ func TestEmbeddedWorkspaceIncludesControlFiles(t *testing.T) {
 		"docker/.env.example",
 		"docker/git-askpass.sh",
 		"docker/secret-source.sh",
+		"docker/install-tools.sh",
+		"docker/verify-tools.sh",
+		"docker/yt-dlp-requirements.txt",
 		"profile/config.yaml",
 		"profile/distribution.yaml",
 		"profile/cron/scripts/openlia-workspace-git-sync.sh",
@@ -19,6 +23,26 @@ func TestEmbeddedWorkspaceIncludesControlFiles(t *testing.T) {
 		if _, err := fs.ReadFile(releaseAssets, path); err != nil {
 			t.Fatalf("embedded release is missing %s: %v", path, err)
 		}
+	}
+}
+
+func TestEmbeddedRuntimeWiresOptionalTools(t *testing.T) {
+	compose, err := fs.ReadFile(releaseAssets, "docker/compose.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dockerfile, err := fs.ReadFile(releaseAssets, "docker/Dockerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(compose), `OPENLIA_ENABLED_TOOLS: "${OPENLIA_ENABLED_TOOLS:-}"`) {
+		t.Fatal("embedded Compose file does not pass optional tools as a build argument")
+	}
+	if !strings.Contains(string(compose), `DEBIAN_SNAPSHOT: "${DEBIAN_SNAPSHOT:-20260505T000000Z}"`) {
+		t.Fatal("embedded Compose file does not pin the Debian snapshot")
+	}
+	if !strings.Contains(string(dockerfile), "openlia-install-tools") {
+		t.Fatal("embedded Dockerfile does not run the optional tool installer")
 	}
 }
 

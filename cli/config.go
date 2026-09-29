@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"openlia/internal/toolcatalog"
 )
 
 const (
@@ -25,6 +27,7 @@ const (
 	defaultWorkspaceUIPort = 8089
 	defaultOpenWebUIPort   = 8090
 	defaultOpenWebUIImage  = "ghcr.io/open-webui/open-webui:main"
+	defaultHermesImage     = "openlia-hermes:v2026.9.14"
 )
 
 var defaultSkills = []string{
@@ -91,6 +94,7 @@ type Config struct {
 	SecretSource            string
 	ReleaseSource           string
 	EnabledSkills           []string
+	EnabledTools            []string
 	WorkspaceGit            WorkspaceGitConfig
 	SkillSources            []SkillSourceConfig
 	Services                []ServiceHostConfig
@@ -146,7 +150,7 @@ func defaultConfig() Config {
 		OutputLanguage:   defaultOutputLanguage,
 		Timezone:         defaultTimezone,
 		Provider:         "copilot",
-		HermesImage:      "openlia-hermes:v2026.9.14",
+		HermesImage:      defaultHermesImage,
 		HermesTag:        "v2026.9.14",
 		HermesDigest:     "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294",
 		LochoImage:       "openlia-locho:v1.2.0-beta.1",
@@ -172,6 +176,13 @@ func defaultConfig() Config {
 		OpenLIABrowser: OpenLIABrowserConfig{Mode: "local", SSHPort: 22},
 		Services:       nil,
 	}
+}
+
+func hermesImage(config Config) string {
+	if config.HermesImage != defaultHermesImage {
+		return config.HermesImage
+	}
+	return toolcatalog.ManagedHermesImage(config.Project, config.EnabledTools, config.HermesTag, config.HermesDigest, toolcatalog.DefaultDebianSnapshot)
 }
 
 func defaultLocalInstallRoot() string {
@@ -415,6 +426,8 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.SecretSource, err = parseString(value)
 			case "skills.enabled":
 				config.EnabledSkills, err = parseStringArray(value)
+			case "tools.enabled":
+				config.EnabledTools, err = parseStringArray(value)
 			case "workspace_git.enabled":
 				config.WorkspaceGit.Enabled, err = parseBool(value)
 			case "workspace_git.provider":
@@ -588,6 +601,9 @@ func validateConfig(config Config) error {
 		if !safeComponent(skill) {
 			return fmt.Errorf("invalid skill name %q", skill)
 		}
+	}
+	if err := toolcatalog.Validate(config.EnabledTools); err != nil {
+		return err
 	}
 	sourceNames := make(map[string]bool)
 	for index, source := range config.SkillSources {
@@ -1026,6 +1042,14 @@ func renderConfig(config Config) string {
 			builder.WriteString(", ")
 		}
 		fmt.Fprintf(&builder, "%q", skill)
+	}
+	builder.WriteString("]\n")
+	builder.WriteString("\n[tools]\nenabled = [")
+	for index, tool := range config.EnabledTools {
+		if index > 0 {
+			builder.WriteString(", ")
+		}
+		fmt.Fprintf(&builder, "%q", tool)
 	}
 	builder.WriteString("]\n")
 	fmt.Fprintf(&builder, "\n[workspace_git]\nenabled = %t\nprovider = %q\nremote = %q\nbranch = %q\nschedule = %q\nauthor_name = %q\nauthor_email = %q\n", config.WorkspaceGit.Enabled, config.WorkspaceGit.Provider, config.WorkspaceGit.Remote, config.WorkspaceGit.Branch, config.WorkspaceGit.Schedule, config.WorkspaceGit.AuthorName, config.WorkspaceGit.AuthorEmail)

@@ -52,3 +52,24 @@ jobs:
 
       - name: Build Workspace UI image
         run: docker build --file docker/workspace-ui.Dockerfile --tag openlia-workspace-ui:ci .
+
+      - name: Build Hermes optional-tools image
+        run: >-
+          docker build
+          --build-arg OPENLIA_PROJECT_NAME=ci
+          --build-arg OPENLIA_ENABLED_TOOLS=pdf,office,ocr,media-transcripts
+          --file docker/Dockerfile
+          --tag openlia-hermes:ci
+          .
+
+      - name: Verify Hermes optional tools
+        run: >-
+          docker run --rm --entrypoint sh
+          --volume "$PWD/docker/verify-tools.sh:/tmp/verify-tools.sh:ro"
+          openlia-hermes:ci /tmp/verify-tools.sh
+
+      - name: Verify optional-tools input rejection
+        run: |
+          ! OPENLIA_ENABLED_TOOLS=pdf,pdf sh docker/install-tools.sh
+          ! OPENLIA_ENABLED_TOOLS=unknown sh docker/install-tools.sh
+          ! OPENLIA_ENABLED_TOOLS=pdf,,ocr sh docker/install-tools.sh

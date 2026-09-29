@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"openlia/internal/toolcatalog"
 	"openlia/operator"
 )
 
@@ -124,13 +125,14 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"OPENLIA_OUTPUT_LANGUAGE=" + shellQuote(remote.Config.OutputLanguage),
 		"OPENLIA_FALLBACK_PROVIDERS=" + shellQuote(renderFallbackProvidersJSON(remote.Config.FallbackProviders)),
 		"HERMES_TIMEZONE=" + shellQuote(remote.Config.Timezone),
-		"OPENLIA_HERMES_IMAGE=" + shellQuote(remote.Config.HermesImage),
+		"OPENLIA_HERMES_IMAGE=" + shellQuote(hermesImage(remote.Config)),
 		"OPENLIA_LOCHO_IMAGE=" + shellQuote(remote.Config.LochoImage),
 		"OPENLIA_LOCHO_VERSION=" + shellQuote(remote.Config.LochoVersion),
 		"OPENLIA_LOCHO_X86_64_SHA256=" + shellQuote(remote.Config.LochoX8664SHA256),
 		"OPENLIA_LOCHO_ARM64_SHA256=" + shellQuote(remote.Config.LochoARM64SHA256),
 		"HERMES_BASE_TAG=" + shellQuote(remote.Config.HermesTag),
 		"HERMES_BASE_DIGEST=" + shellQuote(remote.Config.HermesDigest),
+		"DEBIAN_SNAPSHOT=" + shellQuote(toolcatalog.DefaultDebianSnapshot),
 		"OPENLIA_API_ENABLED=" + shellQuote(strconv.FormatBool(remote.Config.APIEnabled)),
 		"OPENLIA_API_HOST=" + shellQuote(remote.Config.APIHost),
 		"OPENLIA_WORKSPACE_UI_HOST=" + shellQuote(remote.Config.WorkspaceUIHost),
@@ -156,6 +158,7 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"OPENLIA_COMPOSE_PROJECT_DIR=" + shellQuote(filepath.Join(operationRoot, "docker")),
 		"OPENLIA_GENERATED_COMPOSE=" + shellQuote(filepath.Join(operationRoot, "docker", "compose.generated.yaml")),
 		"OPENLIA_ENABLED_SKILLS=" + shellQuote(strings.Join(remote.Config.EnabledSkills, ",")),
+		"OPENLIA_ENABLED_TOOLS=" + shellQuote(strings.Join(remote.Config.EnabledTools, ",")),
 		"OPENLIA_SKILLS_CONFIGURED='true'",
 		"OPENLIA_SKILL_SOURCES=" + shellQuote(renderSkillSourcesJSON(remote.Config.SkillSources)),
 		"OPENLIA_SERVICE_ROLES=" + shellQuote(renderServicesJSON(remote.Config.Services)),
@@ -485,13 +488,14 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_OUTPUT_LANGUAGE=" + config.OutputLanguage,
 		"OPENLIA_FALLBACK_PROVIDERS=" + renderFallbackProvidersJSON(config.FallbackProviders),
 		"HERMES_TIMEZONE=" + config.Timezone,
-		"OPENLIA_HERMES_IMAGE=" + config.HermesImage,
+		"OPENLIA_HERMES_IMAGE=" + hermesImage(config),
 		"OPENLIA_LOCHO_IMAGE=" + config.LochoImage,
 		"OPENLIA_LOCHO_VERSION=" + config.LochoVersion,
 		"OPENLIA_LOCHO_X86_64_SHA256=" + config.LochoX8664SHA256,
 		"OPENLIA_LOCHO_ARM64_SHA256=" + config.LochoARM64SHA256,
 		"HERMES_BASE_TAG=" + config.HermesTag,
 		"HERMES_BASE_DIGEST=" + config.HermesDigest,
+		"DEBIAN_SNAPSHOT=" + toolcatalog.DefaultDebianSnapshot,
 		"OPENLIA_API_ENABLED=" + strconv.FormatBool(config.APIEnabled),
 		"OPENLIA_API_HOST=" + config.APIHost,
 		"OPENLIA_WORKSPACE_UI_HOST=" + config.WorkspaceUIHost,
@@ -517,6 +521,7 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_COMPOSE_PROJECT_DIR=" + filepath.Join(operationRoot, "docker"),
 		"OPENLIA_GENERATED_COMPOSE=" + filepath.Join(operationRoot, "docker", "compose.generated.yaml"),
 		"OPENLIA_ENABLED_SKILLS=" + strings.Join(config.EnabledSkills, ","),
+		"OPENLIA_ENABLED_TOOLS=" + strings.Join(config.EnabledTools, ","),
 		"OPENLIA_SKILLS_CONFIGURED=true",
 		"OPENLIA_SKILL_SOURCES=" + renderSkillSourcesJSON(config.SkillSources),
 		"OPENLIA_SERVICE_ROLES=" + renderServicesJSON(config.Services),

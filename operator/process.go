@@ -134,6 +134,7 @@ func (c Compose) composeEnvironment() []string {
 		"OPENLIA_SKILLS_ENV_ROOT=" + c.Config.SkillsEnvRoot,
 		"OPENLIA_SECRET_DIR=" + c.Config.SecretDir,
 		"OPENLIA_NETWORK_NAME=" + c.Config.NetworkName,
+		"OPENLIA_ENABLED_TOOLS=" + strings.Join(c.Config.EnabledTools, ","),
 	}
 }
 
