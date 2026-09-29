@@ -195,13 +195,14 @@ func TestProfileSyncSeedsMissingWorkspaceTemplatesPreservingExistingFiles(t *tes
 	repo := t.TempDir()
 	runtime := filepath.Join(t.TempDir(), "runtime")
 	for path, contents := range map[string]string{
-		filepath.Join(repo, "profile", "SOUL.md"):                                                      "soul\n",
-		filepath.Join(repo, "profile", "AGENTS.md"):                                                    "agents\n",
-		filepath.Join(repo, "profile", "config.yaml"):                                                  "config\n",
-		filepath.Join(repo, "release", "manifest.json"):                                                `{"openlia":"test"}`,
-		filepath.Join(repo, "workspace-template", "inbox", "chat-review", "chat-review-template.md"): "new chat review template\n",
-		filepath.Join(repo, "workspace-template", "existing.md"):                                      "template original\n",
-		filepath.Join(repo, "workspace-template", "AGENTS.md"):                                         "agents template\n",
+		filepath.Join(repo, "profile", "SOUL.md"):                                           "soul\n",
+		filepath.Join(repo, "profile", "AGENTS.md"):                                         "agents\n",
+		filepath.Join(repo, "profile", "USER.md"):                                           "# User Profile\n",
+		filepath.Join(repo, "profile", "config.yaml"):                                       "config\n",
+		filepath.Join(repo, "release", "manifest.json"):                                     `{"openlia":"test"}`,
+		filepath.Join(repo, "workspace-template", "knowledge", "claims", "claim-record.md"): "new claim template\n",
+		filepath.Join(repo, "workspace-template", "existing.md"):                           "template original\n",
+		filepath.Join(repo, "workspace-template", "AGENTS.md"):                              "agents template\n",
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -230,12 +231,12 @@ func TestProfileSyncSeedsMissingWorkspaceTemplatesPreservingExistingFiles(t *tes
 	}
 
 	// 1. Newly introduced template file should be seeded
-	seededFile := filepath.Join(workspace, "inbox", "chat-review", "chat-review-template.md")
+	seededFile := filepath.Join(workspace, "knowledge", "claims", "claim-record.md")
 	seededData, err := os.ReadFile(seededFile)
 	if err != nil {
 		t.Fatalf("missing seeded template file: %v", err)
 	}
-	if string(seededData) != "new chat review template\n" {
+	if string(seededData) != "new claim template\n" {
 		t.Fatalf("unexpected seeded template data: %q", string(seededData))
 	}
 
@@ -246,6 +247,16 @@ func TestProfileSyncSeedsMissingWorkspaceTemplatesPreservingExistingFiles(t *tes
 	}
 	if string(existingData) != "user customized content\n" {
 		t.Fatalf("existing user file was overwritten! got: %q", string(existingData))
+	}
+
+	// 3. Newly introduced USER.md should be seeded into memories/USER.md
+	userMemFile := filepath.Join(config.DataRoot, "memories", "USER.md")
+	userData, err := os.ReadFile(userMemFile)
+	if err != nil {
+		t.Fatalf("missing seeded user memory file: %v", err)
+	}
+	if string(userData) != "# User Profile\n" {
+		t.Fatalf("unexpected user memory data: %q", string(userData))
 	}
 }
 

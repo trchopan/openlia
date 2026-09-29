@@ -118,6 +118,29 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 			return BootstrapResult{}, err
 		}
 	}
+	memoriesDir := filepath.Join(config.DataRoot, "memories")
+	if err := EnsureDir(memoriesDir, 0o700); err != nil {
+		return BootstrapResult{}, err
+	}
+	if err := ensureRuntimeOwner(memoriesDir, config.RuntimeUID, config.RuntimeGID, 0o700); err != nil {
+		return BootstrapResult{}, err
+	}
+	userSource := filepath.Join(profileRoot, "USER.md")
+	userDest := filepath.Join(memoriesDir, "USER.md")
+	if _, err := os.Stat(userSource); err == nil {
+		if err := copyOnce(userSource, userDest, 0o600); err != nil {
+			return BootstrapResult{}, err
+		}
+		if _, err := os.Stat(userDest); err == nil {
+			if err := ensureRuntimeOwner(userDest, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
+				return BootstrapResult{}, err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return BootstrapResult{}, err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return BootstrapResult{}, err
+	}
 	workspace := filepath.Join(config.DataRoot, "workspace")
 	if err := EnsureDir(workspace, 0o700); err != nil {
 		return BootstrapResult{}, err
@@ -145,16 +168,11 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 	}
 	for _, category := range []string{
 		"inbox",
-		"inbox/chat-review",
 		"goals",
 		"areas",
 		"projects",
 		"knowledge",
 		"knowledge/claims",
-		"knowledge/learning",
-		"knowledge/learning/lessons",
-		"knowledge/learning/assessments",
-		"knowledge/learning/reports",
 		"ideas",
 		"decisions",
 		"monitors",
@@ -164,9 +182,6 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 		"shopping",
 		"travel",
 		"finance",
-		"reports",
-		"reports/daily-briefing",
-		"reports/workspace-organize",
 		"archive",
 	} {
 		if err := EnsureDir(filepath.Join(workspace, category), 0o700); err != nil {

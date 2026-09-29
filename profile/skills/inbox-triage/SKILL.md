@@ -21,14 +21,14 @@ metadata:
 ## Chat Intake & Review Procedure (Conversational Mode)
 
 1. Receive the unstructured text, message, or chat excerpt.
-2. Create or stage a review document under `inbox/chat-review/YYYY-MM-DD-chat-<slug>.md` using `inbox/chat-review/chat-review-template.md`.
+2. Create or stage a review document under `inbox/YYYY-MM-DD-chat-<slug>.md`.
 3. Extract and organize candidate items:
    - **People & Ownership**: differentiate user, spouse/family, colleagues, and external persons.
    - **Proposed Tasks**: concrete physical next actions with owners and optional due dates.
    - **Proposed Events**: title, date/time, participants, location.
    - **Proposed Durable Claims**: candidate statements with explicit kind, source, and evidence.
    - **Unclear / Needs Confirmation**: missing times, ambiguous dates, or unverified facts.
-4. Reply to the user with a concise summary (3–5 bullet points) and a clickable workspace link (`[Review Title](<origin>/files/inbox/chat-review/YYYY-MM-DD-chat-<slug>.md)`).
+4. Reply to the user with a concise summary (3-5 bullet points) and a clickable workspace link (`[Review Title](<origin>/files/inbox/YYYY-MM-DD-chat-<slug>.md)`).
 5. Explicitly request confirmation or approval (e.g. "Approved", "Confirmed").
 6. **Wait for explicit approval** before creating records in `calendar/`, `tasks/`, or `knowledge/claims/`.
 7. Once approved:
@@ -56,6 +56,6 @@ does not modify the input.
 ## Verification
 
 Confirm that:
-1. Every candidate chat intake has a staged review file in `inbox/chat-review/`.
+1. Every candidate chat intake has a staged review file in `inbox/`.
 2. Consequential calendar/task/claim writes occur ONLY after explicit approval.
 3. Source review documents are preserved for provenance.

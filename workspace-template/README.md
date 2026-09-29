@@ -6,23 +6,20 @@ It is copied into a runtime workspace only when that workspace is empty.
 ## Canonical directories
 
 - `inbox/`: uncategorized captures waiting for review.
-- `inbox/chat-review/`: captured messages and chat excerpts waiting for review and approval (`chat-review-template.md`).
 - `goals/`: outcomes and the reason they matter (`goal-template.md`).
 - `areas/`: ongoing responsibilities without a fixed end date (`area-template.md`).
 - `projects/`: bounded outcomes with milestones, tasks, risks, and decisions (`project-template.md`).
 - `knowledge/`: durable notes, references, and research.
 - `knowledge/claims/`: reusable personal claims with explicit evidence, provenance, temporal scope, and status (`claim-record.md`).
-- `knowledge/learning/`: personal curriculum, lesson notes, assessments, and learning focus reports (`learner-profile.md`).
 - `ideas/`: possible future work and observations (`idea-template.md`).
 - `decisions/`: questions, options, evidence, trade-offs, and outcomes (`decision-template.md`).
 - `monitors/`: things to watch for change over time (`monitor-template.md`).
 - `tasks/`: concrete actions that can be completed (`task-template.md`).
 - `calendar/`: planning notes, meeting agendas, and event context (`event-note-template.md`).
-- `people/`: relationship context and person records (`person-template.md`), alongside core user identity and operational context (`profile.md`, `preferences.md`, `user-context.md`).
+- `people/`: relationship context and person records (`person-template.md`).
 - `shopping/`: product research and purchase candidates (`item-template.md`).
 - `travel/`: trips, itineraries, and travel research (`trip-template.md`).
 - `finance/`: budgets, spending notes, and financial reviews (`finance-template.md`).
-- `reports/`: machine-generated daily work briefings and periodic scout reports (`daily-briefing/`, `workspace-organize/`).
 - `archive/`: completed or inactive material retained for reference.
 
 ## Working rules

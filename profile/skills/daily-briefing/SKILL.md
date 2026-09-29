@@ -25,19 +25,18 @@ Read relevant sources across the workspace:
 - `projects/` & `goals/`: active milestones and focus areas.
 - `decisions/`: recent architectural or personal decisions.
 - `monitors/`: standing conditions or watch items.
-- `people/`: user profile, preferences, and user-context.
-- `inbox/` & `inbox/chat-review/`: pending reviews or recently approved items.
-- `knowledge/learning/reports/`: learning progress notes.
+- `knowledge/claims/`: durable personal claims and context.
+- `inbox/`: pending captures or reviews.
 - Recent Git history (`git log`): changes since the previous briefing.
 
-## Report Structure (`reports/daily-briefing/YYYY-MM-DD.md`)
+## Report Structure (`inbox/daily-briefing-YYYY-MM-DD.md`)
 
 Write a dedicated dated markdown report containing:
 
 ### 1. Today
 - Evidenced calendar events, appointments, and deadlines.
 - Active monitors or external conditions (holidays, weather, etc.).
-- If data is absent, explicitly state that no corresponding calendar or task records are available — never present it as an empty day.
+- If data is absent, explicitly state that no corresponding calendar or task records are available  -  never present it as an empty day.
 
 ### 2. What Changed
 - Categorize recent changes into:
@@ -45,7 +44,7 @@ Write a dedicated dated markdown report containing:
   - **Signal**: emerging patterns or operational loops needing attention.
   - **Missing evidence**: unverified inferences or missing follow-ups.
 
-### 3. Important–Urgent Matrix
+### 3. Important-Urgent Matrix
 Rank up to 6 evidenced items across:
 - **Do first**: Important + Urgent
 - **Schedule**: Important, not urgent
@@ -55,9 +54,9 @@ Rank up to 6 evidenced items across:
 ## Delivery (e.g. Telegram / Chat)
 
 - Never send the entire markdown report to the chat.
-- Reply with a concise 3–6 bullet summary focusing on immediate priorities in the user's configured output language.
+- Reply with a concise 3-6 bullet summary focusing on immediate priorities in the user's configured output language.
 - Include a standard clickable HTTP link:
-  `[Daily briefing YYYY-MM-DD](<origin>/files/reports/daily-briefing/YYYY-MM-DD.md)`
+  `[Daily briefing YYYY-MM-DD](<origin>/files/inbox/daily-briefing-YYYY-MM-DD.md)`
 - Never use non-standard URI schemes like `openlia://`.
 
 ## Pitfalls
@@ -67,4 +66,4 @@ Rank up to 6 evidenced items across:
 
 ## Verification
 
-Confirm the report is written to `reports/daily-briefing/YYYY-MM-DD.md`, contains all 3 sections with explicit source citations, and the chat response includes a valid clickable URL.
+Confirm the report is written to `inbox/daily-briefing-YYYY-MM-DD.md`, contains all 3 sections with explicit source citations, and the chat response includes a valid clickable URL.
