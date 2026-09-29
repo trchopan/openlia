@@ -13,12 +13,17 @@ ARG BUN_AARCH64_SHA256=a97c687fb5e54de4e2fb0869a7ac9a2d9c3af75ac182e2b68138c1dd8
 ARG UV_VERSION=0.8.14
 ARG UV_X86_64_SHA256=954add045f29f93191523175e4aea066996840e86c1b6339dee25f48b15b5ddb
 ARG UV_AARCH64_SHA256=69616218470b2ad053617efb9e7027b1518ea38918d933c2791e113d99cec507
+ARG DEBIAN_SNAPSHOT=20260505T000000Z
 
 USER root
 
 # The upstream image owns the entrypoint and s6 tree. Only add immutable
 # command-line runtimes, timezone data, and the OpenLia secret helper here.
-RUN apt-get update \
+RUN sed -i \
+        -e "s|URIs: http://deb.debian.org/debian$|URIs: http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}|" \
+        -e "s|URIs: http://deb.debian.org/debian-security$|URIs: http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}|" \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Check-Valid-Until=false update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git hledger python3-yaml tzdata unzip xz-utils \
     && rm -rf /var/lib/apt/lists/* \
     && hledger --version \
@@ -58,20 +63,23 @@ RUN apt-get update \
     install -m 0755 "/tmp/uv/uv-${uv_target}/uvx" /usr/local/bin/uvx; \
     rm -rf /tmp/bun /tmp/uv "${bun_archive}" "${uv_archive}"
 
-ARG OPENLIA_ENABLED_TOOLS=""
-COPY --chmod=0755 docker/install-tools.sh /usr/local/bin/openlia-install-tools
-RUN OPENLIA_ENABLED_TOOLS="${OPENLIA_ENABLED_TOOLS}" /usr/local/bin/openlia-install-tools
-
 COPY profile/skills/claim-review/requirements.txt /tmp/claim-req.txt
 RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache \
-    --requirement /tmp/claim-req.txt \
+	--requirement /tmp/claim-req.txt \
 	&& uv pip install --python /opt/hermes/.venv/bin/python --no-cache pip-audit==2.9.0 \
-    && rm -f /tmp/claim-req.txt
+	&& rm -f /tmp/claim-req.txt
 
 COPY --chmod=0755 docker/secret-source.sh /usr/local/bin/openlia-secret-source
 COPY --chmod=0755 docker/git-askpass.sh /usr/local/bin/openlia-git-askpass
 COPY --chmod=0755 docker/skill-env-builder.sh /usr/local/bin/openlia-skill-env-builder
 COPY --chmod=0755 docker/skill-runner.py /usr/local/bin/openlia-skill
+
+ARG OPENLIA_PROJECT_NAME="openlia"
+ARG OPENLIA_ENABLED_TOOLS=""
+COPY docker/yt-dlp-requirements.txt /usr/local/share/openlia/yt-dlp-requirements.txt
+COPY --chmod=0755 docker/install-tools.sh /usr/local/bin/openlia-install-tools
+RUN OPENLIA_PROJECT_NAME="${OPENLIA_PROJECT_NAME}" OPENLIA_ENABLED_TOOLS="${OPENLIA_ENABLED_TOOLS}" /usr/local/bin/openlia-install-tools
+LABEL org.openlia.project="${OPENLIA_PROJECT_NAME}" org.openlia.enabled-tools="${OPENLIA_ENABLED_TOOLS}" org.openlia.debian-snapshot="${DEBIAN_SNAPSHOT}"
 
 # Keep the upstream default USER and ENTRYPOINT unchanged. s6 must start as
 # root so the upstream volume setup can drop supervised processes to hermes.

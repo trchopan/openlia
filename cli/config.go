@@ -27,6 +27,7 @@ const (
 	defaultWorkspaceUIPort = 8089
 	defaultOpenWebUIPort   = 8090
 	defaultOpenWebUIImage  = "ghcr.io/open-webui/open-webui:main"
+	defaultHermesImage     = "openlia-hermes:v2026.9.14"
 )
 
 var defaultSkills = []string{
@@ -149,7 +150,7 @@ func defaultConfig() Config {
 		OutputLanguage:   defaultOutputLanguage,
 		Timezone:         defaultTimezone,
 		Provider:         "copilot",
-		HermesImage:      "openlia-hermes:v2026.9.14",
+		HermesImage:      defaultHermesImage,
 		HermesTag:        "v2026.9.14",
 		HermesDigest:     "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294",
 		LochoImage:       "openlia-locho:v1.2.0-beta.1",
@@ -175,6 +176,13 @@ func defaultConfig() Config {
 		OpenLIABrowser: OpenLIABrowserConfig{Mode: "local", SSHPort: 22},
 		Services:       nil,
 	}
+}
+
+func hermesImage(config Config) string {
+	if config.HermesImage != defaultHermesImage {
+		return config.HermesImage
+	}
+	return toolcatalog.ManagedHermesImage(config.Project, config.EnabledTools, config.HermesTag, config.HermesDigest, toolcatalog.DefaultDebianSnapshot)
 }
 
 func defaultLocalInstallRoot() string {

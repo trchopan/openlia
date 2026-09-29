@@ -284,6 +284,15 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 	if err := toolcatalog.Validate(config.EnabledTools); err != nil {
 		return Config{}, fmt.Errorf("OPENLIA_ENABLED_TOOLS: %w", err)
 	}
+	if strings.TrimSpace(values["OPENLIA_HERMES_IMAGE"]) == "" {
+		config.HermesImage = toolcatalog.ManagedHermesImage(
+			config.ProjectName,
+			config.EnabledTools,
+			getOr(values, "HERMES_BASE_TAG", "v2026.9.14"),
+			getOr(values, "HERMES_BASE_DIGEST", "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294"),
+			getOr(values, "DEBIAN_SNAPSHOT", toolcatalog.DefaultDebianSnapshot),
+		)
+	}
 	config.ServiceRoles = make(map[string]string)
 	if rawRoles := values["OPENLIA_SERVICE_ROLES"]; rawRoles != "" {
 		var roles map[string]string

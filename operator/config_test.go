@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"openlia/internal/toolcatalog"
 )
 
 func testConfig(repo, runtime string) Config {
@@ -104,6 +106,10 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	}
 	if !config.LocalMode || !config.SkillsConfigured || config.OutputLanguage != "vi" || config.WorkspaceUIHost != "0.0.0.0" || config.WorkspaceUIPort != 8090 || config.WorkspaceUIPublicOrigin != "https://workspace.example.test" || config.OpenWebUIHost != "127.0.0.1" || config.OpenWebUIPort != 8090 || config.OpenWebUIImage != "ghcr.io/open-webui/open-webui:main" || config.OpenWebUIAuth != false || config.LochoX8664SHA256 != strings.Repeat("a", 64) || config.LochoARM64SHA256 != strings.Repeat("b", 64) || len(config.EnabledSkills) != 2 || strings.Join(config.EnabledTools, ",") != "pdf,office" || config.NetworkName != "example-private" || config.Provider != "copilot" || len(config.FallbackProviders) != 2 || config.FallbackProviders[0].BaseURL != "https://gateway.example.test/v1" || config.FallbackProviders[1].Model != "official-model" {
 		t.Fatalf("unexpected typed config: %+v", config)
+	}
+	wantImage := toolcatalog.ManagedHermesImage("example", []string{"pdf", "office"}, "v2026.9.14", "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294", toolcatalog.DefaultDebianSnapshot)
+	if config.HermesImage != wantImage {
+		t.Fatalf("managed Hermes image = %q, want %q", config.HermesImage, wantImage)
 	}
 }
 

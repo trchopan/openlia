@@ -13,21 +13,31 @@ case "$enabled_tools" in
 esac
 
 packages=""
+media_requested=false
+seen_tools=,
 old_ifs=$IFS
 IFS=,
 for tool in $enabled_tools; do
-    case "$tool" in
+	case "$seen_tools" in
+		*,"$tool",*)
+			printf 'duplicate OpenLia tool capability: %s\n' "$tool" >&2
+			exit 1
+			;;
+	esac
+	seen_tools="$seen_tools$tool,"
+	case "$tool" in
         pdf)
             packages="$packages poppler-utils"
             ;;
-        office)
-            packages="$packages libreoffice-calc libreoffice-writer"
+		office)
+			packages="$packages libreoffice-calc-nogui libreoffice-writer-nogui"
             ;;
         ocr)
             packages="$packages tesseract-ocr tesseract-ocr-eng"
             ;;
-        media-transcripts)
-            packages="$packages ffmpeg yt-dlp"
+		media-transcripts)
+			packages="$packages ffmpeg"
+			media_requested=true
             ;;
         *)
             printf 'unknown OpenLia tool capability: %s\n' "$tool" >&2
@@ -37,11 +47,16 @@ for tool in $enabled_tools; do
 done
 IFS=$old_ifs
 
-apt-get update
+apt-get -o Acquire::Check-Valid-Until=false update
 # Package names come only from the capability map above.
 # shellcheck disable=SC2086
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $packages
 rm -rf /var/lib/apt/lists/*
+
+if [ "$media_requested" = true ]; then
+	uv pip install --python /opt/hermes/.venv/bin/python --no-cache --require-hashes --no-deps \
+		--requirement /usr/local/share/openlia/yt-dlp-requirements.txt
+fi
 
 IFS=,
 for tool in $enabled_tools; do
