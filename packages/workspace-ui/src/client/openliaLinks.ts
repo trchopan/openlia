@@ -122,6 +122,53 @@ export function parseSkillRemainder(
   };
 }
 
+function findMatchingWorkspaceFile(
+  candidate: string,
+  files: WorkspaceTreeEntry[],
+): WorkspaceTreeEntry | undefined {
+  const clean = candidate.replace(/^\/+/, "");
+  if (!clean) return undefined;
+  const lowerClean = clean.toLowerCase();
+
+  // 1. Exact path match (case-sensitive)
+  const exact = files.find((f) => f.path === clean);
+  if (exact) return exact;
+
+  // 2. Exact path match (case-insensitive)
+  const exactCi = files.find((f) => f.path.toLowerCase() === lowerClean);
+  if (exactCi) return exactCi;
+
+  // 3. Exact basename with extension match (case-sensitive, then case-insensitive)
+  const baseMatch = files.find((f) => {
+    const base = f.path.split("/").pop();
+    return base === clean;
+  });
+  if (baseMatch) return baseMatch;
+
+  const baseMatchCi = files.find((f) => {
+    const base = f.path.split("/").pop();
+    return base?.toLowerCase() === lowerClean;
+  });
+  if (baseMatchCi) return baseMatchCi;
+
+  // 4. Path without extension match (e.g. "goals/career" matching "goals/career.md")
+  const pathNoExt = files.find((f) => {
+    const withoutExt = f.path.replace(/\.[^/.]+$/, "");
+    return withoutExt.toLowerCase() === lowerClean;
+  });
+  if (pathNoExt) return pathNoExt;
+
+  // 5. Basename stem without extension match (e.g. "career" matching "goals/career.md")
+  const stemMatch = files.find((f) => {
+    const base = f.path.split("/").pop() ?? "";
+    const stem = base.replace(/\.[^/.]+$/, "");
+    return stem.toLowerCase() === lowerClean;
+  });
+  if (stemMatch) return stemMatch;
+
+  return undefined;
+}
+
 export function resolveLinkTarget(
   input: string,
   options?: {
@@ -133,9 +180,8 @@ export function resolveLinkTarget(
   if (!trimmed) return null;
 
   const knownSkillIds = options?.skills?.map((s) => s.id) ?? [];
-  const knownDocPaths = new Set(
-    options?.tree?.filter((e) => e.kind === "file").map((e) => e.path) ?? [],
-  );
+  const files = options?.tree?.filter((e) => e.kind === "file") ?? [];
+  const knownDocPaths = new Set(files.map((e) => e.path));
 
   // 1. Handle openlia:// scheme
   if (trimmed.startsWith("openlia://")) {
@@ -148,11 +194,13 @@ export function resolveLinkTarget(
       if (host === "workspace") {
         const path = rawPath.replace(/^\/+/, "");
         if (!path) return null;
+        const matched = findMatchingWorkspaceFile(path, files);
+        const resolvedPath = matched ? matched.path : path;
         return {
-          exists: knownDocPaths.size > 0 ? knownDocPaths.has(path) : undefined,
+          exists: matched ? true : knownDocPaths.size > 0 ? false : undefined,
           kind: "workspace",
-          label: path,
-          path,
+          label: resolvedPath,
+          path: resolvedPath,
         };
       }
 
@@ -192,29 +240,72 @@ export function resolveLinkTarget(
   if (/^https?:\/\//i.test(candidate)) {
     try {
       const parsedUrl = new URL(candidate);
-      candidate = parsedUrl.pathname + parsedUrl.search;
+      const searchPath =
+        parsedUrl.searchParams.get("path") ??
+        parsedUrl.searchParams.get("file");
+      const searchSkill = parsedUrl.searchParams.get("skill");
+      const searchSkillFile = parsedUrl.searchParams.get("skillFile");
+      if (searchPath) {
+        candidate = searchPath;
+      } else if (searchSkill) {
+        candidate = `/skills/${searchSkill}${searchSkillFile ? `?skillFile=${searchSkillFile}` : ""}`;
+      } else {
+        candidate = parsedUrl.pathname + parsedUrl.search;
+      }
     } catch {
       // ignore
     }
   }
 
-  // /files/... or /file/...
-  if (candidate.startsWith("/files/") || candidate.startsWith("/file/")) {
-    const withoutPrefix = candidate.replace(/^\/files?\//, "");
+  // Handle root-relative query parameters (e.g. /?path=... or ?path=...)
+  if (candidate.startsWith("/?") || candidate.startsWith("?")) {
+    try {
+      const searchStr = candidate.startsWith("/?")
+        ? candidate.slice(2)
+        : candidate.slice(1);
+      const searchParams = new URLSearchParams(searchStr);
+      const searchPath = searchParams.get("path") ?? searchParams.get("file");
+      const searchSkill = searchParams.get("skill");
+      const searchSkillFile = searchParams.get("skillFile");
+      if (searchPath) {
+        candidate = searchPath;
+      } else if (searchSkill) {
+        candidate = `/skills/${searchSkill}${searchSkillFile ? `?skillFile=${searchSkillFile}` : ""}`;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // /files/... or /file/... or files/... or file/...
+  if (
+    candidate.startsWith("/files/") ||
+    candidate.startsWith("/file/") ||
+    candidate.startsWith("files/") ||
+    candidate.startsWith("file/")
+  ) {
+    const withoutPrefix = candidate.replace(/^\/?files?\//, "");
     const pathPart = withoutPrefix.split("?")[0] ?? "";
     const path = safeDecode(pathPart).replace(/^\/+/, "");
     if (!path) return null;
+    const matched = findMatchingWorkspaceFile(path, files);
+    const resolvedPath = matched ? matched.path : path;
     return {
-      exists: knownDocPaths.size > 0 ? knownDocPaths.has(path) : undefined,
+      exists: matched ? true : knownDocPaths.size > 0 ? false : undefined,
       kind: "workspace",
-      label: path,
-      path,
+      label: resolvedPath,
+      path: resolvedPath,
     };
   }
 
-  // /skills/...
-  if (candidate.startsWith("/skills/") || candidate === "/skills") {
-    const withoutPrefix = candidate.replace(/^\/skills\/?/, "");
+  // /skills/... or skills/...
+  if (
+    candidate.startsWith("/skills/") ||
+    candidate === "/skills" ||
+    candidate.startsWith("skills/") ||
+    candidate === "skills"
+  ) {
+    const withoutPrefix = candidate.replace(/^\/?skills\/?/, "");
     const [pathPart = "", queryPart = ""] = withoutPrefix.split("?");
     const queryParams = new URLSearchParams(queryPart);
     const querySkillFile = queryParams.get("skillFile")?.trim();
@@ -240,33 +331,20 @@ export function resolveLinkTarget(
     };
   }
 
-  // 3. Plain relative path fallbacks
-  // If it starts with workspace/
-  if (candidate.startsWith("workspace/")) {
-    const path = candidate.slice("workspace/".length).replace(/^\/+/, "");
-    if (!path) return null;
+  // /workspace/... or workspace/...
+  if (
+    candidate.startsWith("/workspace/") ||
+    candidate.startsWith("workspace/")
+  ) {
+    const raw = candidate.replace(/^\/?workspace\//, "").replace(/^\/+/, "");
+    if (!raw) return null;
+    const matched = findMatchingWorkspaceFile(raw, files);
+    const resolvedPath = matched ? matched.path : raw;
     return {
-      exists: knownDocPaths.size > 0 ? knownDocPaths.has(path) : undefined,
+      exists: matched ? true : knownDocPaths.size > 0 ? false : undefined,
       kind: "workspace",
-      label: path,
-      path,
-    };
-  }
-
-  // If it starts with skills/
-  if (candidate.startsWith("skills/")) {
-    const raw = candidate.slice("skills/".length).replace(/^\/+/, "");
-    const { skillId, skillFile } = parseSkillRemainder(raw, knownSkillIds);
-    if (!skillId) return null;
-    const skillExists =
-      knownSkillIds.length > 0 ? knownSkillIds.includes(skillId) : undefined;
-    const label = skillFile ? `${skillId} (${skillFile})` : skillId;
-    return {
-      exists: skillExists,
-      kind: "skill",
-      label,
-      skillFile,
-      skillId,
+      label: resolvedPath,
+      path: resolvedPath,
     };
   }
 
@@ -280,24 +358,14 @@ export function resolveLinkTarget(
     };
   }
 
-  // Direct match to known document path
-  if (knownDocPaths.has(candidate)) {
+  // Check matching workspace file in tree
+  const matchedFile = findMatchingWorkspaceFile(candidate, files);
+  if (matchedFile) {
     return {
       exists: true,
       kind: "workspace",
-      label: candidate,
-      path: candidate,
-    };
-  }
-
-  // Generic fallback: if it has a file extension or looks like a file path
-  if (hasFileExtension(candidate) || candidate.includes("/")) {
-    const path = candidate.replace(/^\/+/, "");
-    return {
-      exists: knownDocPaths.size > 0 ? knownDocPaths.has(path) : undefined,
-      kind: "workspace",
-      label: path,
-      path,
+      label: matchedFile.path,
+      path: matchedFile.path,
     };
   }
 
@@ -316,13 +384,18 @@ export function resolveLinkTarget(
     };
   }
 
-  // If candidate has no slash or extension and nothing matched, default to workspace document
-  return {
-    exists: false,
-    kind: "workspace",
-    label: candidate,
-    path: candidate,
-  };
+  // Generic fallback: if it has a file extension or looks like a file path
+  if (hasFileExtension(candidate) || candidate.includes("/")) {
+    const path = candidate.replace(/^\/+/, "");
+    return {
+      exists: knownDocPaths.size > 0 ? false : undefined,
+      kind: "workspace",
+      label: path,
+      path,
+    };
+  }
+
+  return null;
 }
 
 export function filterGoToSuggestions(
