@@ -29,22 +29,21 @@ authoritative without a claim identifier and provenance reference.
 
 Every claim must include:
 
-- `id`: stable, unique identifier.
-- `claim`: the statement in plain language.
-- `kind`: `reported`, `observed`, `inferred`, or `hypothesis`.
-- `source`: the origin type and stable reference.
-- `provenance`: evidence references and, for derived claims, source claims.
-- `asserted_at` or `observed_at`: when the evidence was made or observed.
-- `status`: `candidate`, `active`, `stale`, `contested`, `superseded`, or `retracted`.
+- `id` or `claim_id`: stable, unique identifier.
+- `claim` or `statement`: the statement in plain language.
+- `kind`: `reported`, `observed`, `inferred`, `hypothesis`, or `hypothetical`.
+- `source`: the origin type and stable reference (or descriptive string).
+- `provenance`: evidence references and source context (or descriptive string).
+- `asserted_at`, `observed_at`, or `first_recorded`: when the evidence was made or observed.
+- `status`: `candidate`, `active`, `stale`, `contested`, `superseded`, `retracted`, or `rejected`.
 
 The front matter must be a single YAML mapping. Use quoted dates or ISO-8601
 timestamps; the validator normalizes YAML date scalars before checking them.
 
-Use `valid_from`, `valid_until`, and `review_after` when the statement can
-change over time. Use `confidence` only when it has a stated basis; it is not a
-substitute for evidence and is required for inferred or hypothetical claims.
-An inferred or hypothetical claim may become `active` only with `reviewed_at`
-and `reviewed_by` populated after explicit approval.
+Use `valid_from`, `valid_until`, `temporal_scope`, and `review_due` (or `review_after`)
+when the statement can change over time. Use `confidence` (`low`, `medium`, `high`, or a number
+between 0 and 1) with an explicit basis. For inferred or hypothetical claims, explicit
+evidence and review are required before becoming `active`.
 
 ## Procedure
 

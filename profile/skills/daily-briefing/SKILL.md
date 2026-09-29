@@ -15,28 +15,55 @@ metadata:
 
 ## When to Use
 
-Use for a morning or on-demand snapshot of supplied calendar, task,
-follow-up, monitor, and focus data.
+Use for a morning or on-demand briefing that synthesizes calendar events, active tasks, monitors, recent changes, and personal priorities into an actionable snapshot.
 
-## Procedure
+## Reading Scope
 
-1. Gather only the read access needed for the requested briefing.
-2. Put normalized data in the JSON shape accepted by
-   `scripts/build_briefing.py`.
-3. Run the helper and inspect ordering, missing sections, and proposed focus.
-4. Report recommendations separately from facts; ask before any update.
+Read relevant sources across the workspace:
+- `calendar/`: upcoming events, deadlines, and agendas.
+- `tasks/`: current todos, priority queues, and pending actions.
+- `projects/` & `goals/`: active milestones and focus areas.
+- `decisions/`: recent architectural or personal decisions.
+- `monitors/`: standing conditions or watch items.
+- `knowledge/claims/`: durable personal claims and context.
+- `inbox/`: pending captures or reviews.
+- Recent Git history (`git log`): changes since the previous briefing.
 
-The input object may contain `date`, `focus`, `calendar`, `tasks`,
-`follow_ups`, and `monitors`. The helper never uses the current clock and never
-contacts a service.
+## Report Structure (`inbox/daily-briefing-YYYY-MM-DD.md`)
+
+Write a dedicated dated markdown report containing:
+
+### 1. Today
+- Evidenced calendar events, appointments, and deadlines.
+- Active monitors or external conditions (holidays, weather, etc.).
+- If data is absent, explicitly state that no corresponding calendar or task records are available  -  never present it as an empty day.
+
+### 2. What Changed
+- Categorize recent changes into:
+  - **Facts**: verified records created, edited, or approved with source paths.
+  - **Signal**: emerging patterns or operational loops needing attention.
+  - **Missing evidence**: unverified inferences or missing follow-ups.
+
+### 3. Important-Urgent Matrix
+Rank up to 6 evidenced items across:
+- **Do first**: Important + Urgent
+- **Schedule**: Important, not urgent
+- **Delegate / Coordinate**: Urgent, less critical; requires clear owner
+- **Defer / Drop**: Not important, not urgent; suggest deferral without dropping commitments
+
+## Delivery (e.g. Telegram / Chat)
+
+- Never send the entire markdown report to the chat.
+- Reply with a concise 3-6 bullet summary focusing on immediate priorities in the user's configured output language.
+- Include a standard clickable HTTP link:
+  `[Daily briefing YYYY-MM-DD](<origin>/files/inbox/daily-briefing-YYYY-MM-DD.md)`
+- Never use non-standard URI schemes like `openlia://`.
 
 ## Pitfalls
 
-- A briefing is not permission to change a task or calendar.
-- Do not present missing data as an empty day.
-- Keep urgent signals distinct from general suggestions.
+- A briefing is read-only: never create tasks, modify calendar entries, or send messages during a briefing.
+- Do not fabricate deadlines, progress, or priority levels without evidence.
 
 ## Verification
 
-Confirm the report names its input date, shows each supplied section, and makes
-no workspace or external service changes.
+Confirm the report is written to `inbox/daily-briefing-YYYY-MM-DD.md`, contains all 3 sections with explicit source citations, and the chat response includes a valid clickable URL.

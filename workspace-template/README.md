@@ -10,14 +10,13 @@ It is copied into a runtime workspace only when that workspace is empty.
 - `areas/`: ongoing responsibilities without a fixed end date (`area-template.md`).
 - `projects/`: bounded outcomes with milestones, tasks, risks, and decisions (`project-template.md`).
 - `knowledge/`: durable notes, references, and research.
-- `knowledge/claims/`: reusable personal claims with explicit evidence,
-  provenance, temporal scope, and status (`claim-record.md`).
+- `knowledge/claims/`: reusable personal claims with explicit evidence, provenance, temporal scope, and status (`claim-record.md`).
 - `ideas/`: possible future work and observations (`idea-template.md`).
 - `decisions/`: questions, options, evidence, trade-offs, and outcomes (`decision-template.md`).
 - `monitors/`: things to watch for change over time (`monitor-template.md`).
 - `tasks/`: concrete actions that can be completed (`task-template.md`).
 - `calendar/`: planning notes, meeting agendas, and event context (`event-note-template.md`).
-- `people/`: relationship context, commitments, and follow-ups (`person-template.md`).
+- `people/`: relationship context and person records (`person-template.md`).
 - `shopping/`: product research and purchase candidates (`item-template.md`).
 - `travel/`: trips, itineraries, and travel research (`trip-template.md`).
 - `finance/`: budgets, spending notes, and financial reviews (`finance-template.md`).

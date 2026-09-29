@@ -118,6 +118,29 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 			return BootstrapResult{}, err
 		}
 	}
+	memoriesDir := filepath.Join(config.DataRoot, "memories")
+	if err := EnsureDir(memoriesDir, 0o700); err != nil {
+		return BootstrapResult{}, err
+	}
+	if err := ensureRuntimeOwner(memoriesDir, config.RuntimeUID, config.RuntimeGID, 0o700); err != nil {
+		return BootstrapResult{}, err
+	}
+	userSource := filepath.Join(profileRoot, "USER.md")
+	userDest := filepath.Join(memoriesDir, "USER.md")
+	if _, err := os.Stat(userSource); err == nil {
+		if err := copyOnce(userSource, userDest, 0o600); err != nil {
+			return BootstrapResult{}, err
+		}
+		if _, err := os.Stat(userDest); err == nil {
+			if err := ensureRuntimeOwner(userDest, config.RuntimeUID, config.RuntimeGID, 0o600); err != nil {
+				return BootstrapResult{}, err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return BootstrapResult{}, err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return BootstrapResult{}, err
+	}
 	workspace := filepath.Join(config.DataRoot, "workspace")
 	if err := EnsureDir(workspace, 0o700); err != nil {
 		return BootstrapResult{}, err
@@ -126,18 +149,41 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 	if err != nil {
 		return BootstrapResult{}, err
 	}
-	if empty {
-		template := filepath.Join(config.RepositoryRoot, "workspace-template")
-		if info, statErr := os.Stat(template); statErr == nil && info.IsDir() {
-			if err := copyDirContents(template, workspace); err != nil {
-				return BootstrapResult{}, fmt.Errorf("copy workspace template: %w", err)
-			}
+	template := filepath.Join(config.RepositoryRoot, "workspace-template")
+	templateExists := false
+	if info, statErr := os.Stat(template); statErr == nil && info.IsDir() {
+		templateExists = true
+	}
+	if empty && templateExists {
+		if err := copyDirContents(template, workspace); err != nil {
+			return BootstrapResult{}, fmt.Errorf("copy workspace template: %w", err)
+		}
+	} else if templateExists {
+		if err := seedMissingWorkspaceTemplates(template, workspace); err != nil {
+			return BootstrapResult{}, fmt.Errorf("seed missing workspace templates: %w", err)
 		}
 	}
 	if err := copyOnce(filepath.Join(config.RepositoryRoot, "workspace-template", ".gitignore"), filepath.Join(workspace, ".gitignore"), 0o600); err != nil {
 		return BootstrapResult{}, err
 	}
-	for _, category := range []string{"inbox", "goals", "areas", "projects", "knowledge/claims", "ideas", "decisions", "monitors", "tasks", "calendar", "people", "shopping", "travel", "finance", "archive"} {
+	for _, category := range []string{
+		"inbox",
+		"goals",
+		"areas",
+		"projects",
+		"knowledge",
+		"knowledge/claims",
+		"ideas",
+		"decisions",
+		"monitors",
+		"tasks",
+		"calendar",
+		"people",
+		"shopping",
+		"travel",
+		"finance",
+		"archive",
+	} {
 		if err := EnsureDir(filepath.Join(workspace, category), 0o700); err != nil {
 			return BootstrapResult{}, err
 		}
@@ -201,3 +247,37 @@ func directoryEmpty(path string) (bool, error) {
 	}
 	return len(entries) == 0, nil
 }
+
+// seedMissingWorkspaceTemplates walks templateDir and non-destructively copies any
+// starter template files that do not yet exist in workspaceDir. Existing user files
+// and customizations are strictly preserved.
+func seedMissingWorkspaceTemplates(templateDir, workspaceDir string) error {
+	return filepath.Walk(templateDir, func(path string, info fs.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(templateDir, path)
+		if err != nil {
+			return err
+		}
+		// AGENTS.md is managed by instructions diff/merge workflow.
+		// .gitkeep files are empty directory markers.
+		if rel == "AGENTS.md" || filepath.Base(rel) == ".gitkeep" {
+			return nil
+		}
+		dest := filepath.Join(workspaceDir, rel)
+		if _, statErr := os.Lstat(dest); statErr == nil {
+			return nil
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return statErr
+		}
+		if err := EnsureDir(filepath.Dir(dest), 0o700); err != nil {
+			return err
+		}
+		return copyOnce(path, dest, 0o600)
+	})
+}
+

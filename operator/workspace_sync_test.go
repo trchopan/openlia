@@ -56,6 +56,29 @@ func TestWorkspaceGitSyncHelper(t *testing.T) {
 		t.Fatalf("pull output = %s", pullOutput)
 	}
 
+	writeFile(t, filepath.Join(workspace, "unpushed.md"), "unpushed\n")
+	runGit(t, "-C", workspace, "add", "--all", "--", ".")
+	runGit(t, "-C", workspace, "commit", "-m", "unpushed local commit")
+	aheadOutput := runSync(t, script, workspace)
+	if !bytes.Contains(aheadOutput, []byte(`"status":"ahead"`)) {
+		t.Fatalf("ahead sync output = %s", aheadOutput)
+	}
+
+	writeFile(t, filepath.Join(publisher, "diverged.md"), "diverged remote\n")
+	runGit(t, "-C", publisher, "add", "--all", "--", ".")
+	runGit(t, "-C", publisher, "commit", "-m", "diverged remote")
+	runGit(t, "-C", publisher, "push", "origin", "main")
+	divergedCmd := exec.Command("bash", script)
+	divergedCmd.Env = append(os.Environ(), "OPENLIA_WORKSPACE_GIT_ROOT="+workspace)
+	if output, err := divergedCmd.CombinedOutput(); err == nil {
+		t.Fatalf("diverged sync unexpectedly succeeded: %s", output)
+	} else if !bytes.Contains(output, []byte("local and remote histories diverged")) {
+		t.Fatalf("unexpected diverged output: %s", output)
+	}
+	// Reset local workspace to match publisher so subsequent tests can continue
+	runGit(t, "-C", workspace, "fetch", "origin", "main")
+	runGit(t, "-C", workspace, "reset", "--hard", "origin/main")
+
 	writeFile(t, filepath.Join(publisher, "AGENTS.md"), "remote instruction\n")
 	runGit(t, "-C", publisher, "add", "--all", "--", ".")
 	runGit(t, "-C", publisher, "commit", "-m", "instructions")

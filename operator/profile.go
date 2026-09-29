@@ -231,6 +231,26 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 	if err != nil {
 		return ProfileSyncResult{}, err
 	}
+	workspace := filepath.Join(p.Config.DataRoot, "workspace")
+	if info, err := os.Stat(workspace); err == nil && info.IsDir() {
+		template := filepath.Join(p.Config.RepositoryRoot, "workspace-template")
+		if tInfo, tErr := os.Stat(template); tErr == nil && tInfo.IsDir() {
+			if err := seedMissingWorkspaceTemplates(template, workspace); err != nil {
+				return ProfileSyncResult{}, fmt.Errorf("seed missing workspace templates: %w", err)
+			}
+		}
+	}
+	memoriesDir := filepath.Join(p.Config.DataRoot, "memories")
+	userSource := filepath.Join(p.Config.RepositoryRoot, "profile", "USER.md")
+	userDest := filepath.Join(memoriesDir, "USER.md")
+	if _, err := os.Stat(userSource); err == nil {
+		if err := EnsureDir(memoriesDir, 0o700); err == nil {
+			_ = ensureRuntimeOwner(memoriesDir, p.Config.RuntimeUID, p.Config.RuntimeGID, 0o700)
+			if err := copyOnce(userSource, userDest, 0o600); err == nil {
+				_ = ensureRuntimeOwner(userDest, p.Config.RuntimeUID, p.Config.RuntimeGID, 0o600)
+			}
+		}
+	}
 	result := ProfileSyncResult{OK: true, Action: "profile-sync", Workspace: "preserved", Instructions: instructions, Skills: ProfileSkillStats{
 		CustomizedNames: []string{}, UnmanagedNames: []string{}, Results: []SkillResult{},
 	}}

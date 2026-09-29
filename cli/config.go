@@ -37,6 +37,7 @@ var defaultSkills = []string{
 	"personal-finance",
 	"workspace-git",
 	"claim-review",
+	"workspace-organize",
 }
 
 const (

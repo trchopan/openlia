@@ -16,7 +16,6 @@ records and preserve them unless the user explicitly asks for a change.
 ## File handling
 
 - Read the relevant file and nearby context before proposing an edit.
-- Follow the starter templates in each domain directory when creating new records:
   - `goals/goal-template.md`: high-level outcomes, rationale, and linked projects.
   - `areas/area-template.md`: enduring life domains, standards, and active projects.
   - `projects/project-template.md`: bounded initiatives with milestones and tasks.
@@ -24,6 +23,7 @@ records and preserve them unless the user explicitly asks for a change.
   - `monitors/monitor-template.md`: standing checks, watch URLs, and triggers.
   - `tasks/task-template.md`: concrete physical actions with priorities and context tags.
   - `people/person-template.md`: relationships, important dates, and open loops.
+  - `knowledge/claims/claim-record.md`: durable personal claims with evidence, status, and temporal scope.
   - `ideas/idea-template.md`: seeds, opportunities, and exploration questions.
   - `travel/trip-template.md`: itineraries, reservations, and packing lists.
   - `shopping/item-template.md`: product research, price targets, and evaluations.
@@ -51,6 +51,8 @@ Reading and analysis are safe defaults. Creating or changing a workspace record
 requires an explicit user request or approval. Never send messages, purchase
 items, change calendar entries, move money, or delete records from a routine
 review. Explain proposed consequential actions before asking for approval.
+
+When the user shares chat excerpts, forwarded messages, or personal announcements (e.g. via Telegram), do not immediately file them into calendar, tasks, or claims. First, stage them into `inbox/` (e.g. `inbox/YYYY-MM-DD-chat-<slug>.md`). Present a concise summary and proposed extractions, and wait for explicit user confirmation or approval before filing. Once approved, disperse into `calendar/`, `tasks/`, or `knowledge/claims/`.
 
 ## Claim Memory
 
