@@ -190,3 +190,62 @@ func TestProfileSyncUpdatesManagedOutputLanguage(t *testing.T) {
 		t.Fatalf("custom guidance or updated language was lost:\n%s", data)
 	}
 }
+
+func TestProfileSyncSeedsMissingWorkspaceTemplatesPreservingExistingFiles(t *testing.T) {
+	repo := t.TempDir()
+	runtime := filepath.Join(t.TempDir(), "runtime")
+	for path, contents := range map[string]string{
+		filepath.Join(repo, "profile", "SOUL.md"):                                                      "soul\n",
+		filepath.Join(repo, "profile", "AGENTS.md"):                                                    "agents\n",
+		filepath.Join(repo, "profile", "config.yaml"):                                                  "config\n",
+		filepath.Join(repo, "release", "manifest.json"):                                                `{"openlia":"test"}`,
+		filepath.Join(repo, "workspace-template", "inbox", "chat-review", "chat-review-template.md"): "new chat review template\n",
+		filepath.Join(repo, "workspace-template", "existing.md"):                                      "template original\n",
+		filepath.Join(repo, "workspace-template", "AGENTS.md"):                                         "agents template\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "profile", "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := testConfig(repo, runtime)
+	workspace := filepath.Join(config.DataRoot, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existingUserFile := filepath.Join(workspace, "existing.md")
+	if err := os.WriteFile(existingUserFile, []byte("user customized content\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewProfileOperator(config)
+	p.Now = func() time.Time { return time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC) }
+	if _, err := p.Sync(); err != nil {
+		t.Fatalf("Sync() failed: %v", err)
+	}
+
+	// 1. Newly introduced template file should be seeded
+	seededFile := filepath.Join(workspace, "inbox", "chat-review", "chat-review-template.md")
+	seededData, err := os.ReadFile(seededFile)
+	if err != nil {
+		t.Fatalf("missing seeded template file: %v", err)
+	}
+	if string(seededData) != "new chat review template\n" {
+		t.Fatalf("unexpected seeded template data: %q", string(seededData))
+	}
+
+	// 2. Existing user file must be preserved intact without overwrite
+	existingData, err := os.ReadFile(existingUserFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(existingData) != "user customized content\n" {
+		t.Fatalf("existing user file was overwritten! got: %q", string(existingData))
+	}
+}
+

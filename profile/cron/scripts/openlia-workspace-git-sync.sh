@@ -72,6 +72,11 @@ if [[ "$before" == "$remote_head" ]]; then
     exit 0
 fi
 
+if git merge-base --is-ancestor "origin/${expected_branch}" HEAD; then
+    printf '%s\n' '{"wakeAgent":false,"status":"ahead","reason":"local has unpushed commits"}'
+    exit 0
+fi
+
 if ! git merge-base --is-ancestor HEAD "origin/${expected_branch}"; then
     git status --short --branch >&2 || true
     printf '%s\n' 'workspace Git sync stopped: local and remote histories diverged; local files were retained' >&2

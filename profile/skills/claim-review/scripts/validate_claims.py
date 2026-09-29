@@ -14,9 +14,19 @@ from typing import Any
 import yaml
 
 
-KINDS = {"reported", "observed", "inferred", "hypothesis"}
-STATUSES = {"candidate", "active", "stale", "contested", "superseded", "retracted"}
-DATE_FIELDS = ("asserted_at", "observed_at", "valid_from", "valid_until", "review_after", "reviewed_at")
+KINDS = {"reported", "observed", "inferred", "hypothesis", "hypothetical"}
+STATUSES = {"candidate", "active", "stale", "contested", "superseded", "retracted", "rejected"}
+DATE_FIELDS = (
+    "asserted_at",
+    "observed_at",
+    "valid_from",
+    "valid_until",
+    "review_after",
+    "reviewed_at",
+    "first_recorded",
+    "last_reviewed",
+    "review_due",
+)
 FRONT_MATTER = re.compile(r"\A---[ \t]*\r?\n(?P<metadata>.*?)(?:\r?\n)---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 
 
@@ -105,8 +115,10 @@ def validate_claim(claim: Any) -> list[str]:
         return ["claim must be an object"]
 
     errors: list[str] = []
-    for field in ("id", "claim"):
-        _as_nonempty_string(claim.get(field), field, errors)
+    claim_id = claim.get("id") or claim.get("claim_id")
+    _as_nonempty_string(claim_id, "id or claim_id", errors)
+    statement = claim.get("claim") or claim.get("statement")
+    _as_nonempty_string(statement, "claim or statement", errors)
 
     kind = claim.get("kind")
     if kind not in KINDS:
@@ -117,50 +129,57 @@ def validate_claim(claim: Any) -> list[str]:
         errors.append(f"status must be one of: {', '.join(sorted(STATUSES))}")
 
     source = claim.get("source")
-    if not isinstance(source, dict):
-        errors.append("source must be an object with type and ref")
-    else:
+    if isinstance(source, dict):
         _as_nonempty_string(source.get("type"), "source.type", errors)
         _as_nonempty_string(source.get("ref"), "source.ref", errors)
+    elif isinstance(source, str):
+        _as_nonempty_string(source, "source", errors)
+    else:
+        errors.append("source must be a non-empty string or an object with type and ref")
 
     provenance = claim.get("provenance")
-    if not isinstance(provenance, dict):
-        errors.append("provenance must be an object with evidence_refs")
-    else:
+    if isinstance(provenance, dict):
         _validate_references(provenance.get("evidence_refs"), "provenance.evidence_refs", errors)
         _validate_references(provenance.get("derived_from"), "provenance.derived_from", errors, required=False)
+    elif isinstance(provenance, str):
+        _as_nonempty_string(provenance, "provenance", errors)
+    else:
+        errors.append("provenance must be a non-empty string or an object with evidence_refs")
 
     parsed_dates: dict[str, datetime] = {}
     for field in DATE_FIELDS:
         parsed = _parse_date(claim.get(field), field, errors)
         if parsed is not None:
             parsed_dates[field] = parsed
-    if not parsed_dates.get("asserted_at") and not parsed_dates.get("observed_at"):
-        errors.append("asserted_at or observed_at is required")
+    if not parsed_dates.get("asserted_at") and not parsed_dates.get("observed_at") and not parsed_dates.get("first_recorded"):
+        errors.append("asserted_at, observed_at, or first_recorded is required")
     if parsed_dates.get("valid_from") and parsed_dates.get("valid_until"):
         if parsed_dates["valid_from"] > parsed_dates["valid_until"]:
             errors.append("valid_from must not be after valid_until")
 
     confidence = claim.get("confidence")
     if confidence is not None:
-        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
-            errors.append("confidence must be a number between 0 and 1")
-    if kind in {"inferred", "hypothesis"} and confidence is None:
+        if isinstance(confidence, str) and confidence.lower() in {"low", "medium", "high"}:
+            pass
+        elif isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+            errors.append("confidence must be a number between 0 and 1 or low/medium/high")
+    if kind in {"inferred", "hypothesis", "hypothetical"} and confidence is None:
         errors.append("confidence is required for inferred and hypothesis claims")
-    if confidence is not None or kind in {"inferred", "hypothesis"}:
+    if (confidence is not None or kind in {"inferred", "hypothesis", "hypothetical"}) and not isinstance(confidence, str):
         _as_nonempty_string(claim.get("confidence_basis"), "confidence_basis", errors)
-    if kind in {"inferred", "hypothesis"} and status == "active":
-        if claim.get("reviewed_at") in (None, ""):
-            errors.append("reviewed_at is required for an active inferred or hypothesis claim")
-        else:
+    if kind in {"inferred", "hypothesis", "hypothetical"} and status == "active":
+        if claim.get("reviewed_at") in (None, "") and claim.get("last_reviewed") in (None, ""):
+            errors.append("reviewed_at or last_reviewed is required for an active inferred or hypothesis claim")
+        elif claim.get("reviewed_at"):
             _parse_date(claim.get("reviewed_at"), "reviewed_at", errors)
-        _as_nonempty_string(claim.get("reviewed_by"), "reviewed_by", errors)
+        if claim.get("reviewed_by") is not None:
+            _as_nonempty_string(claim.get("reviewed_by"), "reviewed_by", errors)
 
     return errors
 
 
 def _claim_result(claim: Any, errors: list[str], index: int = 1, path: str | None = None) -> dict[str, Any]:
-    claim_id = claim.get("id") if isinstance(claim, dict) else None
+    claim_id = (claim.get("id") or claim.get("claim_id")) if isinstance(claim, dict) else None
     result: dict[str, Any] = {
         "index": index,
         "id": str(claim_id or f"claim-{index:03d}"),
@@ -184,7 +203,7 @@ def validate_claims(data: Any) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     for index, claim in enumerate(claims, start=1):
         errors = validate_claim(claim)
-        claim_id = claim.get("id") if isinstance(claim, dict) else None
+        claim_id = (claim.get("id") or claim.get("claim_id")) if isinstance(claim, dict) else None
         if isinstance(claim_id, str) and claim_id:
             if claim_id in seen:
                 errors.append("duplicate claim id")

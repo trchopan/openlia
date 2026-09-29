@@ -1,15 +1,15 @@
 ---
 claim_id: claim-YYYYMMDD-short-slug
-statement: "<plain-language statement>"
-kind: reported
-status: candidate
-source: "<source reference or message ID>"
-provenance: "<who supplied the information and context>"
-temporal_scope: "<valid time range or review trigger>"
-confidence: high
-first_recorded: "YYYY-MM-DD"
-last_reviewed: "YYYY-MM-DD"
-review_due: "YYYY-MM-DD"
+statement: ""
+kind: reported | observed | inferred | hypothetical
+status: candidate | active | contested | superseded | rejected
+source: ""
+provenance: ""
+temporal_scope: ""
+confidence: low | medium | high
+first_recorded: YYYY-MM-DD
+last_reviewed: YYYY-MM-DD
+review_due: YYYY-MM-DD
 related_claims: []
 ---
 

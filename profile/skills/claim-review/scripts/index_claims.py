@@ -47,9 +47,9 @@ def _state(claim: dict[str, Any], as_of: date) -> str:
     if valid_until and as_of > valid_until:
         return "expired"
     status = str(claim.get("status") or "")
-    if status in {"candidate", "stale", "contested", "superseded", "retracted"}:
+    if status in {"candidate", "stale", "contested", "superseded", "retracted", "rejected"}:
         return status
-    review_after = _claim_date(claim.get("review_after"))
+    review_after = _claim_date(claim.get("review_after") or claim.get("review_due"))
     if status == "active" and review_after and as_of >= review_after:
         return "review_due"
     return "active"
@@ -59,13 +59,18 @@ def _public_record(claim: dict[str, Any], path: Path, workspace: Path, as_of: da
     state = _state(claim, as_of)
     fields = (
         "id",
+        "claim_id",
         "claim",
+        "statement",
         "kind",
         "status",
         "source",
         "provenance",
         "asserted_at",
         "observed_at",
+        "first_recorded",
+        "last_reviewed",
+        "review_due",
         "valid_from",
         "valid_until",
         "review_after",
@@ -76,6 +81,10 @@ def _public_record(claim: dict[str, Any], path: Path, workspace: Path, as_of: da
         "supersedes",
     )
     record = {field: claim[field] for field in fields if field in claim}
+    if "id" not in record and "claim_id" in record:
+        record["id"] = record["claim_id"]
+    if "claim" not in record and "statement" in record:
+        record["claim"] = record["statement"]
     record.update(
         {
             "path": str(path.relative_to(workspace)),
