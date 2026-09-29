@@ -178,6 +178,6 @@ func releaseSummary(assets fs.FS) (map[string]any, error) {
 		"archive_bytes":  len(archive),
 		"archive_sha256": digest,
 		"hermes_tag":     "v2026.9.14",
-		"locho_version":  "1.2.0-beta.1",
+		"locho_version":  "1.2.0",
 	}, nil
 }
