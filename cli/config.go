@@ -74,6 +74,8 @@ type Config struct {
 	HermesDigest            string
 	LochoImage              string
 	LochoVersion            string
+	LochoX8664SHA256        string
+	LochoARM64SHA256        string
 	APIEnabled              bool
 	APIHost                 string
 	WorkspaceUIHost         string
@@ -84,6 +86,7 @@ type Config struct {
 	OpenWebUIPort           int
 	OpenWebUIImage          string
 	OpenWebUIAuth           bool
+	LochoHostEnabled        bool
 	SecretSource            string
 	ReleaseSource           string
 	EnabledSkills           []string
@@ -133,28 +136,31 @@ type OpenLIABrowserConfig struct {
 
 func defaultConfig() Config {
 	return Config{
-		Schema:          configSchema,
-		Version:         defaultVersion,
-		Mode:            "ssh",
-		InstallRoot:     defaultRemoteRoot,
-		Project:         defaultProject,
-		Model:           "gpt-5.6-luna",
-		OutputLanguage:  defaultOutputLanguage,
-		Timezone:        defaultTimezone,
-		Provider:        "copilot",
-		HermesImage:     "openlia-hermes:v2026.9.14",
-		HermesTag:       "v2026.9.14",
-		HermesDigest:    "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294",
-		LochoImage:      "openlia-locho:v1.2.0-beta.1",
-		LochoVersion:    "1.2.0-beta.1",
-		APIHost:         "127.0.0.1",
-		WorkspaceUIHost: "",
-		WorkspaceUIPort: defaultWorkspaceUIPort,
-		OpenWebUIHost:   "",
-		OpenWebUIPort:   defaultOpenWebUIPort,
-		OpenWebUIImage:  defaultOpenWebUIImage,
-		OpenWebUIAuth:   true,
-		EnabledSkills:   append([]string(nil), defaultSkills...),
+		Schema:           configSchema,
+		Version:          defaultVersion,
+		Mode:             "ssh",
+		InstallRoot:      defaultRemoteRoot,
+		Project:          defaultProject,
+		Model:            "gpt-5.6-luna",
+		OutputLanguage:   defaultOutputLanguage,
+		Timezone:         defaultTimezone,
+		Provider:         "copilot",
+		HermesImage:      "openlia-hermes:v2026.9.14",
+		HermesTag:        "v2026.9.14",
+		HermesDigest:     "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294",
+		LochoImage:       "openlia-locho:v1.2.0-beta.1",
+		LochoVersion:     "1.2.0-beta.1",
+		LochoX8664SHA256: "9d257c856f0a9c8220285db45c28c6227dfa76017d160f74490cfef7bd784ad4",
+		LochoARM64SHA256: "1c0e67b130734467783e5e48a69d3003d218a4da624ba5841f3c5e6840f19c18",
+		APIHost:          "127.0.0.1",
+		WorkspaceUIHost:  "",
+		WorkspaceUIPort:  defaultWorkspaceUIPort,
+		OpenWebUIHost:    "",
+		OpenWebUIPort:    defaultOpenWebUIPort,
+		OpenWebUIImage:   defaultOpenWebUIImage,
+		OpenWebUIAuth:    true,
+		LochoHostEnabled: false,
+		EnabledSkills:    append([]string(nil), defaultSkills...),
 		WorkspaceGit: WorkspaceGitConfig{
 			Provider:    "github",
 			Branch:      "main",
@@ -370,6 +376,8 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.OpenWebUIImage, err = parseString(value)
 			case "open-webui.auth":
 				config.OpenWebUIAuth, err = parseBool(value)
+			case "locho-host.enabled":
+				config.LochoHostEnabled, err = parseBool(value)
 			case "openlia-browser.mode":
 				config.OpenLIABrowser.Mode, err = parseString(value)
 			case "openlia-browser.target":
@@ -394,6 +402,10 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.LochoImage, err = parseString(value)
 			case "components.locho_version":
 				config.LochoVersion, err = parseString(value)
+			case "components.locho_x86_64_sha256":
+				config.LochoX8664SHA256, err = parseString(value)
+			case "components.locho_arm64_sha256":
+				config.LochoARM64SHA256, err = parseString(value)
 			case "api.enabled":
 				config.APIEnabled, err = parseBool(value)
 			case "api.host":
@@ -521,15 +533,29 @@ func validateConfig(config Config) error {
 	if config.LochoVersion == "" || config.LochoImage == "" || config.HermesImage == "" {
 		return errors.New("component versions and image names are required")
 	}
+	if !validDigest("sha256:"+config.LochoX8664SHA256) || !validDigest("sha256:"+config.LochoARM64SHA256) {
+		return errors.New("Locho release checksums must be 64 lowercase hexadecimal characters")
+	}
 	if config.APIHost != "127.0.0.1" {
 		return errors.New("API host must remain 127.0.0.1; use SSH or a private network for access")
 	}
-	if err := validateWorkspaceUI(config.WorkspaceUIHost, config.WorkspaceUIPort, config.WorkspaceUIPublicOrigin, config.WorkspaceUIPasswordHash); err != nil {
+	if err := validateWorkspaceUI(config.WorkspaceUIHost, config.WorkspaceUIPort, config.WorkspaceUIPublicOrigin, config.WorkspaceUIPasswordHash, config.LochoHostEnabled); err != nil {
 		return err
 	}
 	if config.OpenWebUIHost != "" {
 		if err := validateOpenWebUI(config.OpenWebUIHost, config.OpenWebUIPort); err != nil {
 			return err
+		}
+	}
+	if config.LochoHostEnabled {
+		if config.WorkspaceUIHost != "127.0.0.1" || config.OpenWebUIHost != "127.0.0.1" {
+			return errors.New("locho-host requires workspace-ui and open-webui to bind to 127.0.0.1")
+		}
+		if config.WorkspaceUIPort == config.OpenWebUIPort {
+			return errors.New("locho-host requires different workspace-ui and open-webui ports")
+		}
+		if !config.OpenWebUIAuth {
+			return errors.New("locho-host requires open-webui authentication")
 		}
 	}
 	if config.OpenLIABrowser.Configured {
@@ -613,7 +639,7 @@ func validateConfig(config Config) error {
 	return nil
 }
 
-func validateWorkspaceUI(host string, port int, publicOrigin, passwordHash string) error {
+func validateWorkspaceUI(host string, port int, publicOrigin, passwordHash string, authRequired bool) error {
 	if host != "" && (net.ParseIP(host) == nil || host != "127.0.0.1" && host != "0.0.0.0") {
 		return errors.New("workspace-ui.host must be 127.0.0.1 or 0.0.0.0")
 	}
@@ -628,8 +654,8 @@ func validateWorkspaceUI(host string, port int, publicOrigin, passwordHash strin
 			return err
 		}
 	}
-	if host == "0.0.0.0" && passwordHash == "" {
-		return errors.New("workspace-ui.password_hash is required when workspace-ui.host is 0.0.0.0")
+	if (host == "0.0.0.0" || authRequired) && passwordHash == "" {
+		return errors.New("workspace-ui.password_hash is required when Workspace UI authentication is enabled")
 	}
 	return nil
 }
@@ -961,6 +987,9 @@ func renderConfig(config Config) string {
 		}
 		builder.WriteString("\n")
 	}
+	if config.LochoHostEnabled {
+		builder.WriteString("[locho-host]\nenabled = true\n\n")
+	}
 	if config.OpenWebUIHost != "" {
 		fmt.Fprintf(&builder, "[open-webui]\nhost = %q\nport = %d\n", config.OpenWebUIHost, config.OpenWebUIPort)
 		if config.OpenWebUIImage != "" && config.OpenWebUIImage != defaultOpenWebUIImage {
@@ -983,7 +1012,7 @@ func renderConfig(config Config) string {
 		builder.WriteString("\n")
 	}
 	fmt.Fprintf(&builder, "[release]\nsource = %q\n\n", config.ReleaseSource)
-	fmt.Fprintf(&builder, "[components]\nhermes_image = %q\nhermes_tag = %q\nhermes_digest = %q\nlocho_image = %q\nlocho_version = %q\n\n", config.HermesImage, config.HermesTag, config.HermesDigest, config.LochoImage, config.LochoVersion)
+	fmt.Fprintf(&builder, "[components]\nhermes_image = %q\nhermes_tag = %q\nhermes_digest = %q\nlocho_image = %q\nlocho_version = %q\nlocho_x86_64_sha256 = %q\nlocho_arm64_sha256 = %q\n\n", config.HermesImage, config.HermesTag, config.HermesDigest, config.LochoImage, config.LochoVersion, config.LochoX8664SHA256, config.LochoARM64SHA256)
 	fmt.Fprintf(&builder, "[api]\nenabled = %t\nhost = %q\n\n", config.APIEnabled, config.APIHost)
 	fmt.Fprintf(&builder, "[secrets]\nsource = %q\n\n", config.SecretSource)
 	for _, source := range config.SkillSources {

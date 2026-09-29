@@ -20,6 +20,9 @@ func testConfig(repo, runtime string) Config {
 		DataRoot:          filepath.Join(runtime, "hermes"),
 		SystemSkillsRoot:  filepath.Join(runtime, "system-skills"),
 		LochoRoot:         filepath.Join(runtime, "locho"),
+		LochoVersion:      "1.2.0-beta.1",
+		LochoX8664SHA256:  "9d257c856f0a9c8220285db45c28c6227dfa76017d160f74490cfef7bd784ad4",
+		LochoARM64SHA256:  "1c0e67b130734467783e5e48a69d3003d218a4da624ba5841f3c5e6840f19c18",
 		SecretDir:         filepath.Join(runtime, "secrets"),
 		SecretFile:        filepath.Join(runtime, "secrets", "hermes.env"),
 		BackupRoot:        filepath.Join(runtime, "backups"),
@@ -91,11 +94,14 @@ func TestLoadConfigFromEnv(t *testing.T) {
 		"OPENLIA_OPEN_WEBUI_PORT":            "8090",
 		"OPENLIA_OPEN_WEBUI_IMAGE":           "ghcr.io/open-webui/open-webui:main",
 		"OPENLIA_OPEN_WEBUI_AUTH":            "false",
+		"OPENLIA_LOCHO_VERSION":              "1.2.0-beta.1",
+		"OPENLIA_LOCHO_X86_64_SHA256":        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"OPENLIA_LOCHO_ARM64_SHA256":         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !config.LocalMode || !config.SkillsConfigured || config.OutputLanguage != "vi" || config.WorkspaceUIHost != "0.0.0.0" || config.WorkspaceUIPort != 8090 || config.WorkspaceUIPublicOrigin != "https://workspace.example.test" || config.OpenWebUIHost != "127.0.0.1" || config.OpenWebUIPort != 8090 || config.OpenWebUIImage != "ghcr.io/open-webui/open-webui:main" || config.OpenWebUIAuth != false || len(config.EnabledSkills) != 2 || config.NetworkName != "example-private" || config.Provider != "copilot" || len(config.FallbackProviders) != 2 || config.FallbackProviders[0].BaseURL != "https://gateway.example.test/v1" || config.FallbackProviders[1].Model != "official-model" {
+	if !config.LocalMode || !config.SkillsConfigured || config.OutputLanguage != "vi" || config.WorkspaceUIHost != "0.0.0.0" || config.WorkspaceUIPort != 8090 || config.WorkspaceUIPublicOrigin != "https://workspace.example.test" || config.OpenWebUIHost != "127.0.0.1" || config.OpenWebUIPort != 8090 || config.OpenWebUIImage != "ghcr.io/open-webui/open-webui:main" || config.OpenWebUIAuth != false || config.LochoX8664SHA256 != strings.Repeat("a", 64) || config.LochoARM64SHA256 != strings.Repeat("b", 64) || len(config.EnabledSkills) != 2 || config.NetworkName != "example-private" || config.Provider != "copilot" || len(config.FallbackProviders) != 2 || config.FallbackProviders[0].BaseURL != "https://gateway.example.test/v1" || config.FallbackProviders[1].Model != "official-model" {
 		t.Fatalf("unexpected typed config: %+v", config)
 	}
 }
@@ -130,6 +136,29 @@ func TestLoadConfigFromEnvUsesRuntimeIdentity(t *testing.T) {
 	}
 	if config.RuntimeUID != os.Getuid() || config.RuntimeGID != os.Getgid() {
 		t.Fatalf("local runtime identity = %d:%d, want %d:%d", config.RuntimeUID, config.RuntimeGID, os.Getuid(), os.Getgid())
+	}
+}
+
+func TestLoadConfigFromEnvConfiguresLochoHostState(t *testing.T) {
+	repo := t.TempDir()
+	runtime := filepath.Join(t.TempDir(), "runtime")
+	config, err := LoadConfigFromEnv(map[string]string{
+		"OPENLIA_REPO_ROOT":                  repo,
+		"OPENLIA_RUNTIME_ROOT":               runtime,
+		"OPENLIA_LOCAL_MODE":                 "true",
+		"OPENLIA_WORKSPACE_UI_HOST":          "127.0.0.1",
+		"OPENLIA_WORKSPACE_UI_AUTH_REQUIRED": "true",
+		"OPENLIA_OPEN_WEBUI_HOST":            "127.0.0.1",
+		"OPENLIA_LOCHO_HOST_ENABLED":         "true",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.LochoHostEnabled || config.LochoHostRoot != filepath.Join(runtime, "locho-host") || config.LochoHostConfig != filepath.Join(runtime, "locho-host", "locho.toml") || config.LochoHostStateRoot != filepath.Join(runtime, "locho-host", "state") {
+		t.Fatalf("unexpected Locho host config: %+v", config)
+	}
+	if err := config.ValidatePaths(); err != nil {
+		t.Fatalf("valid Locho host paths rejected: %v", err)
 	}
 }
 

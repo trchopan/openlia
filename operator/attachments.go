@@ -211,6 +211,11 @@ func generateAttachmentsFile(config Config) error {
 	if err := validateOpenWebUI(config.OpenWebUIHost, config.OpenWebUIPort); err != nil {
 		return err
 	}
+	if config.LochoHostEnabled {
+		if err := writeLochoHostConfig(config); err != nil {
+			return err
+		}
+	}
 	apiEnvPath := filepath.Join(config.SecretDir, "api-server.env")
 	if config.OpenWebUIHost != "" {
 		if err := EnsureOpenWebUISecrets(config); err != nil {
@@ -366,12 +371,21 @@ func generateAttachmentsFile(config Config) error {
 		builder.WriteString("    deploy:\n      resources:\n        limits:\n          cpus: \"1.0\"\n          memory: 1G\n")
 		builder.WriteString("    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n")
 	}
+	if config.LochoHostEnabled {
+		lochoRoot, _ := json.Marshal(config.LochoHostRoot)
+		lochoCommand := fmt.Sprintf("set -eu; set -- $(getent ahostsv4 workspace-ui); workspace_ip=\"$$1\"; set -- $(getent ahostsv4 open-webui); open_webui_ip=\"$$1\"; config=/var/lib/openlia-locho-host/locho.toml; temporary=\"$$config.tmp\"; trap 'rm -f \"$$temporary\"' EXIT; printf '[[services]]\\nname = \\\"workspace-ui\\\"\\ntype = \\\"tcp\\\"\\nendpoint = \\\"%%s:%d\\\"\\n\\n[[services]]\\nname = \\\"open-webui\\\"\\ntype = \\\"tcp\\\"\\nendpoint = \\\"%%s:%d\\\"\\n' \"$$workspace_ip\" \"$$open_webui_ip\" > \"$$temporary\"; chmod 600 \"$$temporary\"; mv -f \"$$temporary\" \"$$config\"; trap - EXIT; exec locho host --config \"$$config\"", config.WorkspaceUIPort, 8080)
+		quotedLochoCommand, _ := json.Marshal(lochoCommand)
+		builder.WriteString("  locho-host:\n")
+		builder.WriteString("    image: \"${OPENLIA_LOCHO_IMAGE:-openlia-locho:v1.2.0-beta.1}\"\n")
+		fmt.Fprintf(&builder, "    build:\n      context: ..\n      dockerfile: docker/locho.Dockerfile\n      args:\n        LOCHO_BASE_IMAGE: \"${LOCHO_BASE_IMAGE:-debian}\"\n        LOCHO_BASE_TAG: \"${LOCHO_BASE_TAG:-13.4-slim}\"\n        LOCHO_BASE_DIGEST: \"${LOCHO_BASE_DIGEST:-sha256:109e2c65005bf160609e4ba6acf7783752f8502ad218e298253428690b9eaa4b}\"\n        LOCHO_VERSION: %q\n        LOCHO_X86_64_SHA256: %q\n        LOCHO_AARCH64_SHA256: %q\n", config.LochoVersion, config.LochoX8664SHA256, config.LochoARM64SHA256)
+		builder.WriteString(fmt.Sprintf("    entrypoint: [\"sh\", \"-c\"]\n    command: [%s]\n    restart: unless-stopped\n    user: \"%d:%d\"\n    read_only: true\n    tmpfs:\n      - /tmp\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    environment:\n      LOCHO_STATE_DIR: /var/lib/openlia-locho-host/state\n    volumes:\n      - type: bind\n        source: %s\n        target: /var/lib/openlia-locho-host\n    depends_on:\n      - workspace-ui\n      - open-webui\n    networks:\n      - openlia-private\n    deploy:\n      resources:\n        limits:\n          cpus: \"0.5\"\n          memory: 512M\n    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n", quotedLochoCommand, config.RuntimeUID, config.RuntimeGID, lochoRoot))
+	}
 	for _, host := range hosts.Hosts {
 		configPath := filepath.Join(config.LochoRoot, host.Host, "attachments.toml")
 		quoted, _ := json.Marshal(configPath)
 		fmt.Fprintf(&builder, "  locho-%s:\n", host.Host)
 		builder.WriteString("    image: \"${OPENLIA_LOCHO_IMAGE:-openlia-locho:v1.2.0-beta.1}\"\n")
-		builder.WriteString("    build:\n      context: ..\n      dockerfile: docker/locho.Dockerfile\n      args:\n        LOCHO_BASE_IMAGE: \"${LOCHO_BASE_IMAGE:-debian}\"\n        LOCHO_BASE_TAG: \"${LOCHO_BASE_TAG:-13.4-slim}\"\n        LOCHO_BASE_DIGEST: \"${LOCHO_BASE_DIGEST:-sha256:109e2c65005bf160609e4ba6acf7783752f8502ad218e298253428690b9eaa4b}\"\n        LOCHO_VERSION: \"1.2.0-beta.1\"\n        LOCHO_X86_64_SHA256: \"9d257c856f0a9c8220285db45c28c6227dfa76017d160f74490cfef7bd784ad4\"\n        LOCHO_AARCH64_SHA256: \"1c0e67b130734467783e5e48a69d3003d218a4da624ba5841f3c5e6840f19c18\"\n")
+		fmt.Fprintf(&builder, "    build:\n      context: ..\n      dockerfile: docker/locho.Dockerfile\n      args:\n        LOCHO_BASE_IMAGE: \"${LOCHO_BASE_IMAGE:-debian}\"\n        LOCHO_BASE_TAG: \"${LOCHO_BASE_TAG:-13.4-slim}\"\n        LOCHO_BASE_DIGEST: \"${LOCHO_BASE_DIGEST:-sha256:109e2c65005bf160609e4ba6acf7783752f8502ad218e298253428690b9eaa4b}\"\n        LOCHO_VERSION: %q\n        LOCHO_X86_64_SHA256: %q\n        LOCHO_AARCH64_SHA256: %q\n", config.LochoVersion, config.LochoX8664SHA256, config.LochoARM64SHA256)
 		builder.WriteString(fmt.Sprintf("    command: [\"attach\", \"--config\", \"/etc/locho/attachments.toml\"]\n    restart: unless-stopped\n    user: \"%d:%d\"\n    read_only: true\n    tmpfs:\n      - /tmp\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    volumes:\n", config.RuntimeUID, config.RuntimeGID))
 		fmt.Fprintf(&builder, "      - type: bind\n        source: %s\n        target: /etc/locho/attachments.toml\n        read_only: true\n    networks:\n      - openlia-private\n", quoted)
 		builder.WriteString("    deploy:\n      resources:\n        limits:\n          cpus: \"0.5\"\n          memory: 512M\n")
@@ -387,6 +401,28 @@ func generateAttachmentsFile(config Config) error {
 		return err
 	}
 	return nil
+}
+
+func writeLochoHostConfig(config Config) error {
+	if err := ensureLochoHostDirectory(config.LochoHostRoot, config.RuntimeUID, config.RuntimeGID); err != nil {
+		return err
+	}
+	if err := ensureLochoHostDirectory(config.LochoHostStateRoot, config.RuntimeUID, config.RuntimeGID); err != nil {
+		return err
+	}
+	if info, err := os.Lstat(config.LochoHostConfig); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("Locho host config must be a regular non-symlink file")
+		}
+		return ensureRuntimeOwner(config.LochoHostConfig, config.RuntimeUID, config.RuntimeGID, 0o600)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	contents := "[[services]]\nname = \"workspace-ui\"\ntype = \"tcp\"\nendpoint = \"127.0.0.1:" + strconv.Itoa(config.WorkspaceUIPort) + "\"\n\n[[services]]\nname = \"open-webui\"\ntype = \"tcp\"\nendpoint = \"127.0.0.1:" + strconv.Itoa(config.OpenWebUIPort) + "\"\n"
+	if err := AtomicWriteFile(config.LochoHostConfig, []byte(contents), 0o600); err != nil {
+		return err
+	}
+	return ensureRuntimeOwner(config.LochoHostConfig, config.RuntimeUID, config.RuntimeGID, 0o600)
 }
 
 func ensureAPIServerEnv(config Config, path string) error {

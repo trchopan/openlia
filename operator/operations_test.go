@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -51,6 +52,33 @@ type deployBuildRunner struct {
 	calls     []string
 	dataRoot  string
 	secretDir string
+}
+
+type lochoLifecycleRunner struct {
+	calls           []string
+	runningServices string
+	stale           bool
+}
+
+func (r *lochoLifecycleRunner) Run(_ context.Context, name string, args ...string) (CommandResult, error) {
+	call := strings.Join(append([]string{name}, args...), " ")
+	r.calls = append(r.calls, call)
+	if strings.Contains(call, "config --services") {
+		return CommandResult{Stdout: []byte("workspace-ui\nopen-webui\nlocho-host\n")}, nil
+	}
+	if strings.Contains(call, "ps --services --filter status=running") {
+		return CommandResult{Stdout: []byte(r.runningServices)}, nil
+	}
+	if strings.Contains(call, "port workspace-ui 8089") {
+		return CommandResult{Stdout: []byte("127.0.0.1:8089\n")}, nil
+	}
+	if strings.Contains(call, "port open-webui 8080") {
+		return CommandResult{Stdout: []byte("127.0.0.1:8090\n")}, nil
+	}
+	if strings.Contains(call, "exec -T locho-host sh -c") && r.stale {
+		return CommandResult{ExitCode: 1}, fmt.Errorf("stale endpoint")
+	}
+	return CommandResult{}, nil
 }
 
 func (r *deployBuildRunner) Run(_ context.Context, name string, args ...string) (CommandResult, error) {
@@ -283,6 +311,7 @@ func TestDeployOpenWebUIComponentTargetsOnlyOpenWebUI(t *testing.T) {
 	config := testConfig(repo, runtimeRoot)
 	config.OpenWebUIHost = "127.0.0.1"
 	config.OpenWebUIPort = 8090
+	config.OpenWebUIAuth = true
 	if err := os.MkdirAll(filepath.Join(repo, "docker"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -311,6 +340,162 @@ func TestDeployOpenWebUIComponentTargetsOnlyOpenWebUI(t *testing.T) {
 	}
 	if strings.Contains(joined, "hermes") || strings.Contains(joined, "locho") || strings.Contains(joined, "workspace-ui") {
 		t.Fatalf("targeted open-webui deploy touched another service: %s", joined)
+	}
+}
+
+func TestTargetedUIRecreationAlsoRecreatesLochoHost(t *testing.T) {
+	for _, component := range []string{"workspace-ui", "open-webui"} {
+		t.Run(component, func(t *testing.T) {
+			repo := t.TempDir()
+			runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+			config := testConfig(repo, runtimeRoot)
+			config.LochoHostEnabled = true
+			config.LochoHostRoot = filepath.Join(runtimeRoot, "locho-host")
+			config.LochoHostConfig = filepath.Join(config.LochoHostRoot, "locho.toml")
+			config.LochoHostStateRoot = filepath.Join(config.LochoHostRoot, "state")
+			config.WorkspaceUIHost = "127.0.0.1"
+			config.WorkspaceUIAuthRequired = true
+			config.WorkspaceUIPasswordHashFile = filepath.Join(config.SecretDir, "workspace-ui-password.hash")
+			config.OpenWebUIHost = "127.0.0.1"
+			config.OpenWebUIAuth = true
+			for _, directory := range []string{filepath.Dir(config.ComposeFile), config.SecretDir, config.MetaRoot, config.LochoHostRoot, config.LochoHostStateRoot} {
+				if err := os.MkdirAll(directory, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(config.ComposeFile, []byte("services: {}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(config.SecretFile, []byte("# test\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := WriteState(config, stateNeverStarted); err != nil {
+				t.Fatal(err)
+			}
+			runner := &lochoLifecycleRunner{runningServices: "workspace-ui\nopen-webui\nlocho-host\n"}
+			if _, err := Deploy(context.Background(), config, NewCompose(config, runner), DeployOptions{Action: "start", Component: component, HealthAttempts: 1}, time.Now()); err != nil {
+				t.Fatalf("%v; calls=%v", err, runner.calls)
+			}
+			joined := strings.Join(runner.calls, "\n")
+			if !strings.Contains(joined, "up -d --no-deps --force-recreate "+component) || !strings.Contains(joined, "up -d --no-deps --force-recreate locho-host") {
+				t.Fatalf("targeted recreation did not reconcile Locho host: %s", joined)
+			}
+		})
+	}
+}
+
+func TestLochoHostHealthRejectsStaleEndpoints(t *testing.T) {
+	config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+	config.LochoHostEnabled = true
+	runner := &lochoLifecycleRunner{runningServices: "workspace-ui\nopen-webui\nlocho-host\n", stale: true}
+	if lochoHostHealthy(context.Background(), config, NewCompose(config, runner)) {
+		t.Fatal("stale Locho endpoints were reported healthy")
+	}
+}
+
+func TestLochoOnlyDeployRejectsStoppedUIDependencies(t *testing.T) {
+	repo := t.TempDir()
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	config := testConfig(repo, runtimeRoot)
+	config.LochoHostEnabled = true
+	config.LochoHostRoot = filepath.Join(runtimeRoot, "locho-host")
+	config.LochoHostConfig = filepath.Join(config.LochoHostRoot, "locho.toml")
+	config.LochoHostStateRoot = filepath.Join(config.LochoHostRoot, "state")
+	config.WorkspaceUIHost = "127.0.0.1"
+	config.WorkspaceUIAuthRequired = true
+	config.WorkspaceUIPasswordHashFile = filepath.Join(config.SecretDir, "workspace-ui-password.hash")
+	config.OpenWebUIHost = "127.0.0.1"
+	config.OpenWebUIAuth = true
+	for _, directory := range []string{filepath.Dir(config.ComposeFile), config.SecretDir, config.MetaRoot, config.LochoHostRoot, config.LochoHostStateRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(config.ComposeFile, []byte("services: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.SecretFile, []byte("# test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteState(config, stateRunning); err != nil {
+		t.Fatal(err)
+	}
+	runner := &lochoLifecycleRunner{runningServices: "locho-host\n"}
+	if _, err := Deploy(context.Background(), config, NewCompose(config, runner), DeployOptions{Action: "deploy", Component: "locho", HealthAttempts: 1}, time.Now()); err == nil || !strings.Contains(err.Error(), "run openlia deploy first") {
+		t.Fatalf("missing UI dependencies were not rejected: %v", err)
+	}
+}
+
+func TestTargetedUIUpdateRejectsStoppedPeer(t *testing.T) {
+	for _, test := range []struct {
+		component string
+		running   string
+	}{
+		{component: "workspace-ui", running: "workspace-ui\nlocho-host\n"},
+		{component: "open-webui", running: "open-webui\nlocho-host\n"},
+	} {
+		t.Run(test.component, func(t *testing.T) {
+			repo := t.TempDir()
+			runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+			config := testConfig(repo, runtimeRoot)
+			config.LochoHostEnabled = true
+			config.LochoHostRoot = filepath.Join(runtimeRoot, "locho-host")
+			config.LochoHostConfig = filepath.Join(config.LochoHostRoot, "locho.toml")
+			config.LochoHostStateRoot = filepath.Join(config.LochoHostRoot, "state")
+			config.WorkspaceUIHost = "127.0.0.1"
+			config.WorkspaceUIAuthRequired = true
+			config.WorkspaceUIPasswordHashFile = filepath.Join(config.SecretDir, "workspace-ui-password.hash")
+			config.OpenWebUIHost = "127.0.0.1"
+			config.OpenWebUIAuth = true
+			for _, directory := range []string{filepath.Dir(config.ComposeFile), config.SecretDir, config.MetaRoot, config.LochoHostRoot, config.LochoHostStateRoot} {
+				if err := os.MkdirAll(directory, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(config.ComposeFile, []byte("services: {}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(config.SecretFile, []byte("# test\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := WriteState(config, stateStopped); err != nil {
+				t.Fatal(err)
+			}
+			runner := &lochoLifecycleRunner{runningServices: test.running}
+			if _, err := Deploy(context.Background(), config, NewCompose(config, runner), DeployOptions{Action: "deploy", Component: test.component, ForceStart: true, HealthAttempts: 1}, time.Now()); err == nil || !strings.Contains(err.Error(), "run openlia deploy first") {
+				t.Fatalf("stopped peer was not rejected: %v", err)
+			}
+			for _, call := range runner.calls {
+				if strings.Contains(call, " up -d") {
+					t.Fatalf("partial stack was started before rejection: %v", runner.calls)
+				}
+			}
+		})
+	}
+}
+
+func TestLochoHostConfigRejectsSymlink(t *testing.T) {
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	config := testConfig(t.TempDir(), runtimeRoot)
+	config.LochoHostEnabled = true
+	config.LochoHostRoot = filepath.Join(runtimeRoot, "locho-host")
+	config.LochoHostConfig = filepath.Join(config.LochoHostRoot, "locho.toml")
+	config.LochoHostStateRoot = filepath.Join(config.LochoHostRoot, "state")
+	if err := os.MkdirAll(config.LochoHostStateRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "target")
+	if err := os.WriteFile(target, []byte("protected\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, config.LochoHostConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeLochoHostConfig(config); err == nil || !strings.Contains(err.Error(), "non-symlink") {
+		t.Fatalf("Locho config symlink was not rejected: %v", err)
+	}
+	if info, err := os.Stat(target); err != nil || info.Mode().Perm() != 0o644 {
+		t.Fatalf("symlink target metadata changed: %v, %v", info, err)
 	}
 }
 
@@ -853,6 +1038,117 @@ func TestGeneratedAttachmentsContainOpenWebUI(t *testing.T) {
 	}
 	if info, err := os.Stat(apiEnvPath); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("api-server.env has unsafe mode: %v", err)
+	}
+}
+
+func TestGeneratedAttachmentsContainLochoHostForBothUIs(t *testing.T) {
+	repo := t.TempDir()
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	config := testConfig(repo, runtimeRoot)
+	config.LochoHostEnabled = true
+	config.LochoHostRoot = filepath.Join(runtimeRoot, "locho-host")
+	config.LochoHostConfig = filepath.Join(config.LochoHostRoot, "locho.toml")
+	config.LochoHostStateRoot = filepath.Join(config.LochoHostRoot, "state")
+	config.LochoVersion = "9.9.9-test"
+	config.LochoX8664SHA256 = strings.Repeat("a", 64)
+	config.LochoARM64SHA256 = strings.Repeat("b", 64)
+	config.WorkspaceUIHost = "127.0.0.1"
+	config.WorkspaceUIAuthRequired = true
+	config.WorkspaceUIPasswordHashFile = filepath.Join(runtimeRoot, "secrets", "workspace-ui-password.hash")
+	config.OpenWebUIHost = "127.0.0.1"
+	config.OpenWebUIPort = 8090
+	config.OpenWebUIAuth = true
+	if err := os.MkdirAll(filepath.Join(repo, "docker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SecretDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.SecretFile, []byte("COPILOT_GITHUB_TOKEN=gho_testtoken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := GenerateAttachments(config); err != nil {
+		t.Fatal(err)
+	}
+	lochoConfig, err := os.ReadFile(config.LochoHostConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"name = \"workspace-ui\"",
+		"endpoint = \"127.0.0.1:8089\"",
+		"name = \"open-webui\"",
+		"endpoint = \"127.0.0.1:8090\"",
+	} {
+		if !strings.Contains(string(lochoConfig), expected) {
+			t.Fatalf("Locho host config missing %q:\n%s", expected, lochoConfig)
+		}
+	}
+	data, err := os.ReadFile(config.GeneratedCompose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, expected := range []string{
+		"locho-host:",
+		"entrypoint: [\"sh\", \"-c\"]",
+		"exec locho host --config",
+		"target: /var/lib/openlia-locho-host",
+		"LOCHO_STATE_DIR: /var/lib/openlia-locho-host/state",
+		"- openlia-private",
+		"depends_on:",
+		"LOCHO_VERSION: \"9.9.9-test\"",
+		"LOCHO_X86_64_SHA256: \"" + strings.Repeat("a", 64) + "\"",
+		"LOCHO_AARCH64_SHA256: \"" + strings.Repeat("b", 64) + "\"",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated Compose missing %q:\n%s", expected, text)
+		}
+	}
+	activeConfig := "[[services]]\nname = \"workspace-ui\"\ntype = \"tcp\"\nendpoint = \"172.30.0.2:8089\"\n\n[[services]]\nname = \"open-webui\"\ntype = \"tcp\"\nendpoint = \"172.30.0.3:8080\"\n"
+	if err := os.WriteFile(config.LochoHostConfig, []byte(activeConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := GenerateAttachments(config); err != nil {
+		t.Fatal(err)
+	}
+	preserved, err := os.ReadFile(config.LochoHostConfig)
+	if err != nil || string(preserved) != activeConfig {
+		t.Fatalf("active Locho host config was overwritten: %q, %v", preserved, err)
+	}
+}
+
+func TestGeneratedLochoHostComposeValidates(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker CLI is unavailable")
+	}
+	repo, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	config := testConfig(repo, runtimeRoot)
+	config.GeneratedCompose = filepath.Join(t.TempDir(), "compose.generated.yaml")
+	config.LochoHostEnabled = true
+	config.LochoHostRoot = filepath.Join(runtimeRoot, "locho-host")
+	config.LochoHostConfig = filepath.Join(config.LochoHostRoot, "locho.toml")
+	config.LochoHostStateRoot = filepath.Join(config.LochoHostRoot, "state")
+	config.WorkspaceUIHost = "127.0.0.1"
+	config.WorkspaceUIAuthRequired = true
+	config.WorkspaceUIPasswordHashFile = filepath.Join(config.SecretDir, "workspace-ui-password.hash")
+	config.OpenWebUIHost = "127.0.0.1"
+	config.OpenWebUIAuth = true
+	if err := os.MkdirAll(config.SecretDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.SecretFile, []byte("COPILOT_GITHUB_TOKEN=gho_testtoken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := GenerateAttachments(config); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := NewCompose(config, nil).Run(context.Background(), "config", "--quiet"); err != nil {
+		t.Fatalf("generated Locho host Compose is invalid: %v\n%s\n%s", err, result.Stdout, result.Stderr)
 	}
 }
 

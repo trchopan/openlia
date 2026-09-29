@@ -631,6 +631,50 @@ Then initialize:
 ./openlia init --local --root "$HOME/.openlia"
 ```
 
+### Locho Host Bundle
+
+To avoid configuring the two web services separately, initialize OpenLia with
+its built-in Locho host bundle:
+
+```sh
+./openlia init --target user@server --root /srv/openlia --locho-host
+```
+
+The flag enables Workspace UI on the server's loopback interface at port `8089`,
+Open WebUI at port `8090`, and a private `locho-host` container. The Locho host
+exports only these two TCP services over the encrypted Locho connection; it does
+not publish a Docker or Locho application port on the server. The host resolves
+the two private Compose service addresses at startup and allows no other service
+endpoints. OpenLia prompts for the normal
+Workspace UI password and stores its Argon2id verifier in the existing protected
+configuration path. Open WebUI keeps its built-in account authentication.
+Non-interactive initialization requires an existing valid `password_hash` in the
+operator config. Workspace UI and Open WebUI must use different host ports.
+
+After the deployment is running, create a combined client attachment file on the
+operator machine:
+
+```sh
+./openlia locho-host share --output openlia-attachments.toml
+```
+
+Install the prerelease [Locho `1.2.0-beta.1`](https://github.com/trchopan/locho/releases/tag/v1.2.0-beta.1)
+on any client machine, transfer the generated
+mode-`0600` file through a trusted channel, and start both local listeners:
+
+```sh
+locho attach --config openlia-attachments.toml
+```
+
+Then open `http://127.0.0.1:8089` for Workspace UI and
+`http://127.0.0.1:8090` for Open WebUI. The attachment file contains service
+capabilities equivalent to passwords. Do not commit it, email it, or place it in
+shared logs. OpenLia does not yet expose host-capability rotation; follow Locho's
+documented stop/rotate/start requirement before redistributing a newly generated
+attachment file. Normal OpenLia durable backups intentionally exclude the host
+identity and its capabilities. UI-only updates automatically recreate the Locho
+host so it resolves the replacement UI containers before accepting attachments.
+
 `make build` writes the ignored Linux amd64 and arm64 operator artifacts under
 `dist/`; the host CLI includes them in release archives when they are present.
 It also generates the ignored package distributions required by the embedded

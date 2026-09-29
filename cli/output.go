@@ -84,9 +84,9 @@ managed locally or on its selected SSH target.
 
 Usage:
   openlia init [--local|--target user@host] [--root /path] [--project NAME]
-               [--timezone Asia/Ho_Chi_Minh] [--model MODEL] [--provider PROVIDER]
-               [--external-network NAME] [--api] [--api-host 127.0.0.1]
-               [--open-webui] [--open-webui-port 8090]
+                [--timezone Asia/Ho_Chi_Minh] [--model MODEL] [--provider PROVIDER]
+                [--external-network NAME] [--api] [--api-host 127.0.0.1]
+                [--open-webui] [--open-webui-port 8090] [--locho-host]
                [--workspace-git-remote https://github.com/OWNER/REPO.git]
   openlia status [--json]
   openlia doctor [--json]
@@ -107,6 +107,7 @@ Usage:
   openlia instructions status [NAME]
   openlia instructions diff|merge|keep|reset NAME
   openlia workspace-ui password
+  openlia locho-host share [--output PATH]
   openlia browser configure --local|--target user@host --root PATH --extension-token-file PATH [--ssh-port PORT]
   openlia browser install|start|stop|restart|status|logs|uninstall
   openlia telegram id [--token TOKEN]

@@ -81,7 +81,7 @@ func readWorkspaceUIPassword(prompt string) (string, error) {
 }
 
 func provisionWorkspaceUIPassword(ctx context.Context, deployment deployment, config Config) error {
-	if config.WorkspaceUIHost != "0.0.0.0" {
+	if !workspaceUIPasswordRequired(config) {
 		return nil
 	}
 	if err := validateWorkspaceUIPasswordHash(config.WorkspaceUIPasswordHash); err != nil {
@@ -112,6 +112,10 @@ func provisionWorkspaceUIPassword(ctx context.Context, deployment deployment, co
 		return fmt.Errorf("upload password verifier: %w", err)
 	}
 	return nil
+}
+
+func workspaceUIPasswordRequired(config Config) bool {
+	return config.WorkspaceUIHost == "0.0.0.0" || config.LochoHostEnabled
 }
 
 func rollbackWorkspaceUIPassword(ctx context.Context, deployment deployment, config Config, previousHash string) {

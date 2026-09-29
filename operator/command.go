@@ -94,6 +94,8 @@ func RunContext(ctx context.Context, args []string, input io.Reader, output, err
 		return runBackup(ctx, config, args, input, output, errorOutput, jsonOutput, now)
 	case "attachments":
 		return runAttachments(ctx, config, args, output, errorOutput, jsonOutput, now)
+	case "locho-host":
+		return runLochoHost(ctx, config, args, output, errorOutput, jsonOutput)
 	case "auth":
 		return runAuth(ctx, config, args, output, errorOutput, jsonOutput, now)
 	case "deploy":
@@ -191,6 +193,23 @@ func runBackup(ctx context.Context, config Config, args []string, _ io.Reader, o
 		return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 	}
 	return emit(output, result, jsonOutput, "openlia backup: restored "+result.Archive+"; secrets, attachments, and Open WebUI data remain destination-owned")
+}
+
+func runLochoHost(ctx context.Context, config Config, args []string, output, errorOutput io.Writer, jsonOutput bool) int {
+	if len(args) == 0 || args[0] != "share" || len(args) != 1 {
+		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("locho-host requires share"))
+	}
+	if jsonOutput {
+		return commandError(output, errorOutput, true, ExitUsage, fmt.Errorf("locho-host share does not expose capabilities through JSON output"))
+	}
+	result, err := ShareLochoHost(ctx, config, NewCompose(config, nil))
+	if err != nil {
+		return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+	}
+	if _, err := io.WriteString(output, result.AttachmentConfig); err != nil {
+		return commandError(output, errorOutput, false, ExitFailure, err)
+	}
+	return ExitOK
 }
 
 func runAttachments(ctx context.Context, config Config, args []string, output, errorOutput io.Writer, jsonOutput bool, now time.Time) int {
@@ -530,7 +549,7 @@ Usage:
   openlia-operator <subcommand> [--json]
 
 Subcommands:
-	  bootstrap profile skill-status skill-fork skill-migration skill-sources skills backup attachments auth deploy
+	  bootstrap profile skill-status skill-fork skill-migration skill-sources skills backup attachments locho-host auth deploy
 	  healthcheck workspace-git workspace-migrate instructions uninstall`)
 }
 

@@ -279,6 +279,42 @@ func TestPublicWorkspaceUIRequiresSupportedPasswordHash(t *testing.T) {
 	}
 }
 
+func TestLochoHostConfigRoundTripRequiresProtectedLocalUIs(t *testing.T) {
+	config := defaultConfig()
+	config.LochoHostEnabled = true
+	config.WorkspaceUIHost = "127.0.0.1"
+	config.OpenWebUIHost = "127.0.0.1"
+	hash, err := hashWorkspaceUIPassword("correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.WorkspaceUIPasswordHash = hash
+	if err := validateConfig(config); err != nil {
+		t.Fatalf("valid Locho host config was rejected: %v", err)
+	}
+	parsed, err := parseConfig(renderConfig(config))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !parsed.LochoHostEnabled || parsed.WorkspaceUIHost != "127.0.0.1" || parsed.OpenWebUIHost != "127.0.0.1" || parsed.WorkspaceUIPasswordHash != hash || parsed.LochoX8664SHA256 != config.LochoX8664SHA256 || parsed.LochoARM64SHA256 != config.LochoARM64SHA256 {
+		t.Fatalf("Locho host config did not round trip: %#v", parsed)
+	}
+
+	for _, edit := range []func(*Config){
+		func(candidate *Config) { candidate.WorkspaceUIHost = "0.0.0.0" },
+		func(candidate *Config) { candidate.OpenWebUIHost = "" },
+		func(candidate *Config) { candidate.WorkspaceUIPasswordHash = "" },
+		func(candidate *Config) { candidate.OpenWebUIPort = candidate.WorkspaceUIPort },
+		func(candidate *Config) { candidate.OpenWebUIAuth = false },
+	} {
+		candidate := config
+		edit(&candidate)
+		if err := validateConfig(candidate); err == nil {
+			t.Fatal("invalid Locho host config was accepted")
+		}
+	}
+}
+
 func TestLocalConfigRoundTrip(t *testing.T) {
 	temporary := t.TempDir()
 	path := filepath.Join(temporary, "config.toml")
