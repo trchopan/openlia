@@ -287,6 +287,84 @@ describe("resolveLinkTarget", () => {
       skillId: "weekly-review",
     });
   });
+
+  test("resolves document target by filename or stem when path is omitted", () => {
+    // Exact filename with extension
+    expect(resolveLinkTarget("website.md", { tree: mockTree })).toEqual({
+      exists: true,
+      kind: "workspace",
+      label: "projects/website.md",
+      path: "projects/website.md",
+    });
+    expect(resolveLinkTarget("career.md", { tree: mockTree })).toEqual({
+      exists: true,
+      kind: "workspace",
+      label: "goals/career.md",
+      path: "goals/career.md",
+    });
+
+    // Stem without extension
+    expect(resolveLinkTarget("website", { tree: mockTree })).toEqual({
+      exists: true,
+      kind: "workspace",
+      label: "projects/website.md",
+      path: "projects/website.md",
+    });
+    expect(resolveLinkTarget("career", { tree: mockTree })).toEqual({
+      exists: true,
+      kind: "workspace",
+      label: "goals/career.md",
+      path: "goals/career.md",
+    });
+
+    // Path without extension
+    expect(resolveLinkTarget("projects/website", { tree: mockTree })).toEqual({
+      exists: true,
+      kind: "workspace",
+      label: "projects/website.md",
+      path: "projects/website.md",
+    });
+
+    // Unprefixed files/ path
+    expect(
+      resolveLinkTarget("files/projects/website.md", { tree: mockTree }),
+    ).toEqual({
+      exists: true,
+      kind: "workspace",
+      label: "projects/website.md",
+      path: "projects/website.md",
+    });
+
+    // Query parameter path
+    expect(
+      resolveLinkTarget("/?path=projects/website.md", { tree: mockTree }),
+    ).toEqual({
+      exists: true,
+      kind: "workspace",
+      label: "projects/website.md",
+      path: "projects/website.md",
+    });
+    expect(
+      resolveLinkTarget(
+        "https://workspace.example.com/?path=projects/website.md",
+        { tree: mockTree },
+      ),
+    ).toEqual({
+      exists: true,
+      kind: "workspace",
+      label: "projects/website.md",
+      path: "projects/website.md",
+    });
+  });
+
+  test("returns null for arbitrary search terms without extension or slash that do not match", () => {
+    expect(
+      resolveLinkTarget("randomnonexistentquery", {
+        skills: mockSkills,
+        tree: mockTree,
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("filterGoToSuggestions", () => {

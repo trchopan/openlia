@@ -101,7 +101,9 @@ export function GoToModal({
       const selected =
         selectedIndex >= 0 && selectedIndex < suggestions.length
           ? (suggestions[selectedIndex] ?? null)
-          : null;
+          : target?.exists
+            ? null
+            : (suggestions[0] ?? null);
       executeNavigation(selected);
     }
   }

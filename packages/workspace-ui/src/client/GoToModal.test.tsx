@@ -171,8 +171,8 @@ describe("GoToModal", () => {
     );
     fireEvent.change(input, { target: { value: "career" } });
 
-    // Suggestion for goals/career.md should be visible
-    expect(screen.getByText("goals/career.md")).toBeInTheDocument();
+    // Suggestion and target card for goals/career.md should be visible
+    expect(screen.getAllByText("goals/career.md").length).toBeGreaterThan(0);
 
     // Press ArrowDown to highlight the suggestion
     fireEvent.keyDown(input, { key: "ArrowDown" });
@@ -180,6 +180,64 @@ describe("GoToModal", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(onNavigateWorkspace).toHaveBeenCalledWith("goals/career.md");
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("navigates to resolved target path when clicking Open button", () => {
+    const onNavigateWorkspace = vi.fn();
+    const onClose = vi.fn();
+
+    render(
+      <GoToModal
+        isOpen={true}
+        onClose={onClose}
+        onNavigateSkill={vi.fn()}
+        onNavigateWorkspace={onNavigateWorkspace}
+        skills={mockSkills}
+        tree={mockTree}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText(
+      "Paste link or path, or type file/skill name...",
+    );
+    fireEvent.change(input, { target: { value: "website.md" } });
+
+    expect(screen.getByText("Document")).toBeInTheDocument();
+    expect(screen.getAllByText("projects/website.md").length).toBeGreaterThan(
+      0,
+    );
+
+    const openButton = screen.getByRole("button", { name: /Open/i });
+    fireEvent.click(openButton);
+
+    expect(onNavigateWorkspace).toHaveBeenCalledWith("projects/website.md");
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("navigates to resolved target on immediate Enter without arrow navigation", () => {
+    const onNavigateWorkspace = vi.fn();
+    const onClose = vi.fn();
+
+    render(
+      <GoToModal
+        isOpen={true}
+        onClose={onClose}
+        onNavigateSkill={vi.fn()}
+        onNavigateWorkspace={onNavigateWorkspace}
+        skills={mockSkills}
+        tree={mockTree}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText(
+      "Paste link or path, or type file/skill name...",
+    );
+    fireEvent.change(input, { target: { value: "website" } });
+
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onNavigateWorkspace).toHaveBeenCalledWith("projects/website.md");
     expect(onClose).toHaveBeenCalled();
   });
 
