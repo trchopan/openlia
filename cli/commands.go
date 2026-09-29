@@ -32,8 +32,8 @@ func Run(args []string, assets fs.FS) int {
 			"schema":  1,
 			"version": defaultVersion,
 			"hermes":  "v2026.9.14",
-			"locho":   "1.2.0-beta.1",
-		}, fmt.Sprintf("openlia %s (Hermes v2026.9.14, Locho 1.2.0-beta.1)", defaultVersion))
+			"locho":   "1.2.0",
+		}, fmt.Sprintf("openlia %s (Hermes v2026.9.14, Locho 1.2.0)", defaultVersion))
 	}
 	if remaining[0] == "--help" || remaining[0] == "help" {
 		usage(os.Stdout)
@@ -650,7 +650,7 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 			"read_only": true,
 			"updates":   []any{},
 			"message":   "No release index is configured; choose an explicit component after changing its pinned desired version.",
-			"current":   map[string]string{"openlia": defaultVersion, "hermes": "v2026.9.14", "locho": "1.2.0-beta.1"},
+			"current":   map[string]string{"openlia": defaultVersion, "hermes": "v2026.9.14", "locho": "1.2.0"},
 		}, "No release index configured. No component was changed.")
 	}
 	if component != "openlia" && component != "hermes" && component != "locho" && component != "open-webui" {

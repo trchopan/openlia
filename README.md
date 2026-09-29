@@ -695,7 +695,7 @@ operator machine:
 ./openlia locho-host share --output openlia-attachments.toml
 ```
 
-Install the prerelease [Locho `1.2.0-beta.1`](https://github.com/trchopan/locho/releases/tag/v1.2.0-beta.1)
+Install [Locho `1.2.0`](https://github.com/trchopan/locho/releases/tag/v1.2.0)
 on any client machine, transfer the generated
 mode-`0600` file through a trusted channel, and start both local listeners:
 
