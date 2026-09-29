@@ -550,6 +550,33 @@ model = "official-openai-model"
 The `fallback_providers` table order is the failover order. Use the actual
 Locho Compose hostname, service port, and model IDs for your deployment.
 
+### Optional Tools
+
+OpenLia can add curated command-line capabilities to the Hermes image. Enable
+only the bundles the deployment needs:
+
+```toml
+[tools]
+enabled = ["pdf", "office", "ocr", "media-transcripts"]
+```
+
+| Capability | Installed commands and scope |
+| --- | --- |
+| `pdf` | Poppler utilities including `pdftotext` and `pdfinfo` |
+| `office` | Headless LibreOffice Writer and Calc for Word and Excel files, including legacy `.doc` and `.xls` formats |
+| `ocr` | Tesseract OCR with English language data |
+| `media-transcripts` | `yt-dlp` and `ffmpeg` for captions and media from supported public URLs |
+
+The list is an allowlist of capability names, not operating-system package
+names. Unknown and duplicate values are rejected. The default is an empty list
+so existing deployments retain the smaller base image. After changing the
+list, run `openlia deploy` to rebuild and recreate Hermes.
+
+`media-transcripts` retrieves subtitles or automatic captions when the source
+site exposes them. It does not perform local speech-to-text. YouTube, Twitter,
+and Facebook behavior depends on current `yt-dlp` support; private, age-gated,
+or authenticated media is not supported by this initial capability.
+
 Add a `[workspace-ui]` section with `host = "127.0.0.1"` to keep the Workspace
 Editor private, or use `host = "0.0.0.0"` to publish it on all interfaces. A
 public binding requires an Argon2id `password_hash`; create or rotate it with:

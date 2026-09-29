@@ -30,12 +30,15 @@ The derived images use these pinned base images:
   `sha256:109e2c65005bf160609e4ba6acf7783752f8502ad218e298253428690b9eaa4b`.
 
 The Dockerfiles install distribution packages including `ca-certificates`,
-`curl`, `git`, `hledger`, `passwd`, `tzdata`, `unzip`, and `xz-utils`. These
-packages and their transitive dependencies have package-specific licenses and
-copyright notices. The exact package versions are resolved by the Debian image
-at build time rather than pinned individually in this repository. For a built
-image, inspect the package metadata and files under `/usr/share/doc/*/copyright`
-and consult [Debian's license information](https://www.debian.org/legal/licenses/).
+`curl`, `git`, `hledger`, `passwd`, `tzdata`, `unzip`, and `xz-utils`. Optional
+tool capabilities may also install Poppler, LibreOffice Writer and Calc,
+Tesseract OCR and English language data, FFmpeg, and yt-dlp. These packages and
+their transitive dependencies have package-specific licenses and copyright
+notices. The exact package versions are resolved by the image's configured
+distribution repositories rather than pinned individually in this repository.
+For a built image, inspect the package metadata and files under
+`/usr/share/doc/*/copyright` and consult the distribution's license
+information.
 
 ## Bundled and Transitive Notices
 

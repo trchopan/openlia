@@ -24,6 +24,7 @@ func (r *environmentRecordingRunner) RunWithEnv(_ context.Context, environment [
 
 func TestComposeRunPassesResolvedRuntimeEnvironment(t *testing.T) {
 	config := testConfig(t.TempDir(), t.TempDir())
+	config.EnabledTools = []string{"pdf", "ocr"}
 	runner := &environmentRecordingRunner{}
 	compose := NewCompose(config, runner)
 	if _, err := compose.Run(context.Background(), "config", "--quiet"); err != nil {
@@ -37,6 +38,7 @@ func TestComposeRunPassesResolvedRuntimeEnvironment(t *testing.T) {
 		"OPENLIA_SKILLS_ENV_ROOT=" + config.SkillsEnvRoot,
 		"OPENLIA_SECRET_DIR=" + config.SecretDir,
 		"OPENLIA_NETWORK_NAME=" + config.NetworkName,
+		"OPENLIA_ENABLED_TOOLS=pdf,ocr",
 	} {
 		if !strings.Contains(environment, expected) {
 			t.Fatalf("Compose environment missing %q:\n%s", expected, environment)

@@ -59,6 +59,19 @@ func TestOperationCommandIncludesOutputLanguage(t *testing.T) {
 	}
 }
 
+func TestOperationCommandIncludesEnabledTools(t *testing.T) {
+	config := defaultConfig()
+	config.Target = "operator@example.test"
+	config.EnabledTools = []string{"pdf", "media-transcripts"}
+	command := (Remote{Config: config}).operationCommand("ops/deploy.sh")
+	if !strings.Contains(command, "OPENLIA_ENABLED_TOOLS='pdf,media-transcripts'") {
+		t.Fatalf("operation command does not include enabled tools: %s", command)
+	}
+	if !strings.Contains(strings.Join(operationEnvironment(config, "/tmp/release"), "\n"), "OPENLIA_ENABLED_TOOLS=pdf,media-transcripts") {
+		t.Fatal("local environment does not transport enabled tools")
+	}
+}
+
 func TestOperationCommandPrefersTargetOperatorWithLegacyFallback(t *testing.T) {
 	config := defaultConfig()
 	config.Target = "operator@example.test"

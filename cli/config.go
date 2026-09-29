@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"openlia/internal/toolcatalog"
 )
 
 const (
@@ -91,6 +93,7 @@ type Config struct {
 	SecretSource            string
 	ReleaseSource           string
 	EnabledSkills           []string
+	EnabledTools            []string
 	WorkspaceGit            WorkspaceGitConfig
 	SkillSources            []SkillSourceConfig
 	Services                []ServiceHostConfig
@@ -415,6 +418,8 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.SecretSource, err = parseString(value)
 			case "skills.enabled":
 				config.EnabledSkills, err = parseStringArray(value)
+			case "tools.enabled":
+				config.EnabledTools, err = parseStringArray(value)
 			case "workspace_git.enabled":
 				config.WorkspaceGit.Enabled, err = parseBool(value)
 			case "workspace_git.provider":
@@ -588,6 +593,9 @@ func validateConfig(config Config) error {
 		if !safeComponent(skill) {
 			return fmt.Errorf("invalid skill name %q", skill)
 		}
+	}
+	if err := toolcatalog.Validate(config.EnabledTools); err != nil {
+		return err
 	}
 	sourceNames := make(map[string]bool)
 	for index, source := range config.SkillSources {
@@ -1026,6 +1034,14 @@ func renderConfig(config Config) string {
 			builder.WriteString(", ")
 		}
 		fmt.Fprintf(&builder, "%q", skill)
+	}
+	builder.WriteString("]\n")
+	builder.WriteString("\n[tools]\nenabled = [")
+	for index, tool := range config.EnabledTools {
+		if index > 0 {
+			builder.WriteString(", ")
+		}
+		fmt.Fprintf(&builder, "%q", tool)
 	}
 	builder.WriteString("]\n")
 	fmt.Fprintf(&builder, "\n[workspace_git]\nenabled = %t\nprovider = %q\nremote = %q\nbranch = %q\nschedule = %q\nauthor_name = %q\nauthor_email = %q\n", config.WorkspaceGit.Enabled, config.WorkspaceGit.Provider, config.WorkspaceGit.Remote, config.WorkspaceGit.Branch, config.WorkspaceGit.Schedule, config.WorkspaceGit.AuthorName, config.WorkspaceGit.AuthorEmail)

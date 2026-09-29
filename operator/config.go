@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"openlia/internal/toolcatalog"
 )
 
 // Config is the typed view of the OPENLIA_* settings consumed by the
@@ -41,6 +43,7 @@ type Config struct {
 	LochoX8664SHA256            string
 	LochoARM64SHA256            string
 	EnabledSkills               []string
+	EnabledTools                []string
 	SkillsConfigured            bool
 	SkillSources                []SkillSourceConfig
 	SkillsCacheRoot             string
@@ -274,6 +277,12 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 			}
 			config.EnabledSkills = append(config.EnabledSkills, skill)
 		}
+	}
+	if raw := values["OPENLIA_ENABLED_TOOLS"]; raw != "" {
+		config.EnabledTools = strings.Split(raw, ",")
+	}
+	if err := toolcatalog.Validate(config.EnabledTools); err != nil {
+		return Config{}, fmt.Errorf("OPENLIA_ENABLED_TOOLS: %w", err)
 	}
 	config.ServiceRoles = make(map[string]string)
 	if rawRoles := values["OPENLIA_SERVICE_ROLES"]; rawRoles != "" {

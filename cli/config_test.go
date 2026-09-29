@@ -34,6 +34,7 @@ func TestConfigRoundTrip(t *testing.T) {
 		{Name: "team", Repository: "https://github.com/example/team-skills", Branch: "release/v2"},
 	}
 	want.EnabledSkills = []string{"daily-briefing", "deep-research"}
+	want.EnabledTools = []string{"pdf", "ocr", "media-transcripts"}
 	want.WorkspaceGit = WorkspaceGitConfig{
 		Enabled:     true,
 		Provider:    "github",
@@ -58,7 +59,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Target != want.Target || got.Model != want.Model || got.OutputLanguage != want.OutputLanguage || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || got.WorkspaceGit != want.WorkspaceGit || got.OpenLIABrowser != want.OpenLIABrowser || len(got.SkillSources) != 2 || got.SkillSources[0] != want.SkillSources[0] || got.SkillSources[1] != want.SkillSources[1] {
+	if got.Target != want.Target || got.Model != want.Model || got.OutputLanguage != want.OutputLanguage || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || strings.Join(got.EnabledTools, ",") != strings.Join(want.EnabledTools, ",") || got.WorkspaceGit != want.WorkspaceGit || got.OpenLIABrowser != want.OpenLIABrowser || len(got.SkillSources) != 2 || got.SkillSources[0] != want.SkillSources[0] || got.SkillSources[1] != want.SkillSources[1] {
 		t.Fatalf("round trip mismatch: got %#v want %#v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -67,6 +68,16 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("config mode is %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestToolCapabilitiesRejectUnknownAndDuplicateValues(t *testing.T) {
+	for _, values := range [][]string{{"shell"}, {"pdf", "pdf"}} {
+		config := defaultConfig()
+		config.EnabledTools = values
+		if err := validateConfig(config); err == nil {
+			t.Fatalf("invalid tool capabilities accepted: %v", values)
+		}
 	}
 }
 

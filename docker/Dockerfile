@@ -58,6 +58,10 @@ RUN apt-get update \
     install -m 0755 "/tmp/uv/uv-${uv_target}/uvx" /usr/local/bin/uvx; \
     rm -rf /tmp/bun /tmp/uv "${bun_archive}" "${uv_archive}"
 
+ARG OPENLIA_ENABLED_TOOLS=""
+COPY --chmod=0755 docker/install-tools.sh /usr/local/bin/openlia-install-tools
+RUN OPENLIA_ENABLED_TOOLS="${OPENLIA_ENABLED_TOOLS}" /usr/local/bin/openlia-install-tools
+
 COPY profile/skills/claim-review/requirements.txt /tmp/claim-req.txt
 RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache \
     --requirement /tmp/claim-req.txt \
