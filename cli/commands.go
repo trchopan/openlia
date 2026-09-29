@@ -72,6 +72,8 @@ func Run(args []string, assets fs.FS) int {
 		return commandWorkspaceUI(options, remaining[1:])
 	case "browser":
 		return commandOpenLIABrowser(options, remaining[1:], assets)
+	case "telegram":
+		return commandTelegram(options, remaining[1:])
 	default:
 		return fail(options, ExitUsage, fmt.Sprintf("unknown command %q", remaining[0]), map[string]any{"hint": "run openlia --help"})
 	}

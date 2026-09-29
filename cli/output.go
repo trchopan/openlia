@@ -109,6 +109,7 @@ Usage:
   openlia workspace-ui password
   openlia browser configure --local|--target user@host --root PATH --extension-token-file PATH [--ssh-port PORT]
   openlia browser install|start|stop|restart|status|logs|uninstall
+  openlia telegram id [--token TOKEN]
 
 Global flags: --json, --non-interactive, --version, --help
 
