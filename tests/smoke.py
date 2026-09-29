@@ -528,6 +528,7 @@ def run(mode: str, args: argparse.Namespace) -> list[dict[str, Any]]:
             "personal-finance",
             "workspace-git",
             "claim-review",
+            "workspace-organize",
         ):
             results.append(run_case(f"SKILL-{skill}", ["go", "run", ".", "skills", "test", skill]))
         compose_env = {**os.environ, **compose_environment("/tmp/openlia-compose-check", "openlia-compose-check")}
