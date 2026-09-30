@@ -9,7 +9,7 @@ import { SkillsNavigator } from "./SkillsNavigator";
 describe("SkillsNavigator", () => {
   const sampleSkills: SkillSummary[] = [
     {
-      author: "OpenLIA Team",
+      author: "OpenLia Team",
       bundled: false,
       category: "productivity",
       description: "Manage tasks and projects in Notion",
@@ -102,7 +102,7 @@ describe("SkillsNavigator", () => {
 
 describe("SkillDetailPane", () => {
   const sampleDetail: SkillDetail = {
-    author: "OpenLIA Team",
+    author: "OpenLia Team",
     bundled: false,
     category: "productivity",
     description: "Manage tasks and projects in Notion",

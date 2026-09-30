@@ -1164,7 +1164,7 @@ func TestGeneratedLochoHostComposeValidates(t *testing.T) {
 	}
 }
 
-func TestGeneratedAttachmentsDisableHermesOpenLIABrowserToolset(t *testing.T) {
+func TestGeneratedAttachmentsDisableHermesOpenLiaBrowserToolset(t *testing.T) {
 	repo := t.TempDir()
 	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
 	config := testConfig(repo, runtimeRoot)

@@ -173,10 +173,10 @@ func distributionIdentity(config Config) (string, string) {
 	version, source := "unknown", "embedded"
 	if data, err := os.ReadFile(filepath.Join(config.RepositoryRoot, "release", "manifest.json")); err == nil {
 		var manifest struct {
-			OpenLIA string `json:"openlia"`
+			OpenLia string `json:"openlia"`
 		}
-		if json.Unmarshal(data, &manifest) == nil && manifest.OpenLIA != "" {
-			version = manifest.OpenLIA
+		if json.Unmarshal(data, &manifest) == nil && manifest.OpenLia != "" {
+			version = manifest.OpenLia
 		}
 	}
 	if data, err := os.ReadFile(filepath.Join(config.RepositoryRoot, "release.sha256")); err == nil && strings.TrimSpace(string(data)) != "" {

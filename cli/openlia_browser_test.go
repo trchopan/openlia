@@ -5,13 +5,13 @@ import (
 	"testing"
 )
 
-func TestOpenLIABrowserRunnerSupervisesPlaywright(t *testing.T) {
-	runner := renderOpenLIABrowserRunner(openliaBrowserTarget{
+func TestOpenLiaBrowserRunnerSupervisesPlaywright(t *testing.T) {
+	runner := renderOpenLiaBrowserRunner(openliaBrowserTarget{
 		Root: "/srv/openlia-browser",
 	}, "/usr/bin/node", "/usr/bin", "/srv/playwright-token")
 	for _, expected := range []string{
 		"export OPENLIA_BROWSER_SUPERVISE_PLAYWRIGHT=1",
-		"export OPENLIA_BROWSER_ALLOWED_TOOLS='" + strings.Join(defaultOpenLIABrowserAllowlist, ",") + "'",
+		"export OPENLIA_BROWSER_ALLOWED_TOOLS='" + strings.Join(defaultOpenLiaBrowserAllowlist, ",") + "'",
 		"export OPENLIA_BROWSER_PLAYWRIGHT_TOKEN_FILE='/srv/playwright-token'",
 		"exec '/usr/bin/node' '/srv/openlia-browser/server.js'",
 	} {

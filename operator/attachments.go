@@ -240,12 +240,12 @@ func generateAttachmentsFile(config Config) error {
 	}
 	var allServices []LochoService
 	browserURL := ""
-	hasOpenLIABrowserRole := false
+	hasOpenLiaBrowserRole := false
 	for _, host := range hosts.Hosts {
 		for _, svc := range host.Services {
 			allServices = append(allServices, svc)
 			if svc.Role == "openlia-browser" {
-				hasOpenLIABrowserRole = true
+				hasOpenLiaBrowserRole = true
 				if browserURL != "" && browserURL != svc.Endpoint {
 					return fmt.Errorf("multiple openlia-browser attachment endpoints are configured")
 				}
@@ -397,7 +397,7 @@ func generateAttachmentsFile(config Config) error {
 	if err := AtomicWriteFile(config.GeneratedCompose, []byte(builder.String()), 0o600); err != nil {
 		return err
 	}
-	if err := ReconcileBrowserPolicy(config, hasOpenLIABrowserRole, browserURL); err != nil {
+	if err := ReconcileBrowserPolicy(config, hasOpenLiaBrowserRole, browserURL); err != nil {
 		return err
 	}
 	return nil
