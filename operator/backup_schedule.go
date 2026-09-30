@@ -266,7 +266,7 @@ func installUserSystemdBackupSchedule(config Config) error {
 	if err := AtomicWriteFile(filepath.Join(unitDirectory, unitName+".timer"), []byte(timer), 0o600); err != nil {
 		return err
 	}
-	return runSystemctlUser("daemon-reload", "enable", "--now", unitName+".timer")
+	return reloadAndEnableSystemdTimer(runSystemctlUser, unitName)
 }
 
 func removeUserSystemdBackupSchedule(config Config) error {
@@ -303,6 +303,13 @@ func runSystemctlUser(args ...string) error {
 	return nil
 }
 
+func reloadAndEnableSystemdTimer(run func(...string) error, unitName string) error {
+	if err := run("daemon-reload"); err != nil {
+		return err
+	}
+	return run("enable", "--now", unitName+".timer")
+}
+
 func scheduleRuntimeConfig(config Config) Config {
 	current := filepath.Join(config.InstallRoot, "current")
 	config.RepositoryRoot = current
@@ -337,7 +344,7 @@ func installSystemdBackupSchedule(config Config, configPath string) error {
 	if err := AtomicWriteFile(timerPath, []byte(timer), 0o644); err != nil {
 		return err
 	}
-	if err := runSystemctl("daemon-reload", "enable", "--now", unitName+".timer"); err != nil {
+	if err := reloadAndEnableSystemdTimer(runSystemctl, unitName); err != nil {
 		return fmt.Errorf("enable backup timer: %w", err)
 	}
 	return nil
