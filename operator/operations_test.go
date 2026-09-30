@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
 type recordedRunner struct {
@@ -1115,6 +1117,46 @@ func TestGeneratedAttachmentsContainLochoHostForBothUIs(t *testing.T) {
 	preserved, err := os.ReadFile(config.LochoHostConfig)
 	if err != nil || string(preserved) != activeConfig {
 		t.Fatalf("active Locho host config was overwritten: %q, %v", preserved, err)
+	}
+}
+
+func TestLochoHostRuntimeConfigIsValidTOML(t *testing.T) {
+	contents := fmt.Sprintf(
+		strings.ReplaceAll(lochoHostConfigFormat(8089, 8080), `\n`, "\n"),
+		"172.30.0.2",
+		"172.30.0.3",
+	)
+	if strings.Contains(contents, `\"`) {
+		t.Fatalf("Locho host config contains escaped quotes:\n%s", contents)
+	}
+
+	var config struct {
+		Services []struct {
+			Name     string `toml:"name"`
+			Type     string `toml:"type"`
+			Endpoint string `toml:"endpoint"`
+		} `toml:"services"`
+	}
+	if _, err := toml.Decode(contents, &config); err != nil {
+		t.Fatalf("Locho host config is invalid TOML: %v\n%s", err, contents)
+	}
+
+	expected := []struct {
+		name     string
+		typeName string
+		endpoint string
+	}{
+		{name: "workspace-ui", typeName: "tcp", endpoint: "172.30.0.2:8089"},
+		{name: "open-webui", typeName: "tcp", endpoint: "172.30.0.3:8080"},
+	}
+	if len(config.Services) != len(expected) {
+		t.Fatalf("Locho host config has %d services, want %d", len(config.Services), len(expected))
+	}
+	for i, service := range config.Services {
+		want := expected[i]
+		if service.Name != want.name || service.Type != want.typeName || service.Endpoint != want.endpoint {
+			t.Errorf("service %d = {%q, %q, %q}, want {%q, %q, %q}", i, service.Name, service.Type, service.Endpoint, want.name, want.typeName, want.endpoint)
+		}
 	}
 }
 
