@@ -69,10 +69,7 @@ func TestFilesystemOperatorWorkflow(t *testing.T) {
 	if err := os.WriteFile(metadataSentinel, []byte("archived metadata\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	backup, err := CreateBackup(config, "test", now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	backup, identity := createTestEncryptedBackup(t, &config, "test", now)
 	sentinel := filepath.Join(config.DataRoot, "workspace", "inbox", "sentinel.md")
 	if err := os.WriteFile(sentinel, []byte("preserve me\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -80,7 +77,7 @@ func TestFilesystemOperatorWorkflow(t *testing.T) {
 	if err := os.WriteFile(metadataSentinel, []byte("current metadata\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RestoreBackup(config, backup.Archive, now); err != nil {
+	if _, err := restoreTestEncryptedBackup(t, config, backup.Archive, identity, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {

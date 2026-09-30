@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"filippo.io/age"
+	"github.com/robfig/cron/v3"
 	"openlia/internal/toolcatalog"
 )
 
@@ -98,9 +100,28 @@ type Config struct {
 	EnabledSkills           []string
 	EnabledTools            []string
 	WorkspaceGit            WorkspaceGitConfig
+	BackupIdentityFile      string
+	BackupRecipient         string
+	BackupSchedule          string
+	BackupScheduleEnabled   bool
+	BackupRemoteRetention   int
+	BackupDestinations      []BackupDestinationConfig
 	SkillSources            []SkillSourceConfig
 	Services                []ServiceHostConfig
 	OpenLIABrowser          OpenLIABrowserConfig
+}
+
+type BackupDestinationConfig struct {
+	Name                 string
+	Type                 string
+	Endpoint             string
+	Bucket               string
+	Prefix               string
+	Region               string
+	PathStyle            bool
+	RsyncTarget          string
+	IdentityFile         string
+	OperatorIdentityFile string
 }
 
 type SkillSourceConfig struct {
@@ -175,8 +196,12 @@ func defaultConfig() Config {
 			AuthorName:  "OpenLia Agent",
 			AuthorEmail: "openlia@localhost",
 		},
-		OpenLIABrowser: OpenLIABrowserConfig{Mode: "local", SSHPort: 22},
-		Services:       nil,
+		BackupSchedule:        "20 4 * * *",
+		BackupScheduleEnabled: true,
+		BackupRemoteRetention: 30,
+		BackupDestinations:    []BackupDestinationConfig{},
+		OpenLIABrowser:        OpenLIABrowserConfig{Mode: "local", SSHPort: 22},
+		Services:              nil,
 	}
 }
 
@@ -267,6 +292,8 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.FallbackProviders = append(config.FallbackProviders, FallbackProviderConfig{})
 			case "skill_sources":
 				config.SkillSources = append(config.SkillSources, SkillSourceConfig{})
+			case "backup.destinations":
+				config.BackupDestinations = append(config.BackupDestinations, BackupDestinationConfig{})
 			}
 			continue
 		}
@@ -347,6 +374,38 @@ func parseConfigUnchecked(data string) (Config, error) {
 				current.Branch, err = parseString(value)
 			default:
 				return Config{}, fmt.Errorf("line %d contains unknown skill source setting %q", lineNumber, key)
+			}
+		} else if section == "backup.destinations" {
+			if len(config.BackupDestinations) == 0 {
+				return Config{}, fmt.Errorf("line %d defines backup destination fields without a table", lineNumber)
+			}
+			current := &config.BackupDestinations[len(config.BackupDestinations)-1]
+			switch strings.Trim(key, "\"") {
+			case "name":
+				current.Name, err = parseString(value)
+			case "type":
+				current.Type, err = parseString(value)
+			case "endpoint":
+				current.Endpoint, err = parseString(value)
+			case "bucket":
+				current.Bucket, err = parseString(value)
+			case "prefix":
+				current.Prefix, err = parseString(value)
+			case "region":
+				current.Region, err = parseString(value)
+			case "path_style":
+				current.PathStyle, err = parseBool(value)
+			case "rsync_target":
+				current.RsyncTarget, err = parseString(value)
+			case "identity_file":
+				current.IdentityFile, err = parseString(value)
+			case "operator_identity_file":
+				current.OperatorIdentityFile, err = parseString(value)
+				if err == nil {
+					current.OperatorIdentityFile = expandTilde(current.OperatorIdentityFile)
+				}
+			default:
+				return Config{}, fmt.Errorf("line %d contains unknown backup destination setting %q", lineNumber, key)
 			}
 		} else {
 			switch section + "." + key {
@@ -444,6 +503,19 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.WorkspaceGit.AuthorName, err = parseString(value)
 			case "workspace_git.author_email":
 				config.WorkspaceGit.AuthorEmail, err = parseString(value)
+			case "backup.identity_file":
+				config.BackupIdentityFile, err = parseString(value)
+				if err == nil {
+					config.BackupIdentityFile = expandTilde(config.BackupIdentityFile)
+				}
+			case "backup.recipient":
+				config.BackupRecipient, err = parseString(value)
+			case "backup.schedule":
+				config.BackupSchedule, err = parseString(value)
+			case "backup.schedule_enabled":
+				config.BackupScheduleEnabled, err = parseBool(value)
+			case "backup.remote_retention":
+				config.BackupRemoteRetention, err = parseInt(value)
 			default:
 				return Config{}, fmt.Errorf("line %d contains unknown setting %q", lineNumber, section+"."+key)
 			}
@@ -511,6 +583,35 @@ func validateConfig(config Config) error {
 	}
 	if err := validateTimezone(config.Timezone); err != nil {
 		return err
+	}
+	if config.BackupRemoteRetention <= 0 {
+		return errors.New("backup.remote_retention must be a positive integer")
+	}
+	if config.BackupRecipient != "" {
+		if _, err := age.ParseX25519Recipient(config.BackupRecipient); err != nil {
+			return errors.New("backup.recipient must be an age X25519 public recipient")
+		}
+	}
+	if config.BackupIdentityFile != "" {
+		if err := validateAbsoluteRoot(config.BackupIdentityFile, "backup.identity_file"); err != nil {
+			return err
+		}
+		if isInsideWorkingTree(config.BackupIdentityFile) {
+			return errors.New("backup.identity_file must be outside the OpenLia checkout")
+		}
+	}
+	if config.BackupScheduleEnabled || config.BackupSchedule != "" {
+		if _, err := cron.ParseStandard(config.BackupSchedule); err != nil {
+			return fmt.Errorf("backup.schedule must be a five-field cron expression: %w", err)
+		}
+	}
+	if err := validateBackupDestinations(config.BackupDestinations); err != nil {
+		return err
+	}
+	for _, destination := range config.BackupDestinations {
+		if destination.IdentityFile != "" && (pathWithin(destination.IdentityFile, filepath.Join(config.InstallRoot, "runtime", "secrets")) || pathWithin(destination.IdentityFile, filepath.Join(config.InstallRoot, "runtime", "hermes"))) {
+			return fmt.Errorf("backup rsync identity files must not be inside Hermes data or mounted runtime secrets")
+		}
 	}
 	if err := validateOutputLanguage(config.OutputLanguage); err != nil {
 		return err
@@ -653,6 +754,54 @@ func validateConfig(config Config) error {
 			if err := ValidateServiceRole(role); err != nil {
 				return fmt.Errorf("service host %q service %q: %w", host.Name, svc, err)
 			}
+		}
+	}
+	return nil
+}
+
+func validateBackupDestinations(destinations []BackupDestinationConfig) error {
+	seen := make(map[string]bool)
+	for index, destination := range destinations {
+		if !safeComponent(destination.Name) {
+			return fmt.Errorf("backup destination %d has an invalid name", index)
+		}
+		if seen[destination.Name] {
+			return fmt.Errorf("duplicate backup destination %q", destination.Name)
+		}
+		seen[destination.Name] = true
+		switch destination.Type {
+		case "s3":
+			if destination.Bucket == "" || destination.Region == "" {
+				return fmt.Errorf("S3 destination %s requires bucket and region", destination.Name)
+			}
+			if destination.Endpoint != "" {
+				parsed, err := url.Parse(destination.Endpoint)
+				if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+					return fmt.Errorf("S3 destination %s requires a credential-free HTTPS endpoint", destination.Name)
+				}
+			}
+			if strings.HasPrefix(destination.Prefix, "/") || strings.Contains(destination.Prefix, "..") || strings.ContainsAny(destination.Prefix, "\\\r\n") {
+				return fmt.Errorf("S3 destination %s has an unsafe prefix", destination.Name)
+			}
+		case "rsync":
+			if destination.RsyncTarget == "" || strings.ContainsAny(destination.RsyncTarget, " \t\r\n;$&|()<>`'") {
+				return fmt.Errorf("rsync destination %s has an invalid target", destination.Name)
+			}
+			if destination.IdentityFile != "" {
+				if err := validateAbsoluteRoot(destination.IdentityFile, "backup destination identity_file"); err != nil {
+					return err
+				}
+			}
+			if destination.OperatorIdentityFile != "" {
+				if err := validateAbsoluteRoot(destination.OperatorIdentityFile, "backup destination operator_identity_file"); err != nil {
+					return err
+				}
+				if isInsideWorkingTree(destination.OperatorIdentityFile) {
+					return errors.New("backup destination operator_identity_file must be outside the OpenLia checkout")
+				}
+			}
+		default:
+			return fmt.Errorf("backup destination %s type must be s3 or rsync", destination.Name)
 		}
 	}
 	return nil
@@ -914,6 +1063,16 @@ func safeComponent(value string) bool {
 	return true
 }
 
+func pathWithin(path, parent string) bool {
+	path, pathErr := filepath.Abs(path)
+	parent, parentErr := filepath.Abs(parent)
+	if pathErr != nil || parentErr != nil {
+		return false
+	}
+	relative, err := filepath.Rel(parent, path)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
 func safeVersion(value string) bool {
 	if value == "" || strings.HasPrefix(value, ".") || strings.HasPrefix(value, "-") {
 		return false
@@ -1055,6 +1214,41 @@ func renderConfig(config Config) string {
 	}
 	builder.WriteString("]\n")
 	fmt.Fprintf(&builder, "\n[workspace_git]\nenabled = %t\nprovider = %q\nremote = %q\nbranch = %q\nschedule = %q\nauthor_name = %q\nauthor_email = %q\n", config.WorkspaceGit.Enabled, config.WorkspaceGit.Provider, config.WorkspaceGit.Remote, config.WorkspaceGit.Branch, config.WorkspaceGit.Schedule, config.WorkspaceGit.AuthorName, config.WorkspaceGit.AuthorEmail)
+	fmt.Fprintf(&builder, "\n[backup]\nschedule = %q\nschedule_enabled = %t\nremote_retention = %d\n", config.BackupSchedule, config.BackupScheduleEnabled, config.BackupRemoteRetention)
+	if config.BackupIdentityFile != "" {
+		fmt.Fprintf(&builder, "identity_file = %q\n", config.BackupIdentityFile)
+	}
+	if config.BackupRecipient != "" {
+		fmt.Fprintf(&builder, "recipient = %q\n", config.BackupRecipient)
+	}
+	for _, destination := range config.BackupDestinations {
+		builder.WriteString("\n[[backup.destinations]]\n")
+		fmt.Fprintf(&builder, "name = %q\ntype = %q\n", destination.Name, destination.Type)
+		if destination.Endpoint != "" {
+			fmt.Fprintf(&builder, "endpoint = %q\n", destination.Endpoint)
+		}
+		if destination.Bucket != "" {
+			fmt.Fprintf(&builder, "bucket = %q\n", destination.Bucket)
+		}
+		if destination.Prefix != "" {
+			fmt.Fprintf(&builder, "prefix = %q\n", destination.Prefix)
+		}
+		if destination.Region != "" {
+			fmt.Fprintf(&builder, "region = %q\n", destination.Region)
+		}
+		if destination.PathStyle {
+			builder.WriteString("path_style = true\n")
+		}
+		if destination.RsyncTarget != "" {
+			fmt.Fprintf(&builder, "rsync_target = %q\n", destination.RsyncTarget)
+		}
+		if destination.IdentityFile != "" {
+			fmt.Fprintf(&builder, "identity_file = %q\n", destination.IdentityFile)
+		}
+		if destination.OperatorIdentityFile != "" {
+			fmt.Fprintf(&builder, "operator_identity_file = %q\n", destination.OperatorIdentityFile)
+		}
+	}
 	for _, host := range config.Services {
 		builder.WriteString("\n[[services]]\n")
 		if host.Source != "" {

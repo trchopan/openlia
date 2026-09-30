@@ -849,7 +849,13 @@ openlia restart
 openlia uninstall --local --project NAME --root /path
 openlia uninstall --target user@host --project NAME --root /path
 openlia backup create
-openlia backup restore --non-interactive --archive /path/to/backup.tar.gz
+openlia backup keygen
+openlia backup status
+openlia backup list
+openlia backup push [--archive FILENAME.age]
+openlia backup restore --non-interactive --archive /path/to/backup.tar.gz.age
+openlia backup restore --non-interactive --from primary --latest
+openlia backup schedule install|remove
 openlia backup rollback-restore --non-interactive --archive /path/to/rollback.tar.gz
 openlia workspace git status
 openlia workspace git setup
@@ -861,22 +867,88 @@ Use a separate operator config when managing another deployment:
 OPENLIA_CONFIG="$HOME/.config/openlia/remote.toml" openlia status
 ```
 
-`openlia backup create` creates a compact durable backup of the workspace,
+`openlia backup create` creates an encrypted durable backup of the workspace,
 workspace Git history, Hermes agent state, profile-managed files, metadata, and
-custom or external skills. It excludes Open WebUI, bundled image skills,
-rebuildable caches and environments, logs, releases, Docker images, secrets,
-and Locho capability files. Mutating operations use smaller rollback snapshots
-of only the files they change; deploy and restart do not archive the whole
-runtime. Archive members use logical `hermes/` and `meta/` roots rather than
-host absolute paths. Durable restore maps them to the destination runtime and
-regenerates installation identity, stack state, service registries, and host
-configuration; provide destination secrets and attachment sources separately.
-Restore replaces durable Hermes and metadata trees transactionally, removes
-stale durable files, and normalizes restored ownership to the deployment
-runtime UID/GID. It preserves destination secrets, Locho attachments, Open
-WebUI data, and generated host configuration. A pre-restore backup is created
-automatically; restore leaves the stack stopped so the operator can verify state
-before running `openlia start` or `openlia restart`.
+custom or external skills. The operator machine holds the age private identity;
+the target receives only its public recipient and can encrypt but cannot
+decrypt. `openlia init` creates the operator identity at
+`~/.config/openlia/backup-identity.txt`; `openlia backup keygen` creates it for
+an existing deployment. Keep a separate recovery copy of the private identity.
+The archive excludes Open WebUI, bundled image skills, rebuildable caches and
+environments, logs, releases, Docker images, secrets, and Locho capability
+files. Manual capture stops the running Hermes gateway and optional Workspace
+UI while it creates and validates a consistent archive, then restarts them
+before remote upload. Its retained local archive and any S3/rsync copies are
+ciphertext.
+
+New installations install a target-host daily schedule, defaulting to 04:20 in
+the configured IANA timezone. Change `[backup].schedule` with a five-field cron
+expression (for example `"0 2 * * 1"` for Mondays at 02:00), set
+`schedule_enabled = false` to disable it, and run `openlia backup schedule
+install` after changing the schedule. Scheduled capture is live and
+best-effort: Hermes remains available, but files being changed during capture
+may be retried or cause that backup run to fail. Missed schedule occurrences
+are coalesced into at most one run when the target returns.
+
+Configure zero, one, or both remote destinations under `[[backup.destinations]]`:
+
+```toml
+[backup]
+schedule = "20 4 * * *"
+schedule_enabled = true
+remote_retention = 30
+
+[[backup.destinations]]
+name = "primary"
+type = "s3"
+endpoint = "https://s3.example.net"
+bucket = "openlia-backups"
+prefix = "personal"
+region = "us-east-1"
+path_style = true
+
+[[backup.destinations]]
+name = "nas"
+type = "rsync"
+rsync_target = "backup@nas.example.net:/srv/backups/openlia"
+identity_file = "/srv/openlia/operator-secrets/backup-rsync-key"
+operator_identity_file = "/Users/me/.ssh/openlia-backup-read"
+```
+
+S3 uses the target's standard AWS credential chain; grant it only the required
+put/list/delete permissions for the configured prefix. The operator machine
+also needs read access to retrieve remote backups. For rsync, provision the
+target-side SSH key at `identity_file` outside `runtime/secrets` and the Hermes
+data directory so the agent container cannot read it. Pin the host in the
+backup service account's `known_hosts`, and configure
+`operator_identity_file` (or an operator-side SSH agent) for recovery. Remote
+retention defaults to 30 successful backups per destination; local retention
+remains five durable archives. `openlia backup status` shows the latest local
+archive and last upload result; `openlia backup list` lists remote archives.
+If one destination fails, the encrypted local archive remains and the other
+destination is still attempted. Retry the newest artifact with
+`openlia backup push`, or select one retained encrypted archive with
+`--archive FILENAME.age`. On versioned S3 buckets, configure lifecycle expiry
+for noncurrent object versions as well; OpenLia prunes the visible current
+objects under its configured prefix.
+
+`openlia backup restore` accepts a local `.tar.gz.age` archive or retrieves one
+from a configured destination with `--from NAME --latest` (or `--object NAME`).
+The operator CLI verifies and decrypts it locally, then transfers the archive
+over SSH and invokes the existing transactional restore. Durable restore
+accepts encrypted `.tar.gz.age` archives only; there is no plaintext archive
+migration or unencrypted durable-restore path. Internal operation-scoped
+rollback snapshots keep their existing protected local behavior and are not uploaded.
+Restore replaces durable Hermes and metadata trees, removes stale durable
+files, normalizes restored ownership, preserves destination secrets and
+attachments, and leaves runtime services stopped for verification before
+`openlia start` or `openlia restart`.
+
+Uninstall removes local archives and the target schedule but never deletes
+remote objects. Before confirming uninstall, inspect the displayed destination
+status and ensure a remote backup is available if you may need recovery. Keep
+the operator identity and read credentials; uninstall leaves them on the
+operator machine so remote ciphertext remains recoverable.
 
 `openlia update` is read-only without a component. `openlia update openlia`
 synchronizes the Go operator, profile, templates, and bundled skills.
@@ -1003,8 +1075,10 @@ between bundled and external development.
 - Workspace initialization is copy-once; later deployments preserve user files.
 - Durable backups exclude Open WebUI, secret files, OAuth state, bundled image
   skills, rebuildable caches/environments, and Locho capabilities. Protected
-  rollback snapshots contain only the specific files required to undo an
-  approved mutation.
+  durable archive files are encrypted to an operator-held age identity before
+  retention or remote upload. Operation-scoped rollback snapshots contain only
+  the specific files required to undo an approved mutation; they remain
+  local-only protected files and are not part of the remote backup format.
 - Dangerous unattended actions are denied and skill writes are staged for review.
 - Local workspace Git history does not require credentials or a remote.
 - Optional GitHub backup uses a repository-scoped PAT through a mounted askpass

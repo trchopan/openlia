@@ -169,7 +169,7 @@ func TestRemoteExtractsOperatorErrorJSON(t *testing.T) {
 	if err := os.WriteFile(ssh, []byte("#!/bin/sh\nprintf '%s\\n' '{\"schema\":1,\"ok\":false,\"error\":\"remote skill failure\"}'\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", bin)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	config := defaultConfig()
 	config.Target = "operator@example.test"
 	_, err := (Remote{Config: config}).ssh(context.Background(), "ignored", nil)
@@ -185,7 +185,7 @@ func TestRemoteSSHUsesBoundedConnectionOptions(t *testing.T) {
 	if err := os.WriteFile(ssh, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SSH_ARGS_FILE\"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", bin)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("SSH_ARGS_FILE", argsFile)
 	config := defaultConfig()
 	config.Target = "operator@example.test"
@@ -207,6 +207,34 @@ func TestRemoteSSHUsesBoundedConnectionOptions(t *testing.T) {
 		if !strings.Contains(args, expected) {
 			t.Fatalf("SSH arguments missing %q:\n%s", expected, args)
 		}
+	}
+}
+
+func TestRemoteUploadFileStreamsSourceToSSH(t *testing.T) {
+	bin := t.TempDir()
+	output := filepath.Join(t.TempDir(), "uploaded")
+	ssh := filepath.Join(bin, "ssh")
+	if err := os.WriteFile(ssh, []byte("#!/bin/sh\ncat > \"$UPLOAD_OUTPUT\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("UPLOAD_OUTPUT", output)
+	source := filepath.Join(t.TempDir(), "source.age")
+	want := strings.Repeat("ciphertext\n", 1024*1024)
+	if err := os.WriteFile(source, []byte(want), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := defaultConfig()
+	config.Target = "operator@example.test"
+	if err := (Remote{Config: config}).uploadFile(context.Background(), source, "/srv/openlia/runtime/backups/archive.age", 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("streamed upload length/content mismatch: got %d want %d", len(got), len(want))
 	}
 }
 

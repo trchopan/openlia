@@ -19,11 +19,12 @@ import (
 )
 
 type BackupResult struct {
-	OK      bool   `json:"ok"`
-	Archive string `json:"archive"`
-	Secrets string `json:"secrets,omitempty"`
-	Action  string `json:"action,omitempty"`
-	State   string `json:"state,omitempty"`
+	OK           bool                      `json:"ok"`
+	Archive      string                    `json:"archive"`
+	Secrets      string                    `json:"secrets,omitempty"`
+	Action       string                    `json:"action,omitempty"`
+	State        string                    `json:"state,omitempty"`
+	Destinations []BackupDestinationResult `json:"destinations,omitempty"`
 }
 
 type backupManifest struct {
@@ -42,6 +43,7 @@ type backupMetadata struct {
 	Kind      string `json:"kind"`
 	Archive   string `json:"archive"`
 	SHA256    string `json:"sha256"`
+	Encrypted bool   `json:"encrypted,omitempty"`
 	Reason    string `json:"reason"`
 	CreatedAt string `json:"created_at"`
 	Secrets   string `json:"secrets"`
@@ -54,12 +56,51 @@ const (
 	maxArchivePathDepth  = 32
 )
 
+var errBackupSourceChanged = errors.New("backup source changed during live capture")
+
+type backupArchiveLimits struct {
+	members int
+	total   int64
+}
+
+func (limits *backupArchiveLimits) add(name string, size int64, kind byte) error {
+	cleanName := strings.TrimSuffix(name, "/")
+	if !safeArchiveMember(cleanName) || size < 0 || (kind != tar.TypeDir && kind != tar.TypeReg && kind != tar.TypeSymlink) {
+		return fmt.Errorf("backup generated an unsupported archive member")
+	}
+	if limits.members >= maxArchiveMembers || size > maxArchiveMemberSize || limits.total > maxArchiveTotalSize-size {
+		return fmt.Errorf("backup archive exceeds safety limits")
+	}
+	limits.members++
+	limits.total += size
+	return nil
+}
+
 func CreateBackup(config Config, reason string, now time.Time, composers ...Compose) (BackupResult, error) {
+	if config.BackupRecipient == "" {
+		return BackupResult{}, fmt.Errorf("backup encryption recipient is required")
+	}
 	var compose *Compose
 	if len(composers) > 0 {
 		compose = &composers[0]
 	}
-	return createBackup(context.Background(), config, reason, now, compose)
+	return createBackup(context.Background(), config, reason, now, compose, false)
+}
+
+// CreateScheduledBackup captures a portable durable backup while services
+// remain online. The resulting archive is best-effort when writers modify
+// files during collection, but archive validation still fails closed.
+func CreateScheduledBackup(ctx context.Context, config Config, reason string, now time.Time) (BackupResult, error) {
+	if config.BackupRecipient == "" {
+		return BackupResult{}, fmt.Errorf("backup encryption recipient is required")
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		result, err := createBackup(ctx, config, reason, now, nil, true)
+		if !errors.Is(err, errBackupSourceChanged) || attempt == 2 {
+			return result, err
+		}
+	}
+	return BackupResult{}, errBackupSourceChanged
 }
 
 // CreateRollback captures only the explicitly named runtime-relative paths for
@@ -181,21 +222,27 @@ func runtimeRelativePath(config Config, path string) string {
 	return filepath.ToSlash(relative)
 }
 
-func createBackup(ctx context.Context, config Config, reason string, now time.Time, compose *Compose) (result BackupResult, err error) {
+func createBackup(ctx context.Context, config Config, reason string, now time.Time, compose *Compose, live bool) (result BackupResult, err error) {
+	if config.BackupRecipient == "" {
+		return BackupResult{}, fmt.Errorf("backup encryption recipient is required")
+	}
 	unlock, err := acquireBackupLock(ctx, config)
 	if err != nil {
 		return BackupResult{}, err
 	}
 	defer unlock()
-	return createBackupWithRestart(ctx, config, reason, now, compose, true)
+	return createBackupWithRestart(ctx, config, reason, now, compose, true, live)
 }
 
-func createBackupWithRestart(ctx context.Context, config Config, reason string, now time.Time, compose *Compose, restartServices bool) (result BackupResult, err error) {
+func createBackupWithRestart(ctx context.Context, config Config, reason string, now time.Time, compose *Compose, restartServices, live bool) (result BackupResult, err error) {
 	if err := config.ValidatePaths(); err != nil {
 		return BackupResult{}, err
 	}
 	if err := ValidateSafeComponent(reason, "backup-reason"); err != nil {
 		return BackupResult{}, err
+	}
+	if config.BackupRecipient == "" {
+		return BackupResult{}, fmt.Errorf("backup encryption recipient is required")
 	}
 	if info, err := os.Lstat(config.DataRoot); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return BackupResult{}, fmt.Errorf("Hermes data directory is missing")
@@ -211,13 +258,13 @@ func createBackupWithRestart(ctx context.Context, config Config, reason string, 
 	}
 	wasRunning := false
 	uiWasRunning := false
-	if compose != nil && compose.ServiceRunning(ctx, "hermes") {
+	if !live && compose != nil && compose.ServiceRunning(ctx, "hermes") {
 		if _, err := compose.Run(ctx, "stop", "hermes"); err != nil {
 			return BackupResult{}, fmt.Errorf("cannot stop Hermes for a consistent backup")
 		}
 		wasRunning = true
 	}
-	if compose != nil && config.WorkspaceUIHost != "" && compose.ServiceRunning(ctx, "workspace-ui") {
+	if !live && compose != nil && config.WorkspaceUIHost != "" && compose.ServiceRunning(ctx, "workspace-ui") {
 		if _, err := compose.Run(ctx, "stop", "workspace-ui"); err != nil {
 			if wasRunning {
 				_, _ = compose.Run(ctx, "up", "-d", "--no-deps", "hermes")
@@ -263,19 +310,31 @@ func createBackupWithRestart(ctx context.Context, config Config, reason string, 
 		}
 	}()
 	stamp := now.UTC().Format("20060102T150405Z")
-	temporary, err := os.CreateTemp(config.BackupRoot, ".archive-*.tar.gz")
+	encryptedTemporary, err := os.CreateTemp(config.BackupRoot, ".encrypted-*.age")
 	if err != nil {
 		return BackupResult{}, err
 	}
-	temporaryName := temporary.Name()
-	removeTemporary := true
+	encryptedTemporaryName := encryptedTemporary.Name()
+	removeEncryptedTemporary := true
 	defer func() {
-		if removeTemporary {
-			_ = os.Remove(temporaryName)
+		if removeEncryptedTemporary {
+			_ = os.Remove(encryptedTemporaryName)
 		}
 	}()
-	compressor := gzip.NewWriter(temporary)
+	encryptedWriter, err := newBackupEncryptWriter(encryptedTemporary, config.BackupRecipient)
+	if err != nil {
+		_ = encryptedTemporary.Close()
+		return BackupResult{}, err
+	}
+	compressor := gzip.NewWriter(encryptedWriter)
 	archive := tar.NewWriter(compressor)
+	limits := &backupArchiveLimits{}
+	defer func() {
+		_ = archive.Close()
+		_ = compressor.Close()
+		_ = encryptedWriter.Close()
+		_ = encryptedTemporary.Close()
+	}()
 	manifest := backupManifest{
 		Schema:       2,
 		Kind:         "durable",
@@ -288,77 +347,84 @@ func createBackupWithRestart(ctx context.Context, config Config, reason string, 
 	}
 	manifestData, err := json.Marshal(manifest)
 	if err != nil {
-		_ = temporary.Close()
 		return BackupResult{}, err
 	}
+	if len(manifestData) > 64*1024 {
+		return BackupResult{}, fmt.Errorf("backup manifest exceeds safety limits")
+	}
 	if err := writeTarFile(archive, "manifest.json", manifestData, 0o600); err != nil {
-		_ = archive.Close()
-		_ = compressor.Close()
-		_ = temporary.Close()
 		return BackupResult{}, err
 	}
 	bundledGroups := bundledSkillGroups(config.DataRoot)
 	if err := appendDurableTree(archive, "hermes", config.DataRoot, func(relative string, entry fs.DirEntry) bool {
 		return durableHermesPath(relative, entry, bundledGroups)
-	}); err != nil {
-		_ = archive.Close()
-		_ = compressor.Close()
-		_ = temporary.Close()
+	}, limits); err != nil {
 		return BackupResult{}, err
 	}
 	if err := appendDurableTree(archive, "meta", config.MetaRoot, func(relative string, entry fs.DirEntry) bool {
 		return durableMetaPath(relative, entry)
-	}); err != nil {
-		_ = archive.Close()
-		_ = compressor.Close()
-		_ = temporary.Close()
+	}, limits); err != nil {
 		return BackupResult{}, err
 	}
 	if err := archive.Close(); err != nil {
-		_ = compressor.Close()
-		_ = temporary.Close()
 		return BackupResult{}, err
 	}
 	if err := compressor.Close(); err != nil {
-		_ = temporary.Close()
 		return BackupResult{}, err
 	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
+	if err := encryptedWriter.Close(); err != nil {
 		return BackupResult{}, err
 	}
-	if err := temporary.Close(); err != nil {
+	if err := encryptedTemporary.Sync(); err != nil {
 		return BackupResult{}, err
 	}
-	if err := validateRestoreArchive(temporaryName); err != nil {
-		return BackupResult{}, fmt.Errorf("backup archive validation failed")
+	if err := encryptedTemporary.Close(); err != nil {
+		return BackupResult{}, err
 	}
-	digest, err := fileSHA256(temporaryName)
+	// End the manual maintenance window as soon as the consistent encrypted
+	// snapshot is finalized. Remote transport happens after services restart.
+	if restartServices && !live && compose != nil {
+		if wasRunning {
+			if _, restartErr := compose.Run(ctx, "up", "-d", "--no-deps", "hermes"); restartErr == nil {
+				wasRunning = false
+			}
+		}
+		if uiWasRunning {
+			if _, restartErr := compose.Run(ctx, "up", "-d", "--no-deps", "workspace-ui"); restartErr == nil {
+				uiWasRunning = false
+			}
+		}
+	}
+	digest, err := fileSHA256(encryptedTemporaryName)
 	if err != nil {
 		return BackupResult{}, err
 	}
-	destination := filepath.Join(config.BackupRoot, fmt.Sprintf("openlia-%s-%d.tar.gz", stamp, os.Getpid()))
-	for suffix := 1; ; suffix++ {
+	archiveSuffix := ".tar.gz.age"
+	destination := filepath.Join(config.BackupRoot, fmt.Sprintf("openlia-%s-%d%s", stamp, os.Getpid(), archiveSuffix))
+	for collision := 1; ; collision++ {
 		if _, statErr := os.Lstat(destination); errors.Is(statErr, os.ErrNotExist) {
 			break
 		} else if statErr != nil {
 			return BackupResult{}, statErr
 		}
-		destination = filepath.Join(config.BackupRoot, fmt.Sprintf("openlia-%s-%d-%d.tar.gz", stamp, os.Getpid(), suffix))
+		destination = filepath.Join(config.BackupRoot, fmt.Sprintf("openlia-%s-%d-%d%s", stamp, os.Getpid(), collision, archiveSuffix))
 	}
-	if err := os.Rename(temporaryName, destination); err != nil {
+	if err := os.Rename(encryptedTemporaryName, destination); err != nil {
 		return BackupResult{}, err
 	}
-	removeTemporary = false
+	removeEncryptedTemporary = false
 	if err := os.Chmod(destination, 0o600); err != nil {
+		_ = os.Remove(destination)
 		return BackupResult{}, err
 	}
-	metadata := backupMetadata{Schema: 2, Kind: "durable", Archive: filepath.Base(destination), SHA256: digest, Reason: reason, CreatedAt: utcTimestamp(now), Secrets: "excluded"}
+	metadata := backupMetadata{Schema: 2, Kind: "durable", Archive: filepath.Base(destination), SHA256: digest, Encrypted: true, Reason: reason, CreatedAt: utcTimestamp(now), Secrets: "excluded"}
 	metadataData, err := json.Marshal(metadata)
 	if err != nil {
+		_ = os.Remove(destination)
 		return BackupResult{}, err
 	}
 	if err := AtomicWriteFile(destination+".json", append(metadataData, '\n'), 0o600); err != nil {
+		_ = os.Remove(destination)
 		return BackupResult{}, err
 	}
 	if reason != "restore-preflight" {
@@ -452,7 +518,7 @@ func pruneBackups(config Config, keepCount int) ([]string, error) {
 		name := entry.Name()
 		fullPath := filepath.Join(config.BackupRoot, name)
 
-		if entry.Type().IsRegular() && strings.HasPrefix(name, "openlia-") && strings.HasSuffix(name, ".tar.gz") {
+		if entry.Type().IsRegular() && strings.HasPrefix(name, "openlia-") && strings.HasSuffix(name, ".tar.gz.age") {
 			archives = append(archives, fileItem{name: name, path: fullPath, modTime: info.ModTime()})
 		} else if entry.Type().IsRegular() && strings.HasPrefix(name, "rollback-") && strings.HasSuffix(name, ".tar.gz") {
 			rollbacks = append(rollbacks, fileItem{name: name, path: fullPath, modTime: info.ModTime()})
@@ -550,23 +616,7 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 	}
 	defer unlock()
 	if archivePath == "" {
-		entries, err := os.ReadDir(config.BackupRoot)
-		if err != nil {
-			return BackupResult{}, err
-		}
-		var newest time.Time
-		for _, entry := range entries {
-			if entry.Type().IsRegular() && strings.HasPrefix(entry.Name(), "openlia-") && strings.HasSuffix(entry.Name(), ".tar.gz") {
-				info, statErr := entry.Info()
-				if statErr == nil && (archivePath == "" || info.ModTime().After(newest)) {
-					archivePath = filepath.Join(config.BackupRoot, entry.Name())
-					newest = info.ModTime()
-				}
-			}
-		}
-	}
-	if archivePath == "" {
-		return BackupResult{}, fmt.Errorf("restore archive must be inside the backup directory")
+		return BackupResult{}, fmt.Errorf("encrypted durable archives must be decrypted and supplied by the operator CLI")
 	}
 	if err := ValidateAbsolutePath(archivePath, "backup-archive"); err != nil {
 		return BackupResult{}, err
@@ -616,7 +666,7 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 			_ = WriteState(config, stateRunning)
 		}
 	}()
-	preRestore, err := createBackupWithRestart(ctx, config, "restore-preflight", now, compose, false)
+	preRestore, err := createBackupWithRestart(ctx, config, "restore-preflight", now, compose, false, false)
 	if err != nil {
 		return BackupResult{}, err
 	}
@@ -1043,7 +1093,11 @@ func RestoreRollback(config Config, archivePath string, now time.Time, composers
 	return BackupResult{OK: true, Action: "rollback-restore", Archive: archivePath, State: stateRunning, Secrets: manifest.SecretValues}, nil
 }
 
-func appendDurableTree(archive *tar.Writer, label, root string, include func(string, fs.DirEntry) bool) error {
+func appendDurableTree(archive *tar.Writer, label, root string, include func(string, fs.DirEntry) bool, archiveLimits ...*backupArchiveLimits) error {
+	var limits *backupArchiveLimits
+	if len(archiveLimits) > 0 {
+		limits = archiveLimits[0]
+	}
 	return filepath.WalkDir(root, func(current string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -1072,13 +1126,28 @@ func appendDurableTree(archive *tar.Writer, label, root string, include func(str
 			if readErr != nil || !safeRelativeSymlink(name, target) {
 				return fmt.Errorf("durable backup contains unsafe symlink: %s", name)
 			}
+			if limits != nil {
+				if err := limits.add(name, 0, tar.TypeSymlink); err != nil {
+					return err
+				}
+			}
 			return archive.WriteHeader(&tar.Header{Name: name, Mode: int64(info.Mode().Perm()), Typeflag: tar.TypeSymlink, Linkname: target})
 		}
 		if entry.IsDir() {
+			if limits != nil {
+				if err := limits.add(name+"/", 0, tar.TypeDir); err != nil {
+					return err
+				}
+			}
 			return archive.WriteHeader(&tar.Header{Name: name + "/", Mode: int64(info.Mode().Perm()), Typeflag: tar.TypeDir})
 		}
 		if !info.Mode().IsRegular() {
 			return nil
+		}
+		if limits != nil {
+			if err := limits.add(name, info.Size(), tar.TypeReg); err != nil {
+				return err
+			}
 		}
 		input, err := os.Open(current)
 		if err != nil {
@@ -1088,12 +1157,22 @@ func appendDurableTree(archive *tar.Writer, label, root string, include func(str
 			_ = input.Close()
 			return err
 		}
-		_, copyErr := io.Copy(archive, input)
+		written, copyErr := io.CopyN(archive, input, info.Size())
 		closeErr := input.Close()
-		if copyErr != nil {
+		if copyErr != nil || written != info.Size() {
+			if copyErr == nil || errors.Is(copyErr, io.EOF) || errors.Is(copyErr, io.ErrUnexpectedEOF) {
+				return fmt.Errorf("%w: %s", errBackupSourceChanged, current)
+			}
 			return copyErr
 		}
-		return closeErr
+		if closeErr != nil {
+			return closeErr
+		}
+		after, err := os.Stat(current)
+		if err != nil || !os.SameFile(info, after) || info.Size() != after.Size() || !info.ModTime().Equal(after.ModTime()) {
+			return fmt.Errorf("%w: %s", errBackupSourceChanged, current)
+		}
+		return nil
 	})
 }
 
@@ -1160,7 +1239,7 @@ func portableMetaGeneratedPath(relative string, entry fs.DirEntry) bool {
 		return true
 	}
 	switch relative {
-	case "runtime.json", "last-change.json", "stack-state", "services.json":
+	case "runtime.json", "last-change.json", "stack-state", "services.json", "backup-schedule-config.json", "backup-schedule-state.json", "backup-destinations.json":
 		return true
 	default:
 		return false
@@ -1266,6 +1345,12 @@ func allowedArchiveMember(name string) bool {
 func validateRestoreArchive(path string) error {
 	_, err := inspectRestoreArchive(path)
 	return err
+}
+
+// ValidateBackupArchive validates an unencrypted durable archive before the
+// host CLI sends it to a target for restoration.
+func ValidateBackupArchive(path string) error {
+	return validateRestoreArchive(path)
 }
 
 func verifyBackupDigest(archivePath string) error {

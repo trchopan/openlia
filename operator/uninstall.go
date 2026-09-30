@@ -16,6 +16,7 @@ type UninstallResult struct {
 	State      string `json:"state"`
 	Containers string `json:"containers,omitempty"`
 	Network    string `json:"network,omitempty"`
+	Backups    string `json:"backups,omitempty"`
 	Images     string `json:"images"`
 }
 
@@ -42,6 +43,14 @@ func Uninstall(ctx context.Context, config Config, compose Compose) (UninstallRe
 	var marker RuntimeMetadata
 	if json.Unmarshal(data, &marker) != nil || marker.InstallRoot != config.InstallRoot || marker.Project != config.ProjectName || marker.Network != config.NetworkName {
 		return UninstallResult{}, fmt.Errorf("installation marker does not match configured installation")
+	}
+	backupUnlock, err := acquireBackupLock(ctx, config)
+	if err != nil {
+		return UninstallResult{}, fmt.Errorf("cannot quiesce backup before uninstall: %w", err)
+	}
+	defer backupUnlock()
+	if _, err := RemoveBackupSchedule(config); err != nil {
+		return UninstallResult{}, fmt.Errorf("backup schedule cleanup failed; installation root was preserved: %w", err)
 	}
 	current := filepath.Join(config.InstallRoot, "current")
 	if _, err := os.Lstat(current); err == nil {
@@ -106,5 +115,5 @@ func Uninstall(ctx context.Context, config Config, compose Compose) (UninstallRe
 	if _, err := os.Lstat(config.InstallRoot); !errors.Is(err, os.ErrNotExist) {
 		return UninstallResult{}, fmt.Errorf("installation root could not be removed")
 	}
-	return UninstallResult{OK: true, Action: "uninstall", State: "removed", Containers: "removed", Network: "removed", Images: "preserved"}, nil
+	return UninstallResult{OK: true, Action: "uninstall", State: "removed", Containers: "removed", Network: "removed", Backups: "local-removed; remote-preserved", Images: "preserved"}, nil
 }

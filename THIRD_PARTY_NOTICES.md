@@ -16,8 +16,14 @@ replacement for the license files shipped by those projects or images.
 | uv | `0.8.14`; architecture-specific SHA-256 values are recorded in [`docker/Dockerfile`](docker/Dockerfile) | MIT and Apache-2.0 | [MIT License](https://github.com/astral-sh/uv/blob/0.8.14/LICENSE-MIT) and [Apache License 2.0](https://github.com/astral-sh/uv/blob/0.8.14/LICENSE-APACHE) |
 | PyYAML | `6.0.2` | MIT | [Upstream license](https://github.com/yaml/pyyaml/blob/6.0.2/LICENSE) |
 | yt-dlp | `2026.8.19`; universal wheel SHA-256 is recorded in [`docker/yt-dlp-requirements.txt`](docker/yt-dlp-requirements.txt) | Unlicense | [Upstream repository](https://github.com/yt-dlp/yt-dlp) |
+| age | `filippo.io/age v1.3.2` | BSD-3-Clause | [Upstream repository](https://github.com/FiloSottile/age) |
+| AWS SDK for Go v2 | `v1.47.1` and modules in [`go.mod`](go.mod) | Apache-2.0 | [Upstream repository](https://github.com/aws/aws-sdk-go-v2) |
+| robfig/cron | `v3.0.1` | MIT | [Upstream repository](https://github.com/robfig/cron) |
+| BurntSushi/toml | `v1.6.0` | MIT | [Upstream repository](https://github.com/BurntSushi/toml) |
+| `golang.org/x/crypto`, `x/sys`, `x/term` | Versions in [`go.mod`](go.mod) | BSD-3-Clause | [golang.org/x repositories](https://go.googlesource.com/) |
 
-OpenLia has no external Go modules. The Python dependency above is declared in
+Go module pins and transitive dependencies are declared in
+[`go.mod`](go.mod) and [`go.sum`](go.sum). The Python dependency above is declared in
 [`profile/skills/claim-review/requirements.txt`](profile/skills/claim-review/requirements.txt)
 and is also used by the development requirements file.
 
