@@ -201,7 +201,7 @@ func TestProfileSyncSeedsMissingWorkspaceTemplatesPreservingExistingFiles(t *tes
 		filepath.Join(repo, "profile", "config.yaml"):                                       "config\n",
 		filepath.Join(repo, "release", "manifest.json"):                                     `{"openlia":"test"}`,
 		filepath.Join(repo, "workspace-template", "knowledge", "claims", "claim-record.md"): "new claim template\n",
-		filepath.Join(repo, "workspace-template", "existing.md"):                           "template original\n",
+		filepath.Join(repo, "workspace-template", "existing.md"):                            "template original\n",
 		filepath.Join(repo, "workspace-template", "AGENTS.md"):                              "agents template\n",
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
