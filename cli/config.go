@@ -19,6 +19,8 @@ import (
 const (
 	configSchema           = 1
 	defaultVersion         = "0.1.0"
+	defaultHermesTag       = "v2026.9.14"
+	defaultLochoVersion    = "1.2.0"
 	defaultRemoteRoot      = "/srv/openlia"
 	defaultLocalRoot       = ".openlia"
 	defaultProject         = "openlia"
@@ -27,7 +29,7 @@ const (
 	defaultWorkspaceUIPort = 8089
 	defaultOpenWebUIPort   = 8090
 	defaultOpenWebUIImage  = "ghcr.io/open-webui/open-webui:main"
-	defaultHermesImage     = "openlia-hermes:v2026.9.14"
+	defaultHermesImage     = "openlia-hermes:" + defaultHermesTag
 )
 
 var defaultSkills = []string{
@@ -151,10 +153,10 @@ func defaultConfig() Config {
 		Timezone:         defaultTimezone,
 		Provider:         "copilot",
 		HermesImage:      defaultHermesImage,
-		HermesTag:        "v2026.9.14",
+		HermesTag:        defaultHermesTag,
 		HermesDigest:     "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294",
-		LochoImage:       "openlia-locho:v1.2.0",
-		LochoVersion:     "1.2.0",
+		LochoImage:       "openlia-locho:v" + defaultLochoVersion,
+		LochoVersion:     defaultLochoVersion,
 		LochoX8664SHA256: "7687311a3fe9671ac6f75427712dc556b15517493e892d9f81be7d0355bdd5f1",
 		LochoARM64SHA256: "80d089b3fdabe063b4c89fc6685e9bd0f297190d1af86d0f54624ba63d217b97",
 		APIHost:          "127.0.0.1",
