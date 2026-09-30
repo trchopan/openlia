@@ -55,9 +55,9 @@ Rank up to 6 evidenced items across:
 
 - Never send the entire markdown report to the chat.
 - Reply with a concise 3-6 bullet summary focusing on immediate priorities in the user's configured output language.
-- Include a standard clickable HTTP link:
-  `[Daily briefing YYYY-MM-DD](<origin>/files/inbox/daily-briefing-YYYY-MM-DD.md)`
-- Never use non-standard URI schemes like `openlia://`.
+- Include a canonical workspace link:
+  `[Daily briefing YYYY-MM-DD](openlia://workspace/inbox/daily-briefing-YYYY-MM-DD.md)`
+- Do not embed environment-specific HTTP origins.
 
 ## Pitfalls
 

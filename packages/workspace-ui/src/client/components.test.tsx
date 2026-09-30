@@ -11,12 +11,13 @@ import {
   ChatgptPreview,
   CopyLinkButton,
   DeleteFileDialog,
+  DocumentInspector,
   DocumentPane,
   FileNavigator,
   MarkdownPreview,
   WorkspaceHeader,
 } from "./components";
-import { buildWorkspaceLink } from "./openliaLinks";
+import { buildCanonicalWorkspaceUri, buildWorkspaceLink } from "./openliaLinks";
 
 describe("workspace presentation components", () => {
   test("renders safe GFM structures semantically", () => {
@@ -418,5 +419,93 @@ describe("CopyLinkButton and document copy integration", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Discard and delete" }));
     expect(confirmed).toBe(true);
+  });
+
+  test("DocumentPane renders Copy URI button and copies canonical openlia:// URI", () => {
+    let copied = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          copied = text;
+        },
+      },
+    });
+
+    const expectedUri = buildCanonicalWorkspaceUri("tasks.md");
+    render(
+      <DocumentPane
+        conflict=""
+        diff={[]}
+        documentError=""
+        draft="hello"
+        file={{
+          content: "hello",
+          editable: true,
+          modified_at: "2026-09-22T00:00:00.000Z",
+          path: "tasks.md",
+          revision: "rev1",
+          schema: 1,
+          size: 5,
+        }}
+        fileLoading={false}
+        onCloseFiles={() => undefined}
+        onDelete={() => undefined}
+        onDownload={() => undefined}
+        onDraftChange={() => undefined}
+        onOpenDetails={() => undefined}
+        onRetry={() => undefined}
+        onSave={() => undefined}
+        deleting={false}
+        onViewChange={() => undefined}
+        saving={false}
+        view="preview"
+      />,
+    );
+
+    const copyUriBtn = screen.getByRole("button", {
+      name: `Copy URI (${expectedUri})`,
+    });
+    expect(copyUriBtn).toBeInTheDocument();
+    fireEvent.click(copyUriBtn);
+    expect(copied).toBe(expectedUri);
+  });
+
+  test("DocumentInspector renders Web Link and Document URI with copy buttons", () => {
+    const file = {
+      content: "hello",
+      editable: true,
+      modified_at: "2026-09-22T00:00:00.000Z",
+      path: "projects/website.md",
+      revision: "rev1",
+      schema: 1 as const,
+      size: 5,
+    };
+    render(<DocumentInspector diff={[]} draft="hello" file={file} />);
+
+    expect(screen.getByText("Web Link (Share)")).toBeInTheDocument();
+    expect(screen.getByText("Document URI (openlia://)")).toBeInTheDocument();
+    expect(screen.getByText(buildWorkspaceLink(file.path))).toBeInTheDocument();
+    expect(
+      screen.getByText(buildCanonicalWorkspaceUri(file.path)),
+    ).toBeInTheDocument();
+  });
+
+  test("MarkdownPreview navigates on clicking relative markdown links", () => {
+    let navigated = "";
+    render(
+      <MarkdownPreview
+        content={"Check [Another Doc](./another.md) and [Parent](../readme.md)"}
+        currentFilePath="projects/sub/notes.md"
+        onNavigateLink={(href) => {
+          navigated = href;
+        }}
+      />,
+    );
+
+    const link = screen.getByText("Another Doc");
+    expect(link).toBeInTheDocument();
+    fireEvent.click(link);
+    expect(navigated).toBe("./another.md");
   });
 });

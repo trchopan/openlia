@@ -9,7 +9,7 @@ import {
   type WorkspaceView,
 } from "./components";
 import { CodeEditor } from "./CodeEditor";
-import { buildSkillLink } from "./openliaLinks";
+import { buildCanonicalSkillUri, buildSkillLink } from "./openliaLinks";
 
 export type SkillSubTab = "instructions" | "files" | "overview";
 
@@ -104,6 +104,12 @@ export function SkillDetailPane({
               className="btn btn-outline btn-sm gap-1.5"
               link={buildSkillLink(skill.id)}
               title={`Copy link (${buildSkillLink(skill.id)})`}
+            />
+            <CopyLinkButton
+              className="btn btn-outline btn-sm gap-1.5"
+              label="Copy URI"
+              link={buildCanonicalSkillUri(skill.id)}
+              title={`Copy URI (${buildCanonicalSkillUri(skill.id)})`}
             />
 
             <button
@@ -329,6 +335,16 @@ export function SkillDetailPane({
                         size="xs"
                         title={`Copy link (${buildSkillLink(skill.id, selectedFile.path)})`}
                       />
+                      <CopyLinkButton
+                        className="btn btn-outline btn-xs gap-1"
+                        label="Copy URI"
+                        link={buildCanonicalSkillUri(
+                          skill.id,
+                          selectedFile.path,
+                        )}
+                        size="xs"
+                        title={`Copy URI (${buildCanonicalSkillUri(skill.id, selectedFile.path)})`}
+                      />
                       {isDirty && (
                         <button
                           className="btn btn-ghost btn-xs"
@@ -488,17 +504,36 @@ export function SkillDetailPane({
             )}
 
             {/* Skill Link Card */}
-            <div className="card border border-base-content/10 bg-base-100 p-4 shadow-sm">
-              <h3 className="text-sm font-semibold text-base-content/70">
-                Skill Link
-              </h3>
-              <div className="mt-2 flex items-center justify-between gap-2 rounded bg-base-200/50 p-2 text-xs font-mono">
-                <span className="truncate">{buildSkillLink(skill.id)}</span>
-                <CopyLinkButton
-                  className="btn btn-outline btn-xs gap-1 shrink-0"
-                  link={buildSkillLink(skill.id)}
-                  size="xs"
-                />
+            <div className="card border border-base-content/10 bg-base-100 p-4 shadow-sm space-y-3">
+              <div>
+                <h3 className="text-xs uppercase tracking-wide text-base-content/50">
+                  Web Link (Share)
+                </h3>
+                <div className="mt-1 flex items-center justify-between gap-2 rounded bg-base-200/50 p-2 text-xs font-mono">
+                  <span className="truncate">{buildSkillLink(skill.id)}</span>
+                  <CopyLinkButton
+                    className="btn btn-outline btn-xs gap-1 shrink-0"
+                    link={buildSkillLink(skill.id)}
+                    size="xs"
+                    title={`Copy ${buildSkillLink(skill.id)}`}
+                  />
+                </div>
+              </div>
+              <div>
+                <h3 className="text-xs uppercase tracking-wide text-base-content/50">
+                  Skill URI (openlia://)
+                </h3>
+                <div className="mt-1 flex items-center justify-between gap-2 rounded bg-base-200/50 p-2 text-xs font-mono">
+                  <span className="truncate">
+                    {buildCanonicalSkillUri(skill.id)}
+                  </span>
+                  <CopyLinkButton
+                    className="btn btn-outline btn-xs gap-1 shrink-0"
+                    link={buildCanonicalSkillUri(skill.id)}
+                    size="xs"
+                    title={`Copy ${buildCanonicalSkillUri(skill.id)}`}
+                  />
+                </div>
               </div>
             </div>
           </div>

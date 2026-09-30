@@ -14,12 +14,12 @@ control.
 
 ## Workspace and skill links
 
-When referencing or providing links to workspace documents, notes, or skills in user-facing responses:
-- Format links as standard web URLs so they can be clicked directly in chat applications (such as Telegram, Open WebUI, and desktop/mobile browsers).
-- Workspace documents: `[Label](<origin>/files/<path>)` (for example, `[Project Plan](https://workspace.example.com/files/projects/website.md)` or `[Inbox Notes](/files/inbox/2026-09-notes.md)`).
-- Skills: `[Label](<origin>/skills/<skill-id>)` or `[Label](<origin>/skills/<skill-id>/<file>)` (for example, `[Weekly Review](https://workspace.example.com/skills/weekly-review)`).
-- If the public web origin is configured (via `OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN` or known from runtime context), prepend it to the link path (e.g. `https://workspace.example.com/files/<path>`). If no public origin is available, use the root-relative path `/files/<path>` or `/skills/<path>`.
-- Do not use custom non-standard URI schemes like `openlia://` because external chat apps and mobile devices cannot open them.
+When referencing or providing links to workspace documents, notes, or skills in user-facing responses or workspace records:
+- Format links using canonical `openlia://` URIs:
+  - Workspace documents: `[Label](openlia://workspace/<path>)` (for example, `[Project Plan](openlia://workspace/projects/website.md)` or `[Inbox Notes](openlia://workspace/inbox/2026-09-notes.md)`).
+  - Skills: `[Label](openlia://skills/<skill-id>)` or `[Label](openlia://skills/<skill-id>/<file>)` (for example, `[Weekly Review](openlia://skills/weekly-review)`).
+- Inside workspace markdown files, relative paths (e.g. `[Architecture](./architecture.md)`) are also supported.
+- Always use canonical `openlia://` URIs; do not hardcode environment-specific HTTP origins.
 
 <!-- BEGIN OPENLIA MANAGED OUTPUT LANGUAGE -->
 ## Output language

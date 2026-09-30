@@ -28,7 +28,7 @@ metadata:
    - **Proposed Events**: title, date/time, participants, location.
    - **Proposed Durable Claims**: candidate statements with explicit kind, source, and evidence.
    - **Unclear / Needs Confirmation**: missing times, ambiguous dates, or unverified facts.
-4. Reply to the user with a concise summary (3-5 bullet points) and a clickable workspace link (`[Review Title](<origin>/files/inbox/YYYY-MM-DD-chat-<slug>.md)`).
+4. Reply to the user with a concise summary (3-5 bullet points) and a clickable workspace link (`[Review Title](openlia://workspace/inbox/YYYY-MM-DD-chat-<slug>.md)`).
 5. Explicitly request confirmation or approval (e.g. "Approved", "Confirmed").
 6. **Wait for explicit approval** before creating records in `calendar/`, `tasks/`, or `knowledge/claims/`.
 7. Once approved:
@@ -51,7 +51,7 @@ does not modify the input.
 
 - Never create calendar events, tasks, or permanent claim records directly from an unreviewed chat message without user approval.
 - Do not guess or infer missing dates, medical interpretations, or deadlines; mark them explicitly in `Unclear / Needs Confirmation`.
-- Do not use non-standard link schemes like `openlia://`; use standard web/HTTP links.
+- Do not embed environment-specific HTTP origins; use canonical `openlia://` workspace URIs.
 
 ## Verification
 
