@@ -59,7 +59,7 @@ func TestConfigRoundTrip(t *testing.T) {
 		AuthorName:  "OpenLia Agent",
 		AuthorEmail: "openlia@example.test",
 	}
-	want.OpenLIABrowser = OpenLIABrowserConfig{
+	want.OpenLiaBrowser = OpenLiaBrowserConfig{
 		Configured:         true,
 		Mode:               "ssh",
 		Target:             "browser@example.test",
@@ -74,7 +74,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Target != want.Target || got.Model != want.Model || got.OutputLanguage != want.OutputLanguage || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || strings.Join(got.EnabledTools, ",") != strings.Join(want.EnabledTools, ",") || got.WorkspaceGit != want.WorkspaceGit || got.BackupIdentityFile != want.BackupIdentityFile || got.BackupRecipient != want.BackupRecipient || got.BackupSchedule != want.BackupSchedule || got.BackupScheduleEnabled != want.BackupScheduleEnabled || got.BackupRemoteRetention != want.BackupRemoteRetention || len(got.BackupDestinations) != len(want.BackupDestinations) || got.BackupDestinations[0] != want.BackupDestinations[0] || got.BackupDestinations[1] != want.BackupDestinations[1] || got.OpenLIABrowser != want.OpenLIABrowser || len(got.SkillSources) != 2 || got.SkillSources[0] != want.SkillSources[0] || got.SkillSources[1] != want.SkillSources[1] {
+	if got.Target != want.Target || got.Model != want.Model || got.OutputLanguage != want.OutputLanguage || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || strings.Join(got.EnabledTools, ",") != strings.Join(want.EnabledTools, ",") || got.WorkspaceGit != want.WorkspaceGit || got.BackupIdentityFile != want.BackupIdentityFile || got.BackupRecipient != want.BackupRecipient || got.BackupSchedule != want.BackupSchedule || got.BackupScheduleEnabled != want.BackupScheduleEnabled || got.BackupRemoteRetention != want.BackupRemoteRetention || len(got.BackupDestinations) != len(want.BackupDestinations) || got.BackupDestinations[0] != want.BackupDestinations[0] || got.BackupDestinations[1] != want.BackupDestinations[1] || got.OpenLiaBrowser != want.OpenLiaBrowser || len(got.SkillSources) != 2 || got.SkillSources[0] != want.SkillSources[0] || got.SkillSources[1] != want.SkillSources[1] {
 		t.Fatalf("round trip mismatch: got %#v want %#v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -96,17 +96,17 @@ func TestToolCapabilitiesRejectUnknownAndDuplicateValues(t *testing.T) {
 	}
 }
 
-func TestOpenLIABrowserConfigValidation(t *testing.T) {
+func TestOpenLiaBrowserConfigValidation(t *testing.T) {
 	valid := defaultConfig()
-	valid.OpenLIABrowser = OpenLIABrowserConfig{Configured: true, Mode: "local", SSHPort: 22, Root: "/Users/test/services/openlia-browser", ExtensionTokenFile: "/Users/test/services/playwright-server-token.txt"}
+	valid.OpenLiaBrowser = OpenLiaBrowserConfig{Configured: true, Mode: "local", SSHPort: 22, Root: "/Users/test/services/openlia-browser", ExtensionTokenFile: "/Users/test/services/playwright-server-token.txt"}
 	if err := validateConfig(valid); err != nil {
 		t.Fatalf("valid local openlia-browser config rejected: %v", err)
 	}
-	valid.OpenLIABrowser = OpenLIABrowserConfig{Configured: true, Mode: "ssh", Target: "user@example.test", SSHPort: 2222, Root: "/home/user/services/openlia-browser", ExtensionTokenFile: "/home/user/services/playwright-server-token.txt"}
+	valid.OpenLiaBrowser = OpenLiaBrowserConfig{Configured: true, Mode: "ssh", Target: "user@example.test", SSHPort: 2222, Root: "/home/user/services/openlia-browser", ExtensionTokenFile: "/home/user/services/playwright-server-token.txt"}
 	if err := validateConfig(valid); err != nil {
 		t.Fatalf("valid ssh openlia-browser config rejected: %v", err)
 	}
-	for _, config := range []OpenLIABrowserConfig{
+	for _, config := range []OpenLiaBrowserConfig{
 		{Configured: true, Mode: "remote", Root: "/Users/test/services/openlia-browser", ExtensionTokenFile: "/Users/test/services/playwright-server-token.txt"},
 		{Configured: true, Mode: "local", Target: "user@example.test", Root: "/Users/test/services/openlia-browser", ExtensionTokenFile: "/Users/test/services/playwright-server-token.txt"},
 		{Configured: true, Mode: "ssh", Root: "/home/user/services/openlia-browser", ExtensionTokenFile: "/home/user/services/playwright-server-token.txt"},
@@ -115,19 +115,19 @@ func TestOpenLIABrowserConfigValidation(t *testing.T) {
 		{Configured: true, Mode: "local", Root: "~/services/openlia-browser", ExtensionTokenFile: "/Users/test/services/playwright-server-token.txt"},
 	} {
 		candidate := defaultConfig()
-		candidate.OpenLIABrowser = config
+		candidate.OpenLiaBrowser = config
 		if err := validateConfig(candidate); err == nil {
 			t.Fatalf("invalid openlia-browser config accepted: %#v", config)
 		}
 	}
 }
 
-func TestOpenLIABrowserConfigAbsentFromLegacyConfig(t *testing.T) {
+func TestOpenLiaBrowserConfigAbsentFromLegacyConfig(t *testing.T) {
 	config, err := parseConfig("[openlia]\nschema = 1\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.OpenLIABrowser.Configured {
+	if config.OpenLiaBrowser.Configured {
 		t.Fatal("legacy config unexpectedly configured openlia-browser")
 	}
 	if strings.Contains(renderConfig(config), "[openlia-browser]") {
@@ -498,7 +498,7 @@ func TestConfigServicesRoundTrip(t *testing.T) {
 			Name:   "m1pro",
 			Source: sourcePath,
 			Roles: map[string]string{
-				"openlia-browser": RoleOpenLIABrowser,
+				"openlia-browser": RoleOpenLiaBrowser,
 				"genai":           RoleOpenAIGateway,
 			},
 		},
@@ -514,7 +514,7 @@ func TestConfigServicesRoundTrip(t *testing.T) {
 		t.Fatalf("expected 1 service host, got %d", len(got.Services))
 	}
 	host := got.Services[0]
-	if host.Name != "m1pro" || host.Source != sourcePath || len(host.Roles) != 2 || host.Roles["openlia-browser"] != RoleOpenLIABrowser || host.Roles["genai"] != RoleOpenAIGateway {
+	if host.Name != "m1pro" || host.Source != sourcePath || len(host.Roles) != 2 || host.Roles["openlia-browser"] != RoleOpenLiaBrowser || host.Roles["genai"] != RoleOpenAIGateway {
 		t.Fatalf("services round-trip mismatch: got %#v want %#v", host, want.Services[0])
 	}
 }
@@ -533,7 +533,7 @@ func TestConfigServicesMultiHostRoundTrip(t *testing.T) {
 			Name:   "m1pro",
 			Source: source1,
 			Roles: map[string]string{
-				"openlia-browser": RoleOpenLIABrowser,
+				"openlia-browser": RoleOpenLiaBrowser,
 			},
 		},
 		{

@@ -71,7 +71,7 @@ func Run(args []string, assets fs.FS) int {
 	case "locho-host":
 		return commandLochoHost(options, remaining[1:])
 	case "browser":
-		return commandOpenLIABrowser(options, remaining[1:], assets)
+		return commandOpenLiaBrowser(options, remaining[1:], assets)
 	case "telegram":
 		return commandTelegram(options, remaining[1:])
 	default:
@@ -777,7 +777,7 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 				return fail(options, ExitFailure, "workspace Git reconciliation failed: "+err.Error(), nil)
 			}
 		}
-		return renderOpenLIAUpdate(ctx, deployment, options, profileRaw)
+		return renderOpenLiaUpdate(ctx, deployment, options, profileRaw)
 	}
 	// Runtime image updates intentionally reuse the pinned Compose definition.
 	// The command does not silently change a tag or digest; operators update the
@@ -802,7 +802,7 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 	return renderRemote(options, raw, "openlia update "+component+": pinned runtime reconciled")
 }
 
-func renderOpenLIAUpdate(ctx context.Context, deployment deployment, options Options, raw []byte) int {
+func renderOpenLiaUpdate(ctx context.Context, deployment deployment, options Options, raw []byte) int {
 	if options.JSON {
 		return renderRemote(options, raw, "")
 	}

@@ -48,18 +48,18 @@ var defaultSkills = []string{
 }
 
 const (
-	RoleOpenLIABrowser = "openlia-browser"
+	RoleOpenLiaBrowser = "openlia-browser"
 	RoleOpenAIGateway  = "openai-gateway"
 )
 
 var allowedServiceRoles = map[string]bool{
-	RoleOpenLIABrowser: true,
+	RoleOpenLiaBrowser: true,
 	RoleOpenAIGateway:  true,
 }
 
 func ValidateServiceRole(role string) error {
 	if !allowedServiceRoles[role] {
-		return fmt.Errorf("invalid service role %q; must be one of: %s, %s", role, RoleOpenLIABrowser, RoleOpenAIGateway)
+		return fmt.Errorf("invalid service role %q; must be one of: %s, %s", role, RoleOpenLiaBrowser, RoleOpenAIGateway)
 	}
 	return nil
 }
@@ -108,7 +108,7 @@ type Config struct {
 	BackupDestinations      []BackupDestinationConfig
 	SkillSources            []SkillSourceConfig
 	Services                []ServiceHostConfig
-	OpenLIABrowser          OpenLIABrowserConfig
+	OpenLiaBrowser          OpenLiaBrowserConfig
 }
 
 type BackupDestinationConfig struct {
@@ -153,7 +153,7 @@ type WorkspaceGitConfig struct {
 	AuthorEmail string
 }
 
-type OpenLIABrowserConfig struct {
+type OpenLiaBrowserConfig struct {
 	Configured         bool
 	Mode               string
 	Target             string
@@ -200,7 +200,7 @@ func defaultConfig() Config {
 		BackupScheduleEnabled: true,
 		BackupRemoteRetention: 30,
 		BackupDestinations:    []BackupDestinationConfig{},
-		OpenLIABrowser:        OpenLIABrowserConfig{Mode: "local", SSHPort: 22},
+		OpenLiaBrowser:        OpenLiaBrowserConfig{Mode: "local", SSHPort: 22},
 		Services:              nil,
 	}
 }
@@ -303,7 +303,7 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.Services = append(config.Services, ServiceHostConfig{Roles: make(map[string]string)})
 			}
 			if section == "openlia-browser" {
-				config.OpenLIABrowser.Configured = true
+				config.OpenLiaBrowser.Configured = true
 			}
 			continue
 		}
@@ -452,15 +452,15 @@ func parseConfigUnchecked(data string) (Config, error) {
 			case "locho-host.enabled":
 				config.LochoHostEnabled, err = parseBool(value)
 			case "openlia-browser.mode":
-				config.OpenLIABrowser.Mode, err = parseString(value)
+				config.OpenLiaBrowser.Mode, err = parseString(value)
 			case "openlia-browser.target":
-				config.OpenLIABrowser.Target, err = parseString(value)
+				config.OpenLiaBrowser.Target, err = parseString(value)
 			case "openlia-browser.ssh_port":
-				config.OpenLIABrowser.SSHPort, err = parseInt(value)
+				config.OpenLiaBrowser.SSHPort, err = parseInt(value)
 			case "openlia-browser.root":
-				config.OpenLIABrowser.Root, err = parseString(value)
+				config.OpenLiaBrowser.Root, err = parseString(value)
 			case "openlia-browser.extension_token_file":
-				config.OpenLIABrowser.ExtensionTokenFile, err = parseString(value)
+				config.OpenLiaBrowser.ExtensionTokenFile, err = parseString(value)
 			case "components.open_webui_image":
 				config.OpenWebUIImage, err = parseString(value)
 			case "release.source":
@@ -675,8 +675,8 @@ func validateConfig(config Config) error {
 			return errors.New("locho-host requires open-webui authentication")
 		}
 	}
-	if config.OpenLIABrowser.Configured {
-		if err := validateOpenLIABrowser(config.OpenLIABrowser); err != nil {
+	if config.OpenLiaBrowser.Configured {
+		if err := validateOpenLiaBrowser(config.OpenLiaBrowser); err != nil {
 			return err
 		}
 	}
@@ -841,7 +841,7 @@ func validateOpenWebUI(host string, port int) error {
 	return nil
 }
 
-func validateOpenLIABrowser(config OpenLIABrowserConfig) error {
+func validateOpenLiaBrowser(config OpenLiaBrowserConfig) error {
 	if config.Mode != "local" && config.Mode != "ssh" {
 		return errors.New("openlia-browser.mode must be local or ssh")
 	}
@@ -1152,8 +1152,8 @@ func saveConfig(config Config) error {
 func renderConfig(config Config) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "[openlia]\nschema = %d\nversion = %q\nmode = %q\ntarget = %q\nroot = %q\nproject = %q\nmodel = %q\noutput_language = %q\ntimezone = %q\nprovider = %q\nexternal_network = %q\n\n", config.Schema, config.Version, config.Mode, config.Target, config.InstallRoot, config.Project, config.Model, config.OutputLanguage, config.Timezone, config.Provider, config.ExternalNetwork)
-	if config.OpenLIABrowser.Configured {
-		fmt.Fprintf(&builder, "[openlia-browser]\nmode = %q\ntarget = %q\nssh_port = %d\nroot = %q\nextension_token_file = %q\n\n", config.OpenLIABrowser.Mode, config.OpenLIABrowser.Target, config.OpenLIABrowser.SSHPort, config.OpenLIABrowser.Root, config.OpenLIABrowser.ExtensionTokenFile)
+	if config.OpenLiaBrowser.Configured {
+		fmt.Fprintf(&builder, "[openlia-browser]\nmode = %q\ntarget = %q\nssh_port = %d\nroot = %q\nextension_token_file = %q\n\n", config.OpenLiaBrowser.Mode, config.OpenLiaBrowser.Target, config.OpenLiaBrowser.SSHPort, config.OpenLiaBrowser.Root, config.OpenLiaBrowser.ExtensionTokenFile)
 	}
 	if config.WorkspaceUIHost != "" {
 		fmt.Fprintf(&builder, "[workspace-ui]\nhost = %q\nport = %d\n", config.WorkspaceUIHost, config.WorkspaceUIPort)

@@ -24,7 +24,7 @@ type openliaBrowserTarget struct {
 	ExtensionTokenFile string
 }
 
-var defaultOpenLIABrowserAllowlist = []string{
+var defaultOpenLiaBrowserAllowlist = []string{
 	"openlia_browser_session_request",
 	"openlia_browser_session_status",
 	"openlia_browser_session_touch",
@@ -47,45 +47,45 @@ var defaultOpenLIABrowserAllowlist = []string{
 	"browser_close",
 }
 
-func commandOpenLIABrowser(options Options, args []string, assets fs.FS) int {
+func commandOpenLiaBrowser(options Options, args []string, assets fs.FS) int {
 	if len(args) == 0 {
 		return fail(options, ExitUsage, "browser requires configure, install, start, stop, restart, status, logs, or uninstall", nil)
 	}
 	action := args[0]
 	args = args[1:]
 	if action == "configure" {
-		return configureOpenLIABrowser(options, args)
+		return configureOpenLiaBrowser(options, args)
 	}
 	config, code := configOrError(options)
 	if code != ExitOK {
 		return code
 	}
-	if !config.OpenLIABrowser.Configured {
+	if !config.OpenLiaBrowser.Configured {
 		return fail(options, ExitPrereq, "browser is not configured; run `openlia browser configure`", nil)
 	}
-	target := openliaBrowserTarget{Mode: config.OpenLIABrowser.Mode, Target: config.OpenLIABrowser.Target, SSHPort: config.OpenLIABrowser.SSHPort, Root: config.OpenLIABrowser.Root, ExtensionTokenFile: config.OpenLIABrowser.ExtensionTokenFile}
-	if err := validateOpenLIABrowserTarget(target); err != nil {
+	target := openliaBrowserTarget{Mode: config.OpenLiaBrowser.Mode, Target: config.OpenLiaBrowser.Target, SSHPort: config.OpenLiaBrowser.SSHPort, Root: config.OpenLiaBrowser.Root, ExtensionTokenFile: config.OpenLiaBrowser.ExtensionTokenFile}
+	if err := validateOpenLiaBrowserTarget(target); err != nil {
 		return fail(options, ExitUsage, err.Error(), nil)
 	}
 	ctx, cancel := remoteContext()
 	defer cancel()
 	switch action {
 	case "install":
-		return installOpenLIABrowser(options, ctx, target, assets)
+		return installOpenLiaBrowser(options, ctx, target, assets)
 	case "start", "stop", "restart":
-		return lifecycleOpenLIABrowser(options, ctx, target, action)
+		return lifecycleOpenLiaBrowser(options, ctx, target, action)
 	case "status":
-		return statusOpenLIABrowser(options, ctx, target)
+		return statusOpenLiaBrowser(options, ctx, target)
 	case "logs":
-		return logsOpenLIABrowser(options, ctx, target, args)
+		return logsOpenLiaBrowser(options, ctx, target, args)
 	case "uninstall":
-		return uninstallOpenLIABrowser(options, ctx, target)
+		return uninstallOpenLiaBrowser(options, ctx, target)
 	default:
 		return fail(options, ExitUsage, fmt.Sprintf("unknown browser action %q", action), nil)
 	}
 }
 
-func configureOpenLIABrowser(options Options, args []string) int {
+func configureOpenLiaBrowser(options Options, args []string) int {
 	set := newFlagSet("browser configure")
 	local := set.Bool("local", false, "run openlia-browser on this machine")
 	target := set.String("target", "", "install and control openlia-browser on this SSH target")
@@ -105,7 +105,7 @@ func configureOpenLIABrowser(options Options, args []string) int {
 	if err != nil {
 		config = defaultConfig()
 	}
-	config.OpenLIABrowser = OpenLIABrowserConfig{
+	config.OpenLiaBrowser = OpenLiaBrowserConfig{
 		Configured:         true,
 		Mode:               "local",
 		Target:             "",
@@ -114,8 +114,8 @@ func configureOpenLIABrowser(options Options, args []string) int {
 		ExtensionTokenFile: *tokenFile,
 	}
 	if !*local {
-		config.OpenLIABrowser.Mode = "ssh"
-		config.OpenLIABrowser.Target = *target
+		config.OpenLiaBrowser.Mode = "ssh"
+		config.OpenLiaBrowser.Target = *target
 	}
 	if err := validateConfig(config); err != nil {
 		return fail(options, ExitUsage, err.Error(), nil)
@@ -128,16 +128,16 @@ func configureOpenLIABrowser(options Options, args []string) int {
 		"ok":        true,
 		"action":    "configure",
 		"component": "openlia-browser",
-		"mode":      config.OpenLIABrowser.Mode,
-		"target":    config.OpenLIABrowser.Target,
-		"ssh_port":  config.OpenLIABrowser.SSHPort,
-		"root":      config.OpenLIABrowser.Root,
+		"mode":      config.OpenLiaBrowser.Mode,
+		"target":    config.OpenLiaBrowser.Target,
+		"ssh_port":  config.OpenLiaBrowser.SSHPort,
+		"root":      config.OpenLiaBrowser.Root,
 	}, "openlia-browser configuration saved")
 }
 
-func validateOpenLIABrowserTarget(target openliaBrowserTarget) error {
-	config := OpenLIABrowserConfig{Configured: true, Mode: target.Mode, Target: target.Target, SSHPort: target.SSHPort, Root: target.Root, ExtensionTokenFile: target.ExtensionTokenFile}
-	return validateOpenLIABrowser(config)
+func validateOpenLiaBrowserTarget(target openliaBrowserTarget) error {
+	config := OpenLiaBrowserConfig{Configured: true, Mode: target.Mode, Target: target.Target, SSHPort: target.SSHPort, Root: target.Root, ExtensionTokenFile: target.ExtensionTokenFile}
+	return validateOpenLiaBrowser(config)
 }
 
 func openliaBrowserCommand(target openliaBrowserTarget, command string) ([]byte, error) {
@@ -209,7 +209,7 @@ func openliaBrowserRootCommand(target openliaBrowserTarget, command string) stri
 	return "root=" + shellQuote(target.Root) + "; " + command
 }
 
-func installOpenLIABrowser(options Options, ctx context.Context, target openliaBrowserTarget, assets fs.FS) int {
+func installOpenLiaBrowser(options Options, ctx context.Context, target openliaBrowserTarget, assets fs.FS) int {
 	bundle, err := fs.ReadFile(assets, "packages/openlia-browser/dist/server.js")
 	if err != nil {
 		return fail(options, ExitInternal, fmt.Sprintf("openlia-browser bundle is missing: %v", err), nil)
@@ -233,18 +233,18 @@ func installOpenLIABrowser(options Options, ctx context.Context, target openliaB
 	}
 	tokenPath := target.ExtensionTokenFile
 	nodeDir := filepath.Dir(nodePath)
-	runner := renderOpenLIABrowserRunner(target, nodePath, nodeDir, tokenPath)
+	runner := renderOpenLiaBrowserRunner(target, nodePath, nodeDir, tokenPath)
 	if err := openliaBrowserUpload(target, filepath.Join(target.Root, "run.sh"), []byte(runner), "700"); err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
-	return lifecycleOpenLIABrowser(options, ctx, target, "restart")
+	return lifecycleOpenLiaBrowser(options, ctx, target, "restart")
 }
 
-func renderOpenLIABrowserRunner(target openliaBrowserTarget, nodePath, nodeDir, tokenPath string) string {
-	return "#!/bin/sh\nset -eu\nexport PATH=" + shellQuote(nodeDir) + ":${PATH:-/usr/bin:/bin}\nexport OPENLIA_BROWSER_BIND=127.0.0.1\nexport OPENLIA_BROWSER_PORT=8932\nexport OPENLIA_BROWSER_MCP_URL=http://localhost:8931/mcp\nexport OPENLIA_BROWSER_ALLOWED_TOOLS=" + shellQuote(strings.Join(defaultOpenLIABrowserAllowlist, ",")) + "\nexport OPENLIA_BROWSER_PLAYWRIGHT_PORT=8931\nexport OPENLIA_BROWSER_SUPERVISE_PLAYWRIGHT=1\nexport OPENLIA_BROWSER_PLAYWRIGHT_TOKEN_FILE=" + shellQuote(tokenPath) + "\nexport OPENLIA_BROWSER_PLAYWRIGHT_COMMAND=" + shellQuote(filepath.Join(nodeDir, "npx")) + "\nexport OPENLIA_BROWSER_DATA_ROOT=" + shellQuote(filepath.Join(target.Root, "data")) + "\nexec " + shellQuote(nodePath) + " " + shellQuote(filepath.Join(target.Root, "server.js")) + "\n"
+func renderOpenLiaBrowserRunner(target openliaBrowserTarget, nodePath, nodeDir, tokenPath string) string {
+	return "#!/bin/sh\nset -eu\nexport PATH=" + shellQuote(nodeDir) + ":${PATH:-/usr/bin:/bin}\nexport OPENLIA_BROWSER_BIND=127.0.0.1\nexport OPENLIA_BROWSER_PORT=8932\nexport OPENLIA_BROWSER_MCP_URL=http://localhost:8931/mcp\nexport OPENLIA_BROWSER_ALLOWED_TOOLS=" + shellQuote(strings.Join(defaultOpenLiaBrowserAllowlist, ",")) + "\nexport OPENLIA_BROWSER_PLAYWRIGHT_PORT=8931\nexport OPENLIA_BROWSER_SUPERVISE_PLAYWRIGHT=1\nexport OPENLIA_BROWSER_PLAYWRIGHT_TOKEN_FILE=" + shellQuote(tokenPath) + "\nexport OPENLIA_BROWSER_PLAYWRIGHT_COMMAND=" + shellQuote(filepath.Join(nodeDir, "npx")) + "\nexport OPENLIA_BROWSER_DATA_ROOT=" + shellQuote(filepath.Join(target.Root, "data")) + "\nexec " + shellQuote(nodePath) + " " + shellQuote(filepath.Join(target.Root, "server.js")) + "\n"
 }
 
-func lifecycleOpenLIABrowser(options Options, ctx context.Context, target openliaBrowserTarget, action string) int {
+func lifecycleOpenLiaBrowser(options Options, ctx context.Context, target openliaBrowserTarget, action string) int {
 	root := shellQuote(target.Root)
 	pid := target.Root + "/run/openlia-browser.pid"
 	legacyPID := target.Root + "/run/browser-tools.pid"
@@ -265,7 +265,7 @@ func lifecycleOpenLIABrowser(options Options, ctx context.Context, target openli
 	return writeResult(options, map[string]any{"schema": 1, "ok": true, "component": "openlia-browser", "action": action, "mode": target.Mode, "target": target.Target, "ssh_port": target.SSHPort, "root": target.Root}, "openlia-browser "+action+" requested")
 }
 
-func statusOpenLIABrowser(options Options, ctx context.Context, target openliaBrowserTarget) int {
+func statusOpenLiaBrowser(options Options, ctx context.Context, target openliaBrowserTarget) int {
 	output, err := openliaBrowserCommand(target, "curl -fsS http://127.0.0.1:8932/health")
 	if err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
@@ -273,7 +273,7 @@ func statusOpenLIABrowser(options Options, ctx context.Context, target openliaBr
 	return renderRemote(options, output, fmt.Sprintf("openlia-browser status: %s", strings.TrimSpace(string(output))))
 }
 
-func logsOpenLIABrowser(options Options, ctx context.Context, target openliaBrowserTarget, args []string) int {
+func logsOpenLiaBrowser(options Options, ctx context.Context, target openliaBrowserTarget, args []string) int {
 	if len(args) != 0 {
 		return fail(options, ExitUsage, "openlia-browser logs takes no positional arguments", nil)
 	}
@@ -288,7 +288,7 @@ func logsOpenLIABrowser(options Options, ctx context.Context, target openliaBrow
 	return ExitOK
 }
 
-func uninstallOpenLIABrowser(options Options, ctx context.Context, target openliaBrowserTarget) int {
+func uninstallOpenLiaBrowser(options Options, ctx context.Context, target openliaBrowserTarget) int {
 	if !options.NonInteractive {
 		expected := "uninstall " + target.Root
 		fmt.Fprintf(os.Stderr, "Permanently remove openlia-browser from %s? Type %q to continue: ", target.Root, expected)
