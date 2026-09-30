@@ -280,4 +280,3 @@ func seedMissingWorkspaceTemplates(templateDir, workspaceDir string) error {
 		return copyOnce(path, dest, 0o600)
 	})
 }
-

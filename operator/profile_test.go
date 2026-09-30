@@ -259,4 +259,3 @@ func TestProfileSyncSeedsMissingWorkspaceTemplatesPreservingExistingFiles(t *tes
 		t.Fatalf("unexpected user memory data: %q", string(userData))
 	}
 }
-
