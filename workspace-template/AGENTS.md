@@ -39,11 +39,12 @@ records and preserve them unless the user explicitly asks for a change.
 
 ## Workspace and skill links
 
-When referencing or providing links to workspace documents, notes, or skills in user-facing responses:
-- Format links as standard web URLs so they are directly clickable in chat applications (such as Telegram, Open WebUI, and desktop/mobile browsers).
-- Workspace documents: `[Label](<origin>/files/<path>)` (e.g. `[Career Goal](https://workspace.example.com/files/goals/career.md)` or `[Career Goal](/files/goals/career.md)`).
-- Skills: `[Label](<origin>/skills/<skill-id>)` (e.g. `[Inbox Triage](https://workspace.example.com/skills/inbox-triage)`).
-- Prepend the public origin (`OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN`) when configured, or use root-relative paths (`/files/<path>` and `/skills/<path>`). Do not use custom non-standard schemes like `openlia://`.
+When referencing or providing links to workspace documents, notes, or skills in user-facing responses or workspace records:
+- Format links using canonical `openlia://` URIs:
+  - Workspace documents: `[Label](openlia://workspace/<path>)` (e.g. `[Career Goal](openlia://workspace/goals/career.md)`).
+  - Skills: `[Label](openlia://skills/<skill-id>)` (e.g. `[Inbox Triage](openlia://skills/inbox-triage)`).
+  - Inside workspace markdown files, document-relative links (e.g. `[Specs](./specs.md)`) are also supported.
+- Never embed environment-specific HTTP origins or hostnames into workspace records.
 
 ## Approval boundary
 

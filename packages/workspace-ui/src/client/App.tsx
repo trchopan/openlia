@@ -863,7 +863,11 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   }
 
   function handleNavigateLink(href: string) {
-    const target = resolveLinkTarget(href, { skills, tree });
+    const target = resolveLinkTarget(href, {
+      currentFilePath: file?.path,
+      skills,
+      tree,
+    });
     if (!target) return;
     if (target.kind === "workspace") {
       requestOpenFile(target.path);

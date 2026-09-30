@@ -17,7 +17,11 @@ import type {
   WorkspaceGitStatus,
   WorkspaceTreeEntry,
 } from "../shared/api";
-import { buildWorkspaceLink, copyToClipboard } from "./openliaLinks";
+import {
+  buildCanonicalWorkspaceUri,
+  buildWorkspaceLink,
+  copyToClipboard,
+} from "./openliaLinks";
 
 export type WorkspaceView = "edit" | "preview" | "info";
 
@@ -699,7 +703,12 @@ export function FileNavigator({
 }
 
 export function transformMarkdownUrl(url: string): string {
-  if (url.startsWith("openlia://") || url.startsWith("/")) {
+  if (
+    url.startsWith("openlia://") ||
+    url.startsWith("/") ||
+    url.startsWith("./") ||
+    url.startsWith("../")
+  ) {
     return url;
   }
   return defaultUrlTransform(url);
@@ -707,9 +716,11 @@ export function transformMarkdownUrl(url: string): string {
 
 export function MarkdownPreview({
   content,
+  currentFilePath: _currentFilePath,
   onNavigateLink,
 }: {
   content: string;
+  currentFilePath?: string | undefined;
   onNavigateLink?: ((href: string) => void) | undefined;
 }) {
   const { frontmatter, rawYaml, body } = useMemo(
@@ -720,9 +731,20 @@ export function MarkdownPreview({
   const customComponents = useMemo(() => {
     return {
       a: ({ children, href, onClick, ...props }: ComponentProps<"a">) => {
+        const isRelative =
+          href &&
+          (href.startsWith("./") ||
+            href.startsWith("../") ||
+            (!href.includes("://") &&
+              !href.startsWith("/") &&
+              !href.startsWith("mailto:") &&
+              !href.startsWith("#") &&
+              href.endsWith(".md")));
+
         const isInternal =
           href &&
-          (href.startsWith("openlia://") ||
+          (isRelative ||
+            href.startsWith("openlia://") ||
             href.startsWith("/files/") ||
             href.startsWith("/skills/") ||
             ((href.startsWith("http://") || href.startsWith("https://")) &&
@@ -966,7 +988,7 @@ export function DocumentInspector({
             </div>
             <div>
               <dt className="text-xs uppercase tracking-wide text-base-content/50">
-                Workspace Link
+                Web Link (Share)
               </dt>
               <dd className="mt-1 flex items-center justify-between gap-2 break-all font-mono text-xs text-base-content/80">
                 <span>{buildWorkspaceLink(file.path)}</span>
@@ -976,6 +998,21 @@ export function DocumentInspector({
                   link={buildWorkspaceLink(file.path)}
                   size="xs"
                   title={`Copy ${buildWorkspaceLink(file.path)}`}
+                />
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-base-content/50">
+                Document URI (openlia://)
+              </dt>
+              <dd className="mt-1 flex items-center justify-between gap-2 break-all font-mono text-xs text-base-content/80">
+                <span>{buildCanonicalWorkspaceUri(file.path)}</span>
+                <CopyLinkButton
+                  className="btn btn-ghost btn-xs btn-square shrink-0 text-base-content/60 hover:text-base-content"
+                  iconOnly
+                  link={buildCanonicalWorkspaceUri(file.path)}
+                  size="xs"
+                  title={`Copy ${buildCanonicalWorkspaceUri(file.path)}`}
                 />
               </dd>
             </div>
@@ -1198,6 +1235,12 @@ export function DocumentPane({
                 link={buildWorkspaceLink(file.path)}
                 title={`Copy link (${buildWorkspaceLink(file.path)})`}
               />
+              <CopyLinkButton
+                className="btn btn-outline btn-sm gap-1.5"
+                label="Copy URI"
+                link={buildCanonicalWorkspaceUri(file.path)}
+                title={`Copy URI (${buildCanonicalWorkspaceUri(file.path)})`}
+              />
               <button
                 className="btn btn-outline btn-sm"
                 onClick={onDownload}
@@ -1243,7 +1286,7 @@ export function DocumentPane({
                     <circle cx="12" cy="19" r="2" />
                   </svg>
                 </button>
-                <ul className="dropdown-content menu z-30 rounded-box border border-base-content/10 bg-base-100 p-1 shadow-lg text-xs w-36">
+                <ul className="dropdown-content menu z-30 rounded-box border border-base-content/10 bg-base-100 p-1 shadow-lg text-xs w-44">
                   {onRevealInTree && (
                     <li>
                       <button onClick={onRevealInTree} type="button">
@@ -1259,6 +1302,18 @@ export function DocumentPane({
                       type="button"
                     >
                       Copy Link
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      onClick={() =>
+                        void copyToClipboard(
+                          buildCanonicalWorkspaceUri(file.path),
+                        )
+                      }
+                      type="button"
+                    >
+                      Copy URI
                     </button>
                   </li>
                   <li>
@@ -1333,6 +1388,7 @@ export function DocumentPane({
               <div className="workspace-pane-label">Preview</div>
               <MarkdownPreview
                 content={draft}
+                currentFilePath={file.path}
                 onNavigateLink={onNavigateLink}
               />
             </section>

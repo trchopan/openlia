@@ -169,9 +169,31 @@ function findMatchingWorkspaceFile(
   return undefined;
 }
 
+export function resolveRelativePath(
+  relativePath: string,
+  fromFilePath: string,
+): string {
+  const cleanFrom = fromFilePath.replace(/^\/+/, "");
+  const fromDirParts = cleanFrom.includes("/")
+    ? cleanFrom.split("/").slice(0, -1)
+    : [];
+  const relClean = relativePath.split("?")[0]?.split("#")[0] ?? relativePath;
+  const relParts = relClean.split("/").filter((p) => p !== "" && p !== ".");
+  const resultParts = [...fromDirParts];
+  for (const part of relParts) {
+    if (part === "..") {
+      resultParts.pop();
+    } else {
+      resultParts.push(part);
+    }
+  }
+  return resultParts.join("/");
+}
+
 export function resolveLinkTarget(
   input: string,
   options?: {
+    currentFilePath?: string | undefined;
     skills?: SkillSummary[] | undefined;
     tree?: WorkspaceTreeEntry[] | undefined;
   },
@@ -182,6 +204,23 @@ export function resolveLinkTarget(
   const knownSkillIds = options?.skills?.map((s) => s.id) ?? [];
   const files = options?.tree?.filter((e) => e.kind === "file") ?? [];
   const knownDocPaths = new Set(files.map((e) => e.path));
+
+  // 0. Handle relative paths (e.g. ./sibling.md or ../folder/doc.md)
+  if (trimmed.startsWith("./") || trimmed.startsWith("../")) {
+    const targetPath = options?.currentFilePath
+      ? resolveRelativePath(trimmed, options.currentFilePath)
+      : trimmed.replace(/^\.\//, "");
+    if (targetPath) {
+      const matched = findMatchingWorkspaceFile(targetPath, files);
+      const resolvedPath = matched ? matched.path : targetPath;
+      return {
+        exists: matched ? true : knownDocPaths.size > 0 ? false : undefined,
+        kind: "workspace",
+        label: resolvedPath,
+        path: resolvedPath,
+      };
+    }
+  }
 
   // 1. Handle openlia:// scheme
   if (trimmed.startsWith("openlia://")) {
@@ -476,6 +515,23 @@ export function filterGoToSuggestions(
   }
 
   return suggestions.slice(0, limit);
+}
+
+export function buildCanonicalWorkspaceUri(path: string): string {
+  const cleanPath = path.replace(/^\/+/, "");
+  return `openlia://workspace/${cleanPath}`;
+}
+
+export function buildCanonicalSkillUri(
+  skillId: string,
+  skillFile?: string | undefined,
+): string {
+  const cleanSkillId = skillId.replace(/^\/+|\/+$/g, "");
+  if (!skillFile) {
+    return `openlia://skills/${cleanSkillId}`;
+  }
+  const cleanFile = skillFile.replace(/^\/+/, "");
+  return `openlia://skills/${cleanSkillId}/${cleanFile}`;
 }
 
 export function buildWorkspaceLink(path: string, baseOrigin?: string): string {

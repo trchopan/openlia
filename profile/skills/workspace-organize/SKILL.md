@@ -65,9 +65,9 @@ Read relevant sources across the workspace:
 
 5. **Delivery**:
    - Stage the full report into `inbox/workspace-organize-YYYY-MM-DD.md`.
-   - Send a concise 3-5 bullet summary to chat in the user's configured output language with a clickable web link:
-     `[Workspace Organize Report](<origin>/files/inbox/workspace-organize-YYYY-MM-DD.md)`.
-   - Do NOT use non-standard URI schemes like `openlia://`.
+   - Send a concise 3-5 bullet summary to chat in the user's configured output language with a canonical workspace link:
+     `[Workspace Organize Report](openlia://workspace/inbox/workspace-organize-YYYY-MM-DD.md)`.
+   - Do NOT embed environment-specific HTTP origins.
 
 6. **Execution After Approval**:
    - Only execute file moves, archives, or link updates after the user responds with explicit confirmation (e.g. "Approve all" or "Approve O-2026-09-29-001").

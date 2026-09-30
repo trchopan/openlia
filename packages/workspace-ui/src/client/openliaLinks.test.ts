@@ -1,12 +1,15 @@
 import { describe, expect, test } from "vitest";
 import type { SkillSummary, WorkspaceTreeEntry } from "../shared/api";
 import {
+  buildCanonicalSkillUri,
+  buildCanonicalWorkspaceUri,
   buildSkillLink,
   buildWorkspaceLink,
   copyToClipboard,
   filterGoToSuggestions,
   parseSkillRemainder,
   resolveLinkTarget,
+  resolveRelativePath,
 } from "./openliaLinks";
 
 const mockSkills: SkillSummary[] = [
@@ -244,6 +247,52 @@ describe("resolveLinkTarget", () => {
     });
   });
 
+  test("resolveRelativePath calculates normalized target path", () => {
+    expect(
+      resolveRelativePath("./architecture.md", "projects/website/readme.md"),
+    ).toBe("projects/website/architecture.md");
+    expect(
+      resolveRelativePath("../roadmap.md", "projects/website/readme.md"),
+    ).toBe("projects/roadmap.md");
+    expect(
+      resolveRelativePath("../../tasks.md", "projects/website/specs/api.md"),
+    ).toBe("projects/tasks.md");
+    expect(resolveRelativePath("./inbox.md", "root.md")).toBe("inbox.md");
+  });
+
+  test("resolves relative paths with currentFilePath context", () => {
+    const res = resolveLinkTarget("./architecture.md", {
+      currentFilePath: "projects/website/readme.md",
+      tree: [
+        ...mockTree,
+        {
+          kind: "file",
+          path: "projects/website/architecture.md",
+          editable: true,
+          modified_at: "2026-09-22T00:00:00Z",
+          size: 100,
+        },
+      ],
+    });
+    expect(res).toEqual({
+      exists: true,
+      kind: "workspace",
+      label: "projects/website/architecture.md",
+      path: "projects/website/architecture.md",
+    });
+
+    const resParent = resolveLinkTarget("../website.md", {
+      currentFilePath: "projects/archive/old.md",
+      tree: mockTree,
+    });
+    expect(resParent).toEqual({
+      exists: true,
+      kind: "workspace",
+      label: "projects/website.md",
+      path: "projects/website.md",
+    });
+  });
+
   test("resolves web routes /files/<path> and /skills/<path>", () => {
     expect(
       resolveLinkTarget("/files/projects/website.md", { tree: mockTree }),
@@ -394,6 +443,35 @@ describe("filterGoToSuggestions", () => {
     expect(skillMatches).toHaveLength(1);
     expect(skillMatches[0]?.title).toBe("claim-review");
     expect(skillMatches[0]?.kind).toBe("skill");
+  });
+});
+
+describe("buildCanonicalWorkspaceUri and buildCanonicalSkillUri", () => {
+  test("buildCanonicalWorkspaceUri formats canonical openlia://workspace/... URIs", () => {
+    expect(buildCanonicalWorkspaceUri("tasks.md")).toBe(
+      "openlia://workspace/tasks.md",
+    );
+    expect(buildCanonicalWorkspaceUri("/projects/roadmap.md")).toBe(
+      "openlia://workspace/projects/roadmap.md",
+    );
+    expect(buildCanonicalWorkspaceUri("///nested/doc.txt")).toBe(
+      "openlia://workspace/nested/doc.txt",
+    );
+  });
+
+  test("buildCanonicalSkillUri formats canonical openlia://skills/... URIs", () => {
+    expect(buildCanonicalSkillUri("inbox-triage")).toBe(
+      "openlia://skills/inbox-triage",
+    );
+    expect(buildCanonicalSkillUri("/system/developer/")).toBe(
+      "openlia://skills/system/developer",
+    );
+    expect(
+      buildCanonicalSkillUri("weekly-review", "templates/weekly-review.md"),
+    ).toBe("openlia://skills/weekly-review/templates/weekly-review.md");
+    expect(buildCanonicalSkillUri("agent-browser", "/scripts/run.sh")).toBe(
+      "openlia://skills/agent-browser/scripts/run.sh",
+    );
   });
 });
 
