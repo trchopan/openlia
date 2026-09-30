@@ -55,6 +55,12 @@ OpenLia:
   environment isolation, provenance, and activation approval boundaries.
 - Release integrity, provenance, and checksum verification.
 
+Durable backup archives use client-side age encryption. The target receives
+only the public recipient; the private recovery identity stays on the operator
+machine and should be backed up separately. S3 and rsync destinations receive
+ciphertext. Operation-scoped rollback snapshots are local-only, protected by
+filesystem permissions, and are not covered by durable-backup encryption.
+
 Report vulnerabilities in Hermes Agent, Locho, Debian, Docker, Go, Python,
 Bun, uv, PyYAML, or another upstream dependency to that project's maintainers
 as well. Notify OpenLia through the private GitHub report form when the issue

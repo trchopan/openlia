@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"filippo.io/age"
 )
 
 func TestConfigRoundTrip(t *testing.T) {
@@ -28,6 +30,19 @@ func TestConfigRoundTrip(t *testing.T) {
 		{Provider: "openai-api", Model: "official-model"},
 	}
 	want.Timezone = "Asia/Tokyo"
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want.BackupIdentityFile = filepath.Join(temporary, "backup-identity.txt")
+	want.BackupRecipient = identity.Recipient().String()
+	want.BackupSchedule = "15 3 * * 1,3,5"
+	want.BackupScheduleEnabled = true
+	want.BackupRemoteRetention = 30
+	want.BackupDestinations = []BackupDestinationConfig{
+		{Name: "archive", Type: "s3", Endpoint: "https://s3.example.test", Bucket: "openlia-backups", Prefix: "personal", Region: "us-east-1", PathStyle: true},
+		{Name: "nas", Type: "rsync", RsyncTarget: "backup@nas.example.test:/srv/backups/openlia", IdentityFile: "/srv/openlia/backup-ssh-key", OperatorIdentityFile: filepath.Join(temporary, "rsync-key")},
+	}
 	want.SecretSource = filepath.Join(temporary, "hermes.env")
 	want.SkillSources = []SkillSourceConfig{
 		{Name: "official", Repository: "https://github.com/openlia/skills.git", Branch: "main"},
@@ -59,7 +74,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Target != want.Target || got.Model != want.Model || got.OutputLanguage != want.OutputLanguage || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || strings.Join(got.EnabledTools, ",") != strings.Join(want.EnabledTools, ",") || got.WorkspaceGit != want.WorkspaceGit || got.OpenLIABrowser != want.OpenLIABrowser || len(got.SkillSources) != 2 || got.SkillSources[0] != want.SkillSources[0] || got.SkillSources[1] != want.SkillSources[1] {
+	if got.Target != want.Target || got.Model != want.Model || got.OutputLanguage != want.OutputLanguage || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || strings.Join(got.EnabledTools, ",") != strings.Join(want.EnabledTools, ",") || got.WorkspaceGit != want.WorkspaceGit || got.BackupIdentityFile != want.BackupIdentityFile || got.BackupRecipient != want.BackupRecipient || got.BackupSchedule != want.BackupSchedule || got.BackupScheduleEnabled != want.BackupScheduleEnabled || got.BackupRemoteRetention != want.BackupRemoteRetention || len(got.BackupDestinations) != len(want.BackupDestinations) || got.BackupDestinations[0] != want.BackupDestinations[0] || got.BackupDestinations[1] != want.BackupDestinations[1] || got.OpenLIABrowser != want.OpenLIABrowser || len(got.SkillSources) != 2 || got.SkillSources[0] != want.SkillSources[0] || got.SkillSources[1] != want.SkillSources[1] {
 		t.Fatalf("round trip mismatch: got %#v want %#v", got, want)
 	}
 	info, err := os.Stat(path)

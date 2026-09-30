@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sys/unix"
 	"openlia/internal/toolcatalog"
 	"openlia/operator"
 )
@@ -28,6 +30,7 @@ type Remote struct {
 type deployment interface {
 	rootPath(parts ...string) string
 	uploadFile(ctx context.Context, source, destination string, mode os.FileMode) error
+	downloadFile(ctx context.Context, source, destination string) error
 	removeFile(ctx context.Context, destination string) error
 	uploadRelease(ctx context.Context, archive []byte, digest string) error
 	activateRelease(ctx context.Context) error
@@ -61,6 +64,10 @@ func (remote Remote) releasePath() string {
 }
 
 func (remote Remote) ssh(ctx context.Context, command string, input []byte) ([]byte, error) {
+	return remote.sshReader(ctx, command, bytes.NewReader(input))
+}
+
+func (remote Remote) sshReader(ctx context.Context, command string, input io.Reader) ([]byte, error) {
 	if err := validateTarget(remote.Config.Target); err != nil {
 		return nil, err
 	}
@@ -75,7 +82,7 @@ func (remote Remote) ssh(ctx context.Context, command string, input []byte) ([]b
 		"-o", "ServerAliveCountMax=3",
 		"--", remote.Config.Target, command,
 	)
-	process.Stdin = bytes.NewReader(input)
+	process.Stdin = input
 	var stdout, stderr bytes.Buffer
 	process.Stdout = &stdout
 	process.Stderr = io.MultiWriter(&stderr, os.Stderr)
@@ -151,6 +158,11 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"OPENLIA_SECRET_FILE=" + shellQuote(remote.rootPath("runtime", "secrets", "hermes.env")),
 		"OPENLIA_SECRET_DIR=" + shellQuote(remote.rootPath("runtime", "secrets")),
 		"OPENLIA_BACKUP_ROOT=" + shellQuote(remote.rootPath("runtime", "backups")),
+		"OPENLIA_BACKUP_RECIPIENT=" + shellQuote(remote.Config.BackupRecipient),
+		"OPENLIA_BACKUP_SCHEDULE=" + shellQuote(remote.Config.BackupSchedule),
+		"OPENLIA_BACKUP_SCHEDULE_ENABLED=" + shellQuote(strconv.FormatBool(remote.Config.BackupScheduleEnabled)),
+		"OPENLIA_BACKUP_REMOTE_RETENTION=" + shellQuote(strconv.Itoa(remote.Config.BackupRemoteRetention)),
+		"OPENLIA_BACKUP_DESTINATIONS=" + shellQuote(renderBackupDestinationsJSON(remote.Config.BackupDestinations)),
 		"OPENLIA_META_ROOT=" + shellQuote(remote.rootPath("runtime", "meta")),
 		"OPENLIA_SKILLS_CACHE_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-cache")),
 		"OPENLIA_SKILLS_ENV_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-envs")),
@@ -208,9 +220,13 @@ func remoteOperationReadOnly(script string, args []string) bool {
 // the SSH process exits. flock avoids stale lock files after a disconnected
 // operator or a crashed remote process.
 func (remote Remote) lockedSSH(ctx context.Context, command string, input []byte) ([]byte, error) {
+	return remote.lockedSSHReader(ctx, command, bytes.NewReader(input))
+}
+
+func (remote Remote) lockedSSHReader(ctx context.Context, command string, input io.Reader) ([]byte, error) {
 	lockPath := remote.Config.InstallRoot + ".operation.lock"
 	rootCommand := "set -eu; command -v flock >/dev/null 2>&1 || { printf '%s\\n' 'flock is required for serialized OpenLia operations' >&2; exit 69; }; exec 9>" + shellQuote(lockPath) + "; if ! flock -n 9; then printf '%s\\n' 'another OpenLia operation is already running' >&2; exit 75; fi; " + command
-	return remote.ssh(ctx, privilegedCommand(rootCommand), input)
+	return remote.sshReader(ctx, privilegedCommand(rootCommand), input)
 }
 
 func privilegedEnvironmentCommand(environment []string, executable string, args ...string) string {
@@ -362,7 +378,14 @@ func (remote Remote) uninstall(ctx context.Context) ([]byte, error) {
 	command := "if [ -x " + shellQuote(operatorAMD64) + " ] || [ -x " + shellQuote(operatorARM64) + " ] || [ -x " + shellQuote(script) + " ]; then " +
 		remote.operationCommandForRoot(current, "uninstall", "--json") +
 		"; else " + privilegedCommand(remote.legacyUninstallCommand(current)) + "; fi"
-	return remote.lockedSSH(ctx, command, nil)
+	result, err := remote.lockedSSH(ctx, command, nil)
+	if err != nil {
+		return result, err
+	}
+	if _, err := remote.ssh(ctx, privilegedCommand("rm -f -- "+shellQuote(remote.Config.InstallRoot+".operation.lock")), nil); err != nil {
+		return result, fmt.Errorf("installation removed but operation lock cleanup failed: %w", err)
+	}
+	return result, nil
 }
 
 func privilegedCommand(command string) string {
@@ -449,18 +472,69 @@ func (remote Remote) composeLogs(ctx context.Context, follow bool) ([]byte, erro
 }
 
 func (remote Remote) uploadFile(ctx context.Context, source, destination string, mode os.FileMode) error {
-	data, err := os.ReadFile(source)
+	file, err := os.Open(source)
 	if err != nil {
 		return fmt.Errorf("read upload source: %w", err)
 	}
+	defer file.Close()
 	if err := validateAbsoluteRoot(destination, "upload destination"); err != nil {
 		return err
 	}
 	temporary := destination + ".tmp-openlia"
 	rootCommand := "set -eu; mkdir -p " + shellQuote(filepath.Dir(destination)) + "; umask 077; cat > " + shellQuote(temporary) + "; chmod " + shellQuote(fmt.Sprintf("%o", mode.Perm())) + " " + shellQuote(temporary) + "; mv -f " + shellQuote(temporary) + " " + shellQuote(destination)
 	command := "if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then sudo -n sh -c " + shellQuote(rootCommand) + "; else " + rootCommand + "; fi"
-	_, err = remote.lockedSSH(ctx, command, data)
+	_, err = remote.lockedSSHReader(ctx, command, file)
 	return err
+}
+
+func (remote Remote) downloadFile(ctx context.Context, source, destination string) error {
+	backupRoot := remote.rootPath("runtime", "backups")
+	if !filepath.IsAbs(source) || !operatorPathWithin(source, backupRoot) {
+		return fmt.Errorf("download source must be inside the OpenLia backup directory")
+	}
+	// Reject symlink sources so a target-side backup path cannot redirect the
+	// operator download to arbitrary runtime data.
+	if err := remote.statBackupPath(ctx, source); err != nil {
+		return fmt.Errorf("download source must be a regular backup file")
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+		return err
+	}
+	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	command := "if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then sudo -n cat -- " + shellQuote(source) + "; else cat -- " + shellQuote(source) + "; fi"
+	ssh, err := exec.LookPath("ssh")
+	if err != nil {
+		_ = output.Close()
+		_ = os.Remove(destination)
+		return fmt.Errorf("ssh is required: %w", err)
+	}
+	process := exec.CommandContext(ctx, ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3", "--", remote.Config.Target, command)
+	var stderr bytes.Buffer
+	process.Stdout = output
+	process.Stderr = io.MultiWriter(&stderr, os.Stderr)
+	if err := process.Run(); err != nil {
+		_ = output.Close()
+		_ = os.Remove(destination)
+		return fmt.Errorf("remote backup download failed: %s", strings.TrimSpace(redact(stderr.String())))
+	}
+	if err := output.Sync(); err != nil {
+		_ = output.Close()
+		_ = os.Remove(destination)
+		return err
+	}
+	return output.Close()
+}
+
+func (remote Remote) statBackupPath(ctx context.Context, source string) error {
+	command := "if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then sudo -n stat -c '%F' -- " + shellQuote(source) + "; else stat -c '%F' -- " + shellQuote(source) + "; fi"
+	output, err := remote.ssh(ctx, command, nil)
+	if err != nil || strings.TrimSpace(string(output)) != "regular file" {
+		return fmt.Errorf("backup source is not a regular file")
+	}
+	return nil
 }
 
 type Local struct {
@@ -473,7 +547,12 @@ func (local Local) rootPath(parts ...string) string {
 }
 
 func operationEnvironment(config Config, operationRoot string) []string {
+	operatorConfigFile := configPath()
+	if absolute, err := filepath.Abs(operatorConfigFile); err == nil {
+		operatorConfigFile = absolute
+	}
 	return []string{
+		"OPENLIA_CLI_CONFIG_FILE=" + operatorConfigFile,
 		"OPENLIA_LOCAL_MODE=true",
 		"OPENLIA_RUNTIME_UID=" + strconv.Itoa(os.Getuid()),
 		"OPENLIA_RUNTIME_GID=" + strconv.Itoa(os.Getgid()),
@@ -514,6 +593,11 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_SECRET_FILE=" + filepath.Join(config.InstallRoot, "runtime", "secrets", "hermes.env"),
 		"OPENLIA_SECRET_DIR=" + filepath.Join(config.InstallRoot, "runtime", "secrets"),
 		"OPENLIA_BACKUP_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "backups"),
+		"OPENLIA_BACKUP_RECIPIENT=" + config.BackupRecipient,
+		"OPENLIA_BACKUP_SCHEDULE=" + config.BackupSchedule,
+		"OPENLIA_BACKUP_SCHEDULE_ENABLED=" + strconv.FormatBool(config.BackupScheduleEnabled),
+		"OPENLIA_BACKUP_REMOTE_RETENTION=" + strconv.Itoa(config.BackupRemoteRetention),
+		"OPENLIA_BACKUP_DESTINATIONS=" + renderBackupDestinationsJSON(config.BackupDestinations),
 		"OPENLIA_META_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "meta"),
 		"OPENLIA_SKILLS_CACHE_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "skill-cache"),
 		"OPENLIA_SKILLS_ENV_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "skill-envs"),
@@ -527,6 +611,28 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_SERVICE_ROLES=" + renderServicesJSON(config.Services),
 		"OPENLIA_CONFIGURED_HOSTS=" + configuredHosts(config.Services),
 	}
+}
+
+func renderBackupDestinationsJSON(values []BackupDestinationConfig) string {
+	destinations := make([]operator.BackupDestination, 0, len(values))
+	for _, value := range values {
+		destinations = append(destinations, operator.BackupDestination{
+			Name:         value.Name,
+			Type:         value.Type,
+			Endpoint:     value.Endpoint,
+			Bucket:       value.Bucket,
+			Prefix:       value.Prefix,
+			Region:       value.Region,
+			PathStyle:    value.PathStyle,
+			RsyncTarget:  value.RsyncTarget,
+			IdentityFile: value.IdentityFile,
+		})
+	}
+	data, err := json.Marshal(destinations)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
 }
 
 func renderFallbackProvidersJSON(values []FallbackProviderConfig) string {
@@ -595,6 +701,15 @@ func (local Local) command(ctx context.Context, operationRoot, script string, ar
 }
 
 func (local Local) operation(ctx context.Context, script string, input []byte, args ...string) ([]byte, error) {
+	unlock := func() {}
+	if !remoteOperationReadOnly(script, args) {
+		var err error
+		unlock, err = acquireLocalOperationLock(ctx, local.Config)
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer unlock()
 	if operatorArgs, ok := operatorArguments(script, args); ok {
 		return local.operator(ctx, local.releasePath(), input, operatorArgs...)
 	}
@@ -778,7 +893,48 @@ func (local Local) health(ctx context.Context, allowStopped, providerCheck bool)
 }
 
 func (local Local) uninstall(ctx context.Context) ([]byte, error) {
-	return local.operator(ctx, local.rootPath("current"), nil, "uninstall", "--json")
+	unlock, err := acquireLocalOperationLock(ctx, local.Config)
+	if err != nil {
+		return nil, err
+	}
+	result, err := local.operator(ctx, local.rootPath("current"), nil, "uninstall", "--json")
+	unlock()
+	if err != nil {
+		return result, err
+	}
+	if err := os.Remove(local.Config.InstallRoot + ".operation.lock"); err != nil && !os.IsNotExist(err) {
+		return result, fmt.Errorf("installation removed but operation lock cleanup failed: %w", err)
+	}
+	return result, nil
+}
+
+func acquireLocalOperationLock(ctx context.Context, config Config) (func(), error) {
+	path := config.InstallRoot + ".operation.lock"
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open local operation lock: %w", err)
+	}
+	for {
+		err = unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		if err == nil {
+			return func() {
+				_ = unix.Flock(int(file.Fd()), unix.LOCK_UN)
+				_ = file.Close()
+			}, nil
+		}
+		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EAGAIN) {
+			_ = file.Close()
+			return nil, fmt.Errorf("acquire local operation lock: %w", err)
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			_ = file.Close()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func (local Local) composeLogs(ctx context.Context, follow bool) ([]byte, error) {
@@ -818,10 +974,11 @@ func (local Local) uploadFile(ctx context.Context, source, destination string, m
 	if err := validateAbsoluteRoot(destination, "upload destination"); err != nil {
 		return err
 	}
-	data, err := os.ReadFile(source)
+	input, err := os.Open(source)
 	if err != nil {
 		return fmt.Errorf("read upload source: %w", err)
 	}
+	defer input.Close()
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 		return fmt.Errorf("create upload directory: %w", err)
 	}
@@ -835,7 +992,7 @@ func (local Local) uploadFile(ctx context.Context, source, destination string, m
 		temporary.Close()
 		return err
 	}
-	if _, err := temporary.Write(data); err != nil {
+	if _, err := io.Copy(temporary, input); err != nil {
 		temporary.Close()
 		return fmt.Errorf("write upload: %w", err)
 	}
@@ -846,6 +1003,56 @@ func (local Local) uploadFile(ctx context.Context, source, destination string, m
 		return fmt.Errorf("activate upload: %w", err)
 	}
 	return nil
+}
+
+func (local Local) downloadFile(ctx context.Context, source, destination string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	backupRoot := filepath.Join(local.Config.InstallRoot, "runtime", "backups")
+	if !filepath.IsAbs(source) || !operatorPathWithin(source, backupRoot) {
+		return fmt.Errorf("download source must be inside the OpenLia backup directory")
+	}
+	info, err := os.Lstat(source)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("download source must be a regular backup file")
+	}
+	input, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+		return err
+	}
+	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(output, input)
+	syncErr := output.Sync()
+	closeErr := output.Close()
+	if copyErr != nil || syncErr != nil || closeErr != nil {
+		_ = os.Remove(destination)
+		if copyErr != nil {
+			return copyErr
+		}
+		if syncErr != nil {
+			return syncErr
+		}
+		return closeErr
+	}
+	return nil
+}
+
+func operatorPathWithin(path, root string) bool {
+	path, pathErr := filepath.Abs(path)
+	root, rootErr := filepath.Abs(root)
+	if pathErr != nil || rootErr != nil {
+		return false
+	}
+	relative, err := filepath.Rel(root, path)
+	return err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func (local Local) removeFile(ctx context.Context, destination string) error {

@@ -75,6 +75,21 @@ func TestConfigValidatePaths(t *testing.T) {
 	}
 }
 
+func TestConfigRejectsRsyncIdentityMountedIntoHermes(t *testing.T) {
+	repo := t.TempDir()
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	config := testConfig(repo, runtimeRoot)
+	config.BackupDestinations = []BackupDestination{{
+		Name:         "nas",
+		Type:         "rsync",
+		RsyncTarget:  "backup@nas.example.test:/srv/openlia",
+		IdentityFile: filepath.Join(runtimeRoot, "secrets", "rsync-key"),
+	}}
+	if err := config.ValidatePaths(); err == nil || !strings.Contains(err.Error(), "must not be inside Hermes data or mounted runtime secrets") {
+		t.Fatalf("ValidatePaths() error = %v, want mounted credential rejection", err)
+	}
+}
+
 func TestLoadConfigFromEnv(t *testing.T) {
 	repo := t.TempDir()
 	runtime := filepath.Join(t.TempDir(), "runtime")

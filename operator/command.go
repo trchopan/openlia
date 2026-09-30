@@ -116,7 +116,7 @@ func RunContext(ctx context.Context, args []string, input io.Reader, output, err
 		if err != nil {
 			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 		}
-		return emit(output, result, jsonOutput, "openlia uninstall: installation removed; Docker images preserved")
+		return emit(output, result, jsonOutput, "openlia uninstall: local installation and backups removed; remote backups and Docker images preserved")
 	default:
 		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("unknown command %q", command))
 	}
@@ -128,6 +128,10 @@ func runBackup(ctx context.Context, config Config, args []string, _ io.Reader, o
 		action, args = args[0], args[1:]
 	}
 	if action == "create" {
+		scheduled, args := removeFlag(args, "--scheduled")
+		if config.BackupRecipient == "" {
+			return commandError(output, errorOutput, jsonOutput, ExitPrereq, fmt.Errorf("backup encryption recipient is not configured; run `openlia backup keygen`"))
+		}
 		reason := "manual"
 		remaining, value, err := consumeOptionalValue(args, "--reason")
 		if err != nil {
@@ -139,15 +143,95 @@ func runBackup(ctx context.Context, config Config, args []string, _ io.Reader, o
 		if len(remaining) != 0 {
 			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup create accepts --reason NAME"))
 		}
-		compose := NewCompose(config, nil)
-		result, err := createBackup(ctx, config, reason, now, &compose)
+		var result BackupResult
+		if scheduled {
+			result, err = CreateScheduledBackup(ctx, config, reason, now)
+		} else {
+			compose := NewCompose(config, nil)
+			result, err = createBackup(ctx, config, reason, now, &compose, false)
+		}
 		if err != nil {
 			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 		}
-		if err := RecordChange(config, "backup", "ok", result.Archive, "reason="+reason, now); err != nil {
+		result.Destinations, err = PushBackup(ctx, config, result, now)
+		backupStatus := "ok"
+		if err != nil {
+			backupStatus = "partial"
+		}
+		if recordErr := RecordChange(config, "backup", backupStatus, result.Archive, "reason="+reason, now); recordErr != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, recordErr)
+		}
+		if err != nil {
 			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 		}
 		return emit(output, result, jsonOutput, "openlia backup: created "+result.Archive)
+	}
+	if action == "tick" {
+		if len(args) != 0 {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup tick accepts no arguments"))
+		}
+		result, ran, err := BackupScheduleTick(ctx, config, now)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		if !ran {
+			return emit(output, map[string]any{"ok": true, "action": "tick", "ran": false}, jsonOutput, "openlia backup: schedule not due")
+		}
+		return emit(output, result, jsonOutput, "openlia backup: scheduled archive created "+result.Archive)
+	}
+	if action == "schedule-install" {
+		if len(args) != 0 {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup schedule-install accepts no arguments"))
+		}
+		result, err := InstallBackupSchedule(config, now)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, result, jsonOutput, "openlia backup: schedule installed")
+	}
+	if action == "schedule-remove" {
+		if len(args) != 0 {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup schedule-remove accepts no arguments"))
+		}
+		result, err := RemoveBackupSchedule(config)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, result, jsonOutput, "openlia backup: schedule removed")
+	}
+	if action == "status" {
+		if len(args) != 0 {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup status accepts no arguments"))
+		}
+		result, err := ReadBackupStatus(config)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, result, jsonOutput, FormatBackupStatus(result))
+	}
+	if action == "push" {
+		archive, remaining, err := stringFlag(args, "--archive")
+		if err != nil || len(remaining) != 0 {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup push accepts --archive PATH"))
+		}
+		if archive == "" {
+			archive, err = latestEncryptedBackup(config)
+			if err != nil {
+				return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+			}
+		}
+		if err := ValidateAbsolutePath(archive, "backup-archive"); err != nil || !within(archive, config.BackupRoot) || !strings.HasSuffix(archive, ".tar.gz.age") {
+			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup push requires an encrypted archive inside the backup directory"))
+		}
+		if err := verifyBackupDigest(archive); err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		result := BackupResult{OK: true, Archive: archive, Secrets: "excluded"}
+		result.Destinations, err = PushBackup(ctx, config, result, now)
+		if err != nil {
+			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+		}
+		return emit(output, result, jsonOutput, "openlia backup: pushed "+filepath.Base(archive))
 	}
 	if action == "prune" {
 		keep := config.BackupRetention
@@ -176,7 +260,7 @@ func runBackup(ctx context.Context, config Config, args []string, _ io.Reader, o
 		return emit(output, result, jsonOutput, fmt.Sprintf("openlia backup: pruned %d archives, keeping %d", len(removed), keep))
 	}
 	if action != "restore" && action != "rollback-restore" {
-		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup requires create, restore, rollback-restore, or prune"))
+		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup requires create, restore, rollback-restore, prune, status, tick, schedule-install, or schedule-remove"))
 	}
 	archive, remaining, err := stringFlag(args, "--archive")
 	if err != nil || len(remaining) != 0 {

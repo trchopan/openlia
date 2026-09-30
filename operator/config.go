@@ -8,7 +8,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"filippo.io/age"
+	"github.com/robfig/cron/v3"
 	"openlia/internal/toolcatalog"
 )
 
@@ -19,6 +22,7 @@ type Config struct {
 	RuntimeRoot                 string
 	InstallRoot                 string
 	ProjectName                 string
+	Timezone                    string
 	NetworkName                 string
 	ComposeFile                 string
 	ComposeProjectDir           string
@@ -30,6 +34,12 @@ type Config struct {
 	SecretFile                  string
 	BackupRoot                  string
 	BackupRetention             int
+	BackupRecipient             string
+	BackupSchedule              string
+	BackupScheduleEnabled       bool
+	BackupRemoteRetention       int
+	BackupDestinations          []BackupDestination
+	OperatorConfigFile          string
 	MetaRoot                    string
 	StateFile                   string
 	LocalMode                   bool
@@ -69,6 +79,21 @@ type Config struct {
 	RuntimeGID                  int
 	ServiceRoles                map[string]string
 	ConfiguredHosts             []string
+}
+
+// BackupDestination describes a target-side remote backup store. Credentials
+// are intentionally resolved by the target's normal credential mechanisms and
+// are never embedded in this structure.
+type BackupDestination struct {
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	Endpoint     string `json:"endpoint,omitempty"`
+	Bucket       string `json:"bucket,omitempty"`
+	Prefix       string `json:"prefix,omitempty"`
+	Region       string `json:"region,omitempty"`
+	PathStyle    bool   `json:"path_style,omitempty"`
+	RsyncTarget  string `json:"rsync_target,omitempty"`
+	IdentityFile string `json:"identity_file,omitempty"`
 }
 
 type FallbackProviderConfig struct {
@@ -114,6 +139,17 @@ func (s *SkillSourceConfig) UnmarshalJSON(data []byte) error {
 
 // LoadConfig reads the process environment.
 func LoadConfig() (Config, error) {
+	if configPath := os.Getenv("OPENLIA_OPERATOR_CONFIG_FILE"); configPath != "" {
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			return Config{}, fmt.Errorf("read persisted operator config: %w", err)
+		}
+		var config Config
+		if err := json.Unmarshal(data, &config); err != nil {
+			return Config{}, fmt.Errorf("parse persisted operator config: %w", err)
+		}
+		return config, config.ValidatePaths()
+	}
 	values := make(map[string]string)
 	for _, value := range os.Environ() {
 		key, item, ok := strings.Cut(value, "=")
@@ -176,6 +212,7 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		RuntimeRoot:             runtimeRoot,
 		InstallRoot:             installRoot,
 		ProjectName:             project,
+		Timezone:                getOr(values, "HERMES_TIMEZONE", "Asia/Ho_Chi_Minh"),
 		NetworkName:             getOr(values, "OPENLIA_NETWORK_NAME", project+"-private"),
 		ComposeFile:             getOr(values, "OPENLIA_COMPOSE_FILE", filepath.Join(repositoryRoot, "docker", "compose.yaml")),
 		ComposeProjectDir:       getOr(values, "OPENLIA_COMPOSE_PROJECT_DIR", filepath.Join(repositoryRoot, "docker")),
@@ -187,6 +224,12 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		SecretFile:              getOr(values, "OPENLIA_SECRET_FILE", filepath.Join(runtimeRoot, "secrets", "hermes.env")),
 		BackupRoot:              getOr(values, "OPENLIA_BACKUP_ROOT", filepath.Join(runtimeRoot, "backups")),
 		BackupRetention:         5,
+		BackupRecipient:         values["OPENLIA_BACKUP_RECIPIENT"],
+		BackupSchedule:          getOr(values, "OPENLIA_BACKUP_SCHEDULE", "20 4 * * *"),
+		BackupScheduleEnabled:   true,
+		BackupRemoteRetention:   30,
+		BackupDestinations:      []BackupDestination{},
+		OperatorConfigFile:      values["OPENLIA_CLI_CONFIG_FILE"],
 		MetaRoot:                getOr(values, "OPENLIA_META_ROOT", filepath.Join(runtimeRoot, "meta")),
 		StateFile:               getOr(values, "OPENLIA_STATE_FILE", filepath.Join(runtimeRoot, "meta", "stack-state")),
 		Provider:                getOr(values, "OPENLIA_PROVIDER", "copilot"),
@@ -209,6 +252,17 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		RuntimeGID:              runtimeGID,
 		LochoHostRoot:           filepath.Join(runtimeRoot, "locho-host"),
 	}
+	if raw := values["OPENLIA_BACKUP_DESTINATIONS"]; raw != "" {
+		if err := json.Unmarshal([]byte(raw), &config.BackupDestinations); err != nil {
+			return Config{}, fmt.Errorf("OPENLIA_BACKUP_DESTINATIONS must be valid JSON: %w", err)
+		}
+	}
+	if raw := values["OPENLIA_BACKUP_SCHEDULE_ENABLED"]; raw != "" {
+		config.BackupScheduleEnabled, err = strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("OPENLIA_BACKUP_SCHEDULE_ENABLED must be true or false")
+		}
+	}
 	if err := validateOutputLanguage(config.OutputLanguage); err != nil {
 		return Config{}, fmt.Errorf("OPENLIA_OUTPUT_LANGUAGE: %w", err)
 	}
@@ -219,6 +273,13 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 			return Config{}, fmt.Errorf("OPENLIA_BACKUP_RETENTION must be a positive integer")
 		}
 		config.BackupRetention = parsed
+	}
+	if rawRetention := values["OPENLIA_BACKUP_REMOTE_RETENTION"]; rawRetention != "" {
+		parsed, err := strconv.Atoi(rawRetention)
+		if err != nil || parsed <= 0 {
+			return Config{}, fmt.Errorf("OPENLIA_BACKUP_REMOTE_RETENTION must be a positive integer")
+		}
+		config.BackupRemoteRetention = parsed
 	}
 
 	config.LocalMode = localMode
@@ -432,6 +493,35 @@ func (c Config) ValidatePaths() error {
 	if err := validateOutputLanguage(c.OutputLanguage); err != nil {
 		return fmt.Errorf("output language: %w", err)
 	}
+	if c.BackupRetention < 0 || c.BackupRemoteRetention < 0 {
+		return fmt.Errorf("backup retention counts must be non-negative")
+	}
+	if c.BackupRecipient != "" {
+		if _, err := age.ParseX25519Recipient(c.BackupRecipient); err != nil {
+			return fmt.Errorf("backup recipient is invalid")
+		}
+	}
+	timezone := c.Timezone
+	if timezone == "" {
+		timezone = "Asia/Ho_Chi_Minh"
+	}
+	if _, err := time.LoadLocation(timezone); err != nil {
+		return fmt.Errorf("backup timezone is invalid: %w", err)
+	}
+	if c.BackupScheduleEnabled {
+		if _, err := cron.ParseStandard(c.BackupSchedule); err != nil {
+			return fmt.Errorf("backup schedule must be a five-field cron expression: %w", err)
+		}
+	}
+	if err := validateBackupDestinations(c.BackupDestinations); err != nil {
+		return err
+	}
+	for _, destination := range c.BackupDestinations {
+		identityPath := filepath.Clean(destination.IdentityFile)
+		if destination.IdentityFile != "" && (identityPath == filepath.Clean(c.SecretDir) || identityPath == filepath.Clean(c.DataRoot) || within(destination.IdentityFile, c.SecretDir) || within(destination.IdentityFile, c.DataRoot)) {
+			return fmt.Errorf("rsync identity files must not be inside Hermes data or mounted runtime secrets")
+		}
+	}
 	if err := ValidateAbsolutePath(c.RuntimeRoot, "runtime-root"); err != nil {
 		return err
 	}
@@ -559,6 +649,53 @@ func (c Config) ValidatePaths() error {
 	for _, skill := range c.EnabledSkills {
 		if err := ValidateSafeComponent(skill, "skill"); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateBackupDestinations(destinations []BackupDestination) error {
+	seen := make(map[string]bool)
+	for index, destination := range destinations {
+		if err := ValidateSafeComponent(destination.Name, "backup-destination-name"); err != nil {
+			return fmt.Errorf("backup destination %d: %w", index, err)
+		}
+		if seen[destination.Name] {
+			return fmt.Errorf("duplicate backup destination %q", destination.Name)
+		}
+		seen[destination.Name] = true
+		switch destination.Type {
+		case "s3":
+			if destination.Bucket == "" || destination.Region == "" {
+				return fmt.Errorf("S3 backup destination %s requires bucket and region", destination.Name)
+			}
+			if strings.ContainsAny(destination.Bucket, "/\\ \t\r\n") || strings.HasPrefix(destination.Bucket, "-") {
+				return fmt.Errorf("S3 backup destination %s has an invalid bucket", destination.Name)
+			}
+			if destination.Endpoint != "" {
+				parsed, err := url.Parse(destination.Endpoint)
+				if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+					return fmt.Errorf("S3 backup destination %s has an invalid HTTPS endpoint", destination.Name)
+				}
+			}
+			if strings.HasPrefix(destination.Prefix, "/") || strings.Contains(destination.Prefix, "..") || strings.ContainsAny(destination.Prefix, "\\\r\n") {
+				return fmt.Errorf("S3 backup destination %s has an unsafe prefix", destination.Name)
+			}
+		case "rsync":
+			if destination.RsyncTarget == "" || strings.ContainsAny(destination.RsyncTarget, " \t\r\n;$&|()<>`'") {
+				return fmt.Errorf("rsync backup destination %s has an invalid target", destination.Name)
+			}
+			host, remotePath, err := splitRsyncTarget(destination.RsyncTarget)
+			if err != nil || !safeSSHHost(host) || !filepath.IsAbs(remotePath) || strings.Contains(remotePath, "..") {
+				return fmt.Errorf("rsync backup destination %s must use host:/absolute/path syntax", destination.Name)
+			}
+			if destination.IdentityFile != "" {
+				if err := ValidateAbsolutePath(destination.IdentityFile, "backup-rsync-identity-file"); err != nil {
+					return err
+				}
+			}
+		default:
+			return fmt.Errorf("backup destination %s has unsupported type %q", destination.Name, destination.Type)
 		}
 	}
 	return nil

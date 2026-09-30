@@ -528,11 +528,9 @@ func TestBackupExcludesSecretsAndAttachmentCapabilities(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	result, err := CreateBackup(config, "test", time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatal(err)
-	}
-	names := archiveNames(t, result.Archive)
+	result, identity := createTestEncryptedBackup(t, &config, "test", time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC))
+	plainArchive := decryptTestBackup(t, config.BackupRoot, result.Archive, identity)
+	names := archiveNames(t, plainArchive)
 	if !names["hermes/keep.txt"] || names["locho/laptop/runtime.txt"] {
 		t.Fatalf("ordinary runtime files missing from archive: %v", names)
 	}
@@ -568,11 +566,9 @@ func TestDurableBackupExcludesRebuildableSkillsAndCaches(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	result, err := CreateBackup(config, "durable-scope", time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	names := archiveNames(t, result.Archive)
+	result, identity := createTestEncryptedBackup(t, &config, "durable-scope", time.Now())
+	plainArchive := decryptTestBackup(t, config.BackupRoot, result.Archive, identity)
+	names := archiveNames(t, plainArchive)
 	for _, expected := range []string{"hermes/workspace/keep.md", "hermes/skills/claim-review/SKILL.md"} {
 		if !names[expected] {
 			t.Fatalf("durable member missing %s: %v", expected, names)
@@ -671,10 +667,7 @@ func TestDurableBackupRestoresAcrossRuntimeRoots(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	archive, err := CreateBackup(sourceConfig, "portable", time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
+	archive, identity := createTestEncryptedBackup(t, &sourceConfig, "portable", time.Now())
 	var metadata backupMetadata
 	metadataData, err := os.ReadFile(archive.Archive + ".json")
 	if err != nil || json.Unmarshal(metadataData, &metadata) != nil || metadata.Archive != filepath.Base(archive.Archive) {
@@ -686,18 +679,11 @@ func TestDurableBackupRestoresAcrossRuntimeRoots(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	archiveCopy := filepath.Join(targetConfig.BackupRoot, filepath.Base(archive.Archive))
-	archiveBytes, err := os.ReadFile(archive.Archive)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(archiveCopy, archiveBytes, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	targetConfig.BackupRecipient = sourceConfig.BackupRecipient
 	if err := os.WriteFile(filepath.Join(targetConfig.DataRoot, "config.yaml"), []byte("new host config"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RestoreBackup(targetConfig, archiveCopy, time.Now()); err != nil {
+	if _, err := restoreTestEncryptedBackup(t, targetConfig, archive.Archive, identity, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	contents, err := os.ReadFile(filepath.Join(targetConfig.DataRoot, "workspace", "note.md"))
@@ -733,10 +719,7 @@ func TestDurableRestoreRemovesStaleFilesAndKeepsGeneratedState(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	archive, err := CreateBackup(sourceConfig, "portable", time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
+	archive, identity := createTestEncryptedBackup(t, &sourceConfig, "portable", time.Now())
 	targetConfig := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "target-runtime"))
 	for _, directory := range []string{targetConfig.DataRoot, targetConfig.MetaRoot, targetConfig.BackupRoot} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -755,15 +738,8 @@ func TestDurableRestoreRemovesStaleFilesAndKeepsGeneratedState(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	archiveCopy := filepath.Join(targetConfig.BackupRoot, filepath.Base(archive.Archive))
-	data, err := os.ReadFile(archive.Archive)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(archiveCopy, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := RestoreBackup(targetConfig, archiveCopy, time.Now()); err != nil {
+	targetConfig.BackupRecipient = sourceConfig.BackupRecipient
+	if _, err := restoreTestEncryptedBackup(t, targetConfig, archive.Archive, identity, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(targetConfig.DataRoot, "stale.db")); !os.IsNotExist(err) {
@@ -828,14 +804,11 @@ func TestRestoreRejectsMismatchedBackupDigest(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	archive, err := CreateBackup(config, "digest", time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
+	archive, _ := createTestEncryptedBackup(t, &config, "digest", time.Now())
 	if err := os.WriteFile(archive.Archive, []byte("tampered"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RestoreBackup(config, archive.Archive, time.Now()); err == nil || !strings.Contains(err.Error(), "checksum") {
+	if err := verifyBackupDigest(archive.Archive); err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatalf("tampered archive error = %v", err)
 	}
 }
@@ -851,14 +824,11 @@ func TestRestoreCreatesPreflightBackupWithoutOverwritingSelectedArchive(t *testi
 	if err := os.WriteFile(path, []byte("archived"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	archive, err := CreateBackup(config, "restore-test", time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
+	archive, identity := createTestEncryptedBackup(t, &config, "restore-test", time.Now())
 	if err := os.WriteFile(path, []byte("current"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RestoreBackup(config, archive.Archive, time.Now()); err != nil {
+	if _, err := restoreTestEncryptedBackup(t, config, archive.Archive, identity, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	contents, err := os.ReadFile(path)
@@ -1366,7 +1336,7 @@ func TestPruneBackups(t *testing.T) {
 	baseTime := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
 	// Create 7 backup archives with .json pairs spaced 1 minute apart
 	for i := 1; i <= 7; i++ {
-		archivePath := filepath.Join(config.BackupRoot, fmt.Sprintf("openlia-20260921T10000%dZ-%d.tar.gz", i, i))
+		archivePath := filepath.Join(config.BackupRoot, fmt.Sprintf("openlia-20260921T10000%dZ-%d.tar.gz.age", i, i))
 		if err := os.WriteFile(archivePath, []byte(fmt.Sprintf("archive-%d", i)), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -1408,7 +1378,7 @@ func TestPruneBackups(t *testing.T) {
 
 	// Verify archives 1..4 are gone, 5..7 remain
 	for i := 1; i <= 4; i++ {
-		archivePath := filepath.Join(config.BackupRoot, fmt.Sprintf("openlia-20260921T10000%dZ-%d.tar.gz", i, i))
+		archivePath := filepath.Join(config.BackupRoot, fmt.Sprintf("openlia-20260921T10000%dZ-%d.tar.gz.age", i, i))
 		if _, err := os.Stat(archivePath); !os.IsNotExist(err) {
 			t.Fatalf("expected archive %d to be deleted, but it exists", i)
 		}
@@ -1417,7 +1387,7 @@ func TestPruneBackups(t *testing.T) {
 		}
 	}
 	for i := 5; i <= 7; i++ {
-		archivePath := filepath.Join(config.BackupRoot, fmt.Sprintf("openlia-20260921T10000%dZ-%d.tar.gz", i, i))
+		archivePath := filepath.Join(config.BackupRoot, fmt.Sprintf("openlia-20260921T10000%dZ-%d.tar.gz.age", i, i))
 		if _, err := os.Stat(archivePath); err != nil {
 			t.Fatalf("expected archive %d to exist, but stat error: %v", i, err)
 		}
