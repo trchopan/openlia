@@ -373,7 +373,7 @@ func generateAttachmentsFile(config Config) error {
 	}
 	if config.LochoHostEnabled {
 		lochoRoot, _ := json.Marshal(config.LochoHostRoot)
-		lochoCommand := fmt.Sprintf("set -eu; set -- $(getent ahostsv4 workspace-ui); workspace_ip=\"$$1\"; set -- $(getent ahostsv4 open-webui); open_webui_ip=\"$$1\"; config=/var/lib/openlia-locho-host/locho.toml; temporary=\"$$config.tmp\"; trap 'rm -f \"$$temporary\"' EXIT; printf '[[services]]\\nname = \\\"workspace-ui\\\"\\ntype = \\\"tcp\\\"\\nendpoint = \\\"%%s:%d\\\"\\n\\n[[services]]\\nname = \\\"open-webui\\\"\\ntype = \\\"tcp\\\"\\nendpoint = \\\"%%s:%d\\\"\\n' \"$$workspace_ip\" \"$$open_webui_ip\" > \"$$temporary\"; chmod 600 \"$$temporary\"; mv -f \"$$temporary\" \"$$config\"; trap - EXIT; exec locho host --config \"$$config\"", config.WorkspaceUIPort, 8080)
+		lochoCommand := "set -eu; set -- $(getent ahostsv4 workspace-ui); workspace_ip=\"$$1\"; set -- $(getent ahostsv4 open-webui); open_webui_ip=\"$$1\"; config=/var/lib/openlia-locho-host/locho.toml; temporary=\"$$config.tmp\"; trap 'rm -f \"$$temporary\"' EXIT; printf '" + lochoHostConfigFormat(config.WorkspaceUIPort, 8080) + "' \"$$workspace_ip\" \"$$open_webui_ip\" > \"$$temporary\"; chmod 600 \"$$temporary\"; mv -f \"$$temporary\" \"$$config\"; trap - EXIT; exec locho host --config \"$$config\""
 		quotedLochoCommand, _ := json.Marshal(lochoCommand)
 		builder.WriteString("  locho-host:\n")
 		builder.WriteString("    image: \"${OPENLIA_LOCHO_IMAGE:-openlia-locho:v1.2.0}\"\n")
@@ -401,6 +401,10 @@ func generateAttachmentsFile(config Config) error {
 		return err
 	}
 	return nil
+}
+
+func lochoHostConfigFormat(workspacePort, openWebUIPort int) string {
+	return fmt.Sprintf("[[services]]\\nname = \"workspace-ui\"\\ntype = \"tcp\"\\nendpoint = \"%%s:%d\"\\n\\n[[services]]\\nname = \"open-webui\"\\ntype = \"tcp\"\\nendpoint = \"%%s:%d\"\\n", workspacePort, openWebUIPort)
 }
 
 func writeLochoHostConfig(config Config) error {
