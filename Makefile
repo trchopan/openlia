@@ -82,6 +82,11 @@ compose-config:
 	OPENLIA_SYSTEM_SKILLS_ROOT=/tmp/openlia-compose-check/runtime/system-skills \
 	OPENLIA_SKILLS_CACHE_ROOT=/tmp/openlia-compose-check/runtime/skill-cache \
 	OPENLIA_SKILLS_ENV_ROOT=/tmp/openlia-compose-check/runtime/skill-envs \
+	OPENLIA_META_ROOT=/tmp/openlia-compose-check/runtime/meta \
+	OPENLIA_BACKUP_ROOT=/tmp/openlia-compose-check/runtime/backups \
+	OPENLIA_RUNTIME_UID=$$(id -u) \
+	OPENLIA_RUNTIME_GID=$$(id -g) \
+	OPENLIA_OPERATION_LOCK=/tmp/openlia-compose-check.operation.lock \
 	OPENLIA_SECRET_DIR=/tmp/openlia-compose-check/runtime/secrets \
 	OPENLIA_NETWORK_NAME=openlia-compose-check-private \
 	docker compose -f docker/compose.yaml config --quiet

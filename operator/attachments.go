@@ -274,7 +274,8 @@ func generateAttachmentsFile(config Config) error {
 
 	var builder strings.Builder
 	hasHermesEnv := config.APIEnabled || config.OpenWebUIHost != "" || config.ExternalNetwork != "" || browserURL != "" || config.WorkspaceUIPublicOrigin != "" || len(allServices) > 0
-	hasGeneratedServices := hasHermesEnv || config.WorkspaceUIHost != "" || config.OpenWebUIHost != "" || len(hosts.Hosts) > 0
+	schedulerVolumes := backupSchedulerIdentityVolumes(config)
+	hasGeneratedServices := hasHermesEnv || config.WorkspaceUIHost != "" || config.OpenWebUIHost != "" || len(hosts.Hosts) > 0 || len(schedulerVolumes) > 0
 	if !hasGeneratedServices {
 		builder.WriteString("services: {}\n")
 	} else {
@@ -391,6 +392,16 @@ func generateAttachmentsFile(config Config) error {
 		builder.WriteString("    deploy:\n      resources:\n        limits:\n          cpus: \"0.5\"\n          memory: 512M\n")
 		builder.WriteString("    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n")
 	}
+	if len(schedulerVolumes) > 0 {
+		builder.WriteString("  backup-scheduler:\n    volumes:\n")
+		for _, volume := range schedulerVolumes {
+			builder.WriteString("      - type: bind\n        source: ")
+			builder.WriteString(volume.source)
+			builder.WriteString("\n        target: ")
+			builder.WriteString(volume.target)
+			builder.WriteString("\n        read_only: true\n")
+		}
+	}
 	if config.ExternalNetwork != "" {
 		fmt.Fprintf(&builder, "networks:\n  openlia-external:\n    name: %q\n    external: true\n", config.ExternalNetwork)
 	}
@@ -401,6 +412,32 @@ func generateAttachmentsFile(config Config) error {
 		return err
 	}
 	return nil
+}
+
+type backupSchedulerIdentityVolume struct {
+	source string
+	target string
+}
+
+func backupSchedulerIdentityVolumes(config Config) []backupSchedulerIdentityVolume {
+	if !config.BackupScheduleEnabled {
+		return nil
+	}
+	volumes := make([]backupSchedulerIdentityVolume, 0)
+	for _, destination := range config.BackupDestinations {
+		if destination.Type != "rsync" || destination.IdentityFile == "" {
+			continue
+		}
+		source, err := json.Marshal(destination.IdentityFile)
+		if err != nil {
+			continue
+		}
+		volumes = append(volumes, backupSchedulerIdentityVolume{
+			source: string(source),
+			target: "/run/openlia-destinations/" + destination.Name,
+		})
+	}
+	return volumes
 }
 
 func lochoHostConfigFormat(workspacePort, openWebUIPort int) string {

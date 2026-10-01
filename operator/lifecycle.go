@@ -97,6 +97,12 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 				return DeployResult{}, fmt.Errorf("Hermes image build failed")
 			}
 		}
+		if options.Component == "all" && config.BackupScheduleEnabled {
+			if _, err := compose.Run(ctx, "build", "backup-scheduler"); err != nil {
+				_ = RecordChange(config, options.Action, "failed", backup, "backup scheduler image build failed", now)
+				return DeployResult{}, fmt.Errorf("backup scheduler image build failed")
+			}
+		}
 		if options.Component == "all" || options.Component == "locho" {
 			services := composeServices(ctx, compose)
 			if len(services) > 0 {

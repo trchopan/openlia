@@ -183,7 +183,7 @@ func runBackup(ctx context.Context, config Config, args []string, _ io.Reader, o
 		if len(args) != 0 {
 			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup schedule-install accepts no arguments"))
 		}
-		result, err := InstallBackupSchedule(config, now)
+		result, err := InstallBackupScheduleContext(ctx, config, now)
 		if err != nil {
 			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 		}
@@ -193,7 +193,7 @@ func runBackup(ctx context.Context, config Config, args []string, _ io.Reader, o
 		if len(args) != 0 {
 			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("backup schedule-remove accepts no arguments"))
 		}
-		result, err := RemoveBackupSchedule(config)
+		result, err := RemoveBackupScheduleContext(ctx, config)
 		if err != nil {
 			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 		}

@@ -200,12 +200,16 @@ func pushRsyncBackup(ctx context.Context, config Config, destination BackupDesti
 }
 
 func backupNamespace(config Config) string {
-	digest := sha256.Sum256([]byte(config.ProjectName + "\x00" + config.InstallRoot))
+	root := config.InstallRoot
+	if config.BackupNamespaceRoot != "" {
+		root = config.BackupNamespaceRoot
+	}
+	digest := sha256.Sum256([]byte(config.ProjectName + "\x00" + root))
 	return hex.EncodeToString(digest[:])[:16]
 }
 
 func removeRsyncObject(ctx context.Context, destination BackupDestination, host, path string) error {
-	args := []string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"}
+	args := backupSSHOptions()
 	if destination.IdentityFile != "" {
 		args = append(args, "-i", destination.IdentityFile)
 	}
@@ -214,7 +218,7 @@ func removeRsyncObject(ctx context.Context, destination BackupDestination, host,
 }
 
 func ensureRsyncRemoteDirectory(ctx context.Context, destination BackupDestination, host, directory string) error {
-	args := []string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"}
+	args := backupSSHOptions()
 	if destination.IdentityFile != "" {
 		args = append(args, "-i", destination.IdentityFile)
 	}
@@ -230,7 +234,7 @@ func rsyncUpload(ctx context.Context, destination BackupDestination, source, hos
 	if _, err := exec.LookPath("rsync"); err != nil {
 		return fmt.Errorf("rsync is required on the target: %w", err)
 	}
-	sshArgs := []string{"ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"}
+	sshArgs := append([]string{"ssh"}, backupSSHOptions()...)
 	if destination.IdentityFile != "" {
 		sshArgs = append(sshArgs, "-i", destination.IdentityFile)
 	}
@@ -252,7 +256,7 @@ func rsyncUpload(ctx context.Context, destination BackupDestination, source, hos
 
 func pruneRsyncBackups(ctx context.Context, destination BackupDestination, host, directory string, keep int) error {
 	findCommand := rsyncBackupListCommand(directory)
-	args := []string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"}
+	args := backupSSHOptions()
 	if destination.IdentityFile != "" {
 		args = append(args, "-i", destination.IdentityFile)
 	}
@@ -279,7 +283,7 @@ func pruneRsyncBackups(ctx context.Context, destination BackupDestination, host,
 	for _, item := range items[keep:] {
 		for _, name := range []string{item, item + ".json"} {
 			removeCommand := "rm -f -- " + shellArgumentQuote(filepath.Join(directory, name))
-			removeArgs := []string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"}
+			removeArgs := backupSSHOptions()
 			if destination.IdentityFile != "" {
 				removeArgs = append(removeArgs, "-i", destination.IdentityFile)
 			}
@@ -290,6 +294,14 @@ func pruneRsyncBackups(ctx context.Context, destination BackupDestination, host,
 		}
 	}
 	return nil
+}
+
+func backupSSHOptions() []string {
+	args := []string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"}
+	if knownHosts := os.Getenv("OPENLIA_BACKUP_KNOWN_HOSTS"); knownHosts != "" {
+		args = append(args, "-o", "UserKnownHostsFile="+knownHosts)
+	}
+	return args
 }
 
 func rsyncBackupListCommand(directory string) string {

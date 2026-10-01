@@ -1,0 +1,3 @@
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+* * * * * root /bin/sh -c '. /run/openlia/scheduler.env; exec /usr/local/bin/openlia-backup-tick >>/proc/1/fd/1 2>>/proc/1/fd/2'

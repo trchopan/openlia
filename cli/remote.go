@@ -105,18 +105,32 @@ func (remote Remote) operationCommand(operation string, args ...string) string {
 }
 
 func (remote Remote) composeEnvironment() string {
+	knownHosts := remote.Config.BackupKnownHosts
+	if knownHosts == "" {
+		knownHosts = "/root/.ssh/known_hosts"
+	}
 	values := []string{
 		"OPENLIA_DATA_ROOT=" + shellQuote(remote.rootPath("runtime", "hermes")),
 		"OPENLIA_SYSTEM_SKILLS_ROOT=" + shellQuote(remote.rootPath("runtime", "system-skills")),
 		"OPENLIA_SKILLS_CACHE_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-cache")),
 		"OPENLIA_SKILLS_ENV_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-envs")),
 		"OPENLIA_SECRET_DIR=" + shellQuote(remote.rootPath("runtime", "secrets")),
+		"OPENLIA_META_ROOT=" + shellQuote(remote.rootPath("runtime", "meta")),
+		"OPENLIA_BACKUP_ROOT=" + shellQuote(remote.rootPath("runtime", "backups")),
+		"OPENLIA_RUNTIME_UID='10000'",
+		"OPENLIA_RUNTIME_GID='10000'",
+		"OPENLIA_OPERATION_LOCK=" + shellQuote(remote.Config.InstallRoot+".operation.lock"),
+		"OPENLIA_BACKUP_KNOWN_HOSTS_SOURCE=" + shellQuote(knownHosts),
 		"OPENLIA_NETWORK_NAME=" + shellQuote(remote.Config.Project+"-private"),
 	}
 	return strings.Join(values, " ")
 }
 
 func (remote Remote) operationCommandForRoot(operationRoot, operation string, args ...string) string {
+	knownHosts := remote.Config.BackupKnownHosts
+	if knownHosts == "" {
+		knownHosts = "/root/.ssh/known_hosts"
+	}
 	environment := []string{
 		"OPENLIA_LOCAL_MODE='false'",
 		"OPENLIA_RUNTIME_UID='10000'",
@@ -158,12 +172,14 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"OPENLIA_SECRET_FILE=" + shellQuote(remote.rootPath("runtime", "secrets", "hermes.env")),
 		"OPENLIA_SECRET_DIR=" + shellQuote(remote.rootPath("runtime", "secrets")),
 		"OPENLIA_BACKUP_ROOT=" + shellQuote(remote.rootPath("runtime", "backups")),
+		"OPENLIA_META_ROOT=" + shellQuote(remote.rootPath("runtime", "meta")),
+		"OPENLIA_OPERATION_LOCK=" + shellQuote(remote.Config.InstallRoot+".operation.lock"),
+		"OPENLIA_BACKUP_KNOWN_HOSTS_SOURCE=" + shellQuote(knownHosts),
 		"OPENLIA_BACKUP_RECIPIENT=" + shellQuote(remote.Config.BackupRecipient),
 		"OPENLIA_BACKUP_SCHEDULE=" + shellQuote(remote.Config.BackupSchedule),
 		"OPENLIA_BACKUP_SCHEDULE_ENABLED=" + shellQuote(strconv.FormatBool(remote.Config.BackupScheduleEnabled)),
 		"OPENLIA_BACKUP_REMOTE_RETENTION=" + shellQuote(strconv.Itoa(remote.Config.BackupRemoteRetention)),
 		"OPENLIA_BACKUP_DESTINATIONS=" + shellQuote(renderBackupDestinationsJSON(remote.Config.BackupDestinations)),
-		"OPENLIA_META_ROOT=" + shellQuote(remote.rootPath("runtime", "meta")),
 		"OPENLIA_SKILLS_CACHE_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-cache")),
 		"OPENLIA_SKILLS_ENV_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-envs")),
 		"OPENLIA_COMPOSE_FILE=" + shellQuote(filepath.Join(operationRoot, "docker", "compose.yaml")),
@@ -235,7 +251,16 @@ func privilegedEnvironmentCommand(environment []string, executable string, args 
 		quotedArgs = append(quotedArgs, shellQuote(arg))
 	}
 	arguments := strings.Join(quotedArgs, " ")
-	return "if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then sudo -n env " + strings.Join(environment, " ") + " " + executable + " " + arguments + "; else env " + strings.Join(unprivilegedEnvironment(environment), " ") + " " + executable + " " + arguments + "; fi"
+	passthrough := []string{
+		`AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID-}"`,
+		`AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY-}"`,
+		`AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN-}"`,
+		`AWS_PROFILE="${AWS_PROFILE-}"`,
+		`AWS_REGION="${AWS_REGION-}"`,
+		`AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION-}"`,
+	}
+	environmentCommand := strings.Join(append(append([]string{}, environment...), passthrough...), " ")
+	return "if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then sudo -n env " + environmentCommand + " " + executable + " " + arguments + "; else env " + strings.Join(unprivilegedEnvironment(environment), " ") + " " + strings.Join(passthrough, " ") + " " + executable + " " + arguments + "; fi"
 }
 
 func unprivilegedEnvironment(environment []string) []string {
@@ -551,6 +576,11 @@ func operationEnvironment(config Config, operationRoot string) []string {
 	if absolute, err := filepath.Abs(operatorConfigFile); err == nil {
 		operatorConfigFile = absolute
 	}
+	home, _ := os.UserHomeDir()
+	knownHosts := config.BackupKnownHosts
+	if knownHosts == "" {
+		knownHosts = filepath.Join(home, ".ssh", "known_hosts")
+	}
 	return []string{
 		"OPENLIA_CLI_CONFIG_FILE=" + operatorConfigFile,
 		"OPENLIA_LOCAL_MODE=true",
@@ -593,6 +623,9 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_SECRET_FILE=" + filepath.Join(config.InstallRoot, "runtime", "secrets", "hermes.env"),
 		"OPENLIA_SECRET_DIR=" + filepath.Join(config.InstallRoot, "runtime", "secrets"),
 		"OPENLIA_BACKUP_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "backups"),
+		"OPENLIA_META_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "meta"),
+		"OPENLIA_OPERATION_LOCK=" + config.InstallRoot + ".operation.lock",
+		"OPENLIA_BACKUP_KNOWN_HOSTS_SOURCE=" + knownHosts,
 		"OPENLIA_BACKUP_RECIPIENT=" + config.BackupRecipient,
 		"OPENLIA_BACKUP_SCHEDULE=" + config.BackupSchedule,
 		"OPENLIA_BACKUP_SCHEDULE_ENABLED=" + strconv.FormatBool(config.BackupScheduleEnabled),
