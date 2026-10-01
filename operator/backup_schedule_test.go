@@ -44,6 +44,31 @@ func TestScheduleRuntimeConfigUsesContainerPaths(t *testing.T) {
 	}
 }
 
+func TestScheduleRuntimeConfigProjectsOptionalRuntimePaths(t *testing.T) {
+	runtimeConfig := scheduleRuntimeConfig(testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime")))
+	runtimeConfig.WorkspaceUIHost = "127.0.0.1"
+	runtimeConfig.WorkspaceUIAuthRequired = true
+	runtimeConfig.OpenWebUIHost = "127.0.0.1"
+	runtimeConfig.OpenWebUIAuth = true
+	runtimeConfig.LochoHostEnabled = true
+	if err := runtimeConfig.ValidatePaths(); err != nil {
+		t.Fatalf("projected scheduler config is invalid: %v", err)
+	}
+	for name, path := range map[string]string{
+		"skills cache":          runtimeConfig.SkillsCacheRoot,
+		"skills env":            runtimeConfig.SkillsEnvRoot,
+		"Open WebUI":            runtimeConfig.OpenWebUIDataRoot,
+		"Locho root":            runtimeConfig.LochoHostRoot,
+		"Locho config":          runtimeConfig.LochoHostConfig,
+		"Locho state":           runtimeConfig.LochoHostStateRoot,
+		"Workspace UI password": runtimeConfig.WorkspaceUIPasswordHashFile,
+	} {
+		if !within(path, "/runtime") {
+			t.Errorf("%s path = %q, want path below /runtime", name, path)
+		}
+	}
+}
+
 func TestBackupSchedulerIdentityVolumesFollowScheduleState(t *testing.T) {
 	config := Config{BackupScheduleEnabled: true, BackupDestinations: []BackupDestination{{Name: "nas", Type: "rsync", IdentityFile: "/srv/keys/openlia"}}}
 	if got := backupSchedulerIdentityVolumes(config); len(got) != 1 || got[0].target != "/run/openlia-destinations/nas" {

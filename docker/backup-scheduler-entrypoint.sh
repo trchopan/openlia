@@ -55,6 +55,11 @@ TZ=${TZ:-Asia/Ho_Chi_Minh}
 EOF
 chmod 0600 /run/openlia/scheduler.env
 
+# Use the same persisted environment for the startup tick as cron uses.
+set -a
+. /run/openlia/scheduler.env
+set +a
+
 # A release update can leave a due schedule behind while the Compose project
 # is being recreated. Run once immediately; the schedule state prevents a
 # duplicate run when cron reaches the same minute.
