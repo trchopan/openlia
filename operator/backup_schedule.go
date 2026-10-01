@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -182,9 +180,6 @@ func InstallBackupScheduleContext(ctx context.Context, config Config, now time.T
 	if err := waitForBackupScheduler(ctx, compose); err != nil {
 		return BackupScheduleResult{}, err
 	}
-	if err := removeLegacyBackupSchedule(config); err != nil {
-		return BackupScheduleResult{}, fmt.Errorf("remove legacy backup schedule: %w", err)
-	}
 	return BackupScheduleResult{OK: true, Action: "schedule-install", Enabled: true, Schedule: config.BackupSchedule, Timezone: config.Timezone, Installed: utcTimestamp(now)}, nil
 }
 
@@ -220,9 +215,6 @@ func RemoveBackupScheduleContext(ctx context.Context, config Config, composers .
 		if _, err := compose.Run(ctx, "--profile", "backup", "rm", "-sf", "backup-scheduler"); err != nil {
 			return BackupScheduleResult{}, fmt.Errorf("remove backup scheduler: %w", err)
 		}
-	}
-	if err := removeLegacyBackupSchedule(config); err != nil {
-		return BackupScheduleResult{}, err
 	}
 	return BackupScheduleResult{OK: true, Action: "schedule-remove", Enabled: false, Schedule: config.BackupSchedule, Timezone: config.Timezone}, nil
 }
@@ -262,53 +254,6 @@ func backupScheduleInstalled(config Config) bool {
 	return err == nil && containsService(result.Stdout, "backup-scheduler")
 }
 
-func removeLegacyBackupSchedule(config Config) error {
-	if runtime.GOOS == "linux" {
-		if config.LocalMode {
-			return removeUserSystemdBackupSchedule(config)
-		}
-		return removeSystemdBackupSchedule(config)
-	}
-	if runtime.GOOS == "darwin" && config.LocalMode {
-		return removeLaunchdBackupSchedule(config)
-	}
-	return nil
-}
-
-func removeUserSystemdBackupSchedule(config Config) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	unitName := "openlia-backup-" + config.ProjectName
-	unitDirectory := filepath.Join(home, ".config", "systemd", "user")
-	timerPath := filepath.Join(unitDirectory, unitName+".timer")
-	servicePath := filepath.Join(unitDirectory, unitName+".service")
-	_, timerErr := os.Stat(timerPath)
-	_, serviceErr := os.Stat(servicePath)
-	if os.IsNotExist(timerErr) && os.IsNotExist(serviceErr) {
-		return nil
-	}
-	_ = runSystemctlUser("stop", unitName+".service")
-	_ = runSystemctlUser("disable", "--now", unitName+".timer")
-	for _, path := range []string{timerPath, servicePath} {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	return runSystemctlUser("daemon-reload")
-}
-
-func runSystemctlUser(args ...string) error {
-	commandArgs := append([]string{"--user"}, args...)
-	command := exec.Command("systemctl", commandArgs...)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("systemctl --user %s: %s", strings.Join(args, " "), strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
 func scheduleRuntimeConfig(config Config) Config {
 	config.BackupNamespaceRoot = config.InstallRoot
 	config.RepositoryRoot = "/opt/openlia/current"
@@ -332,53 +277,4 @@ func scheduleRuntimeConfig(config Config) Config {
 		}
 	}
 	return config
-}
-
-func removeSystemdBackupSchedule(config Config) error {
-	unitName := "openlia-backup-" + config.ProjectName
-	servicePath := filepath.Join("/etc/systemd/system", unitName+".service")
-	timerPath := filepath.Join("/etc/systemd/system", unitName+".timer")
-	_, serviceErr := os.Stat(servicePath)
-	_, timerErr := os.Stat(timerPath)
-	if os.IsNotExist(serviceErr) && os.IsNotExist(timerErr) {
-		return nil
-	}
-	_ = runSystemctl("disable", "--now", unitName+".timer")
-	for _, path := range []string{timerPath, servicePath} {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	return runSystemctl("daemon-reload")
-}
-
-func runSystemctl(args ...string) error {
-	command := exec.Command("systemctl", args...)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("systemctl %s: %s", strings.Join(args, " "), strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
-func systemdEscape(value string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(value, "\\", "\\\\"), " ", "\\x20")
-}
-
-func removeLaunchdBackupSchedule(config Config) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	label := "com.openlia.backup." + config.ProjectName
-	plistPath := filepath.Join(home, "Library", "LaunchAgents", label+".plist")
-	_ = exec.Command("launchctl", "unload", "-w", plistPath).Run()
-	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	logPath := filepath.Join(home, "Library", "Logs", "openlia-backup-"+config.ProjectName+".log")
-	if err := os.Remove(logPath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
 }

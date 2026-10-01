@@ -883,15 +883,14 @@ ciphertext.
 
 New installations start a Compose backup-scheduler sidecar with a daily
 schedule defaulting to 04:20 in the configured IANA timezone. The sidecar is
-used for both remote Linux and local macOS deployments; no host systemd or
-launchd schedule is required. Change `[backup].schedule` with a five-field
-cron expression (for example `"0 2 * * 1"` for Mondays at 02:00), set
+used for both remote Linux and local macOS deployments and is managed entirely
+through Compose. Change `[backup].schedule` with a five-field cron expression
+(for example `"0 2 * * 1"` for Mondays at 02:00), set
 `schedule_enabled = false` to disable it, and run `openlia backup schedule
 install` after changing the schedule. Scheduled capture is live and
 best-effort: Hermes remains available, but files being changed during capture
 may be retried or cause that backup run to fail. Missed schedule occurrences
-are coalesced into at most one run when the target returns. Existing host
-systemd or launchd schedules are removed when the sidecar is installed.
+are coalesced into at most one run when the target returns.
 
 Configure zero, one, or both remote destinations under `[[backup.destinations]]`:
 
