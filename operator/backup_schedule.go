@@ -126,6 +126,10 @@ func BackupScheduleTick(ctx context.Context, config Config, now time.Time) (Back
 }
 
 func InstallBackupSchedule(config Config, now time.Time) (BackupScheduleResult, error) {
+	return InstallBackupScheduleContext(context.Background(), config, now)
+}
+
+func InstallBackupScheduleContext(ctx context.Context, config Config, now time.Time) (BackupScheduleResult, error) {
 	if err := config.ValidatePaths(); err != nil {
 		return BackupScheduleResult{}, err
 	}
@@ -133,7 +137,7 @@ func InstallBackupSchedule(config Config, now time.Time) (BackupScheduleResult, 
 		return BackupScheduleResult{}, fmt.Errorf("backup encryption recipient is required before enabling the schedule")
 	}
 	if !config.BackupScheduleEnabled {
-		return RemoveBackupSchedule(config)
+		return RemoveBackupScheduleContext(ctx, config)
 	}
 	if _, err := cron.ParseStandard(config.BackupSchedule); err != nil {
 		return BackupScheduleResult{}, fmt.Errorf("invalid backup schedule: %w", err)
@@ -141,9 +145,6 @@ func InstallBackupSchedule(config Config, now time.Time) (BackupScheduleResult, 
 	for _, destination := range config.BackupDestinations {
 		if destination.Type != "rsync" {
 			continue
-		}
-		if _, err := exec.LookPath("rsync"); err != nil {
-			return BackupScheduleResult{}, fmt.Errorf("rsync destination %s requires rsync on the target", destination.Name)
 		}
 		if destination.IdentityFile != "" {
 			info, err := os.Stat(destination.IdentityFile)
@@ -155,8 +156,11 @@ func InstallBackupSchedule(config Config, now time.Time) (BackupScheduleResult, 
 	if err := EnsureDir(config.MetaRoot, 0o700); err != nil {
 		return BackupScheduleResult{}, err
 	}
-	config = scheduleRuntimeConfig(config)
-	configData, err := json.Marshal(config)
+	if err := generateAttachmentsFile(config); err != nil {
+		return BackupScheduleResult{}, fmt.Errorf("generate backup scheduler mounts: %w", err)
+	}
+	runtimeConfig := scheduleRuntimeConfig(config)
+	configData, err := json.Marshal(runtimeConfig)
 	if err != nil {
 		return BackupScheduleResult{}, err
 	}
@@ -164,109 +168,111 @@ func InstallBackupSchedule(config Config, now time.Time) (BackupScheduleResult, 
 	if err := AtomicWriteFile(configPath, append(configData, '\n'), 0o600); err != nil {
 		return BackupScheduleResult{}, err
 	}
-	if runtime.GOOS == "linux" {
-		var err error
-		if config.LocalMode {
-			err = installUserSystemdBackupSchedule(config)
-		} else {
-			err = installSystemdBackupSchedule(config, configPath)
-		}
-		if err != nil {
-			return BackupScheduleResult{}, err
-		}
-	} else if runtime.GOOS == "darwin" && config.LocalMode {
-		if err := installLaunchdBackupSchedule(config); err != nil {
-			return BackupScheduleResult{}, err
-		}
-	} else {
-		return BackupScheduleResult{}, fmt.Errorf("managed backup scheduling is supported on Linux targets and local macOS deployments")
-	}
 	statePath := filepath.Join(config.MetaRoot, "backup-schedule-state.json")
-	if _, err := os.Stat(statePath); os.IsNotExist(err) {
-		state := backupScheduleState{Schema: 1, InstalledAt: utcTimestamp(now)}
-		data, _ := json.Marshal(state)
-		if err := AtomicWriteFile(statePath, append(data, '\n'), 0o600); err != nil {
-			return BackupScheduleResult{}, err
-		}
+	if err := ensureBackupScheduleState(statePath, now); err != nil {
+		return BackupScheduleResult{}, err
+	}
+	compose := NewCompose(config, nil)
+	if _, err := compose.Run(ctx, "--profile", "backup", "build", "backup-scheduler"); err != nil {
+		return BackupScheduleResult{}, fmt.Errorf("build backup scheduler: %w", err)
+	}
+	if _, err := compose.Run(ctx, "--profile", "backup", "up", "-d", "--no-deps", "--force-recreate", "backup-scheduler"); err != nil {
+		return BackupScheduleResult{}, fmt.Errorf("start backup scheduler: %w", err)
+	}
+	if err := waitForBackupScheduler(ctx, compose); err != nil {
+		return BackupScheduleResult{}, err
+	}
+	if err := removeLegacyBackupSchedule(config); err != nil {
+		return BackupScheduleResult{}, fmt.Errorf("remove legacy backup schedule: %w", err)
 	}
 	return BackupScheduleResult{OK: true, Action: "schedule-install", Enabled: true, Schedule: config.BackupSchedule, Timezone: config.Timezone, Installed: utcTimestamp(now)}, nil
 }
 
-func RemoveBackupSchedule(config Config) (BackupScheduleResult, error) {
-	if runtime.GOOS == "linux" {
-		var err error
-		if config.LocalMode {
-			err = removeUserSystemdBackupSchedule(config)
-		} else {
-			err = removeSystemdBackupSchedule(config)
+func ensureBackupScheduleState(statePath string, now time.Time) error {
+	if _, err := os.Stat(statePath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	state := backupScheduleState{Schema: 1, InstalledAt: utcTimestamp(now)}
+	data, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	return AtomicWriteFile(statePath, append(data, '\n'), 0o600)
+}
+
+func RemoveBackupSchedule(config Config, composers ...Compose) (BackupScheduleResult, error) {
+	return RemoveBackupScheduleContext(context.Background(), config, composers...)
+}
+
+func RemoveBackupScheduleContext(ctx context.Context, config Config, composers ...Compose) (BackupScheduleResult, error) {
+	if !config.BackupScheduleEnabled {
+		if err := generateAttachmentsFile(config); err != nil {
+			return BackupScheduleResult{}, fmt.Errorf("remove backup scheduler mounts: %w", err)
 		}
-		if err != nil {
-			return BackupScheduleResult{}, err
+	}
+	if _, err := os.Stat(config.ComposeFile); err == nil {
+		compose := NewCompose(config, nil)
+		if len(composers) > 0 {
+			compose = composers[0]
 		}
-	} else if runtime.GOOS == "darwin" && config.LocalMode {
-		if err := removeLaunchdBackupSchedule(config); err != nil {
-			return BackupScheduleResult{}, err
+		if _, err := compose.Run(ctx, "--profile", "backup", "rm", "-sf", "backup-scheduler"); err != nil {
+			return BackupScheduleResult{}, fmt.Errorf("remove backup scheduler: %w", err)
 		}
+	}
+	if err := removeLegacyBackupSchedule(config); err != nil {
+		return BackupScheduleResult{}, err
 	}
 	return BackupScheduleResult{OK: true, Action: "schedule-remove", Enabled: false, Schedule: config.BackupSchedule, Timezone: config.Timezone}, nil
 }
 
-func backupScheduleInstalled(config Config) bool {
-	unitName := "openlia-backup-" + config.ProjectName
-	var path string
-	switch runtime.GOOS {
-	case "linux":
-		if config.LocalMode {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return false
+func waitForBackupScheduler(ctx context.Context, compose Compose) error {
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		result, err := compose.Run(ctx, "--profile", "backup", "ps", "--format", "{{.State}} {{.Health}}", "backup-scheduler")
+		if err == nil {
+			status := strings.TrimSpace(string(result.Stdout))
+			if strings.HasPrefix(status, "running") && strings.Contains(status, "healthy") {
+				return nil
 			}
-			path = filepath.Join(home, ".config", "systemd", "user", unitName+".timer")
-		} else {
-			path = filepath.Join("/etc/systemd/system", unitName+".timer")
 		}
-	case "darwin":
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return false
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			if err != nil {
+				return fmt.Errorf("backup scheduler did not become healthy: %w", err)
+			}
+			return fmt.Errorf("backup scheduler did not become healthy: %s", strings.TrimSpace(string(result.Stdout)))
+		case <-ticker.C:
 		}
-		path = filepath.Join(home, "Library", "LaunchAgents", "com.openlia.backup."+config.ProjectName+".plist")
-	default:
-		return false
 	}
-	info, err := os.Stat(path)
-	return err == nil && info.Mode().IsRegular()
 }
 
-func installUserSystemdBackupSchedule(config Config) error {
-	if config.OperatorConfigFile == "" {
-		return fmt.Errorf("operator config path is not available for the local schedule")
+func backupScheduleInstalled(config Config) bool {
+	if !config.BackupScheduleEnabled {
+		return false
 	}
-	if _, err := exec.LookPath("systemctl"); err != nil {
-		return fmt.Errorf("systemctl is required to install the local backup schedule")
+	compose := NewCompose(config, nil)
+	result, err := compose.Run(context.Background(), "--profile", "backup", "ps", "--services", "--filter", "status=running")
+	return err == nil && containsService(result.Stdout, "backup-scheduler")
+}
+
+func removeLegacyBackupSchedule(config Config) error {
+	if runtime.GOOS == "linux" {
+		if config.LocalMode {
+			return removeUserSystemdBackupSchedule(config)
+		}
+		return removeSystemdBackupSchedule(config)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
+	if runtime.GOOS == "darwin" && config.LocalMode {
+		return removeLaunchdBackupSchedule(config)
 	}
-	unitDirectory := filepath.Join(home, ".config", "systemd", "user")
-	if err := os.MkdirAll(unitDirectory, 0o700); err != nil {
-		return err
-	}
-	program, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	unitName := "openlia-backup-" + config.ProjectName
-	service := "[Unit]\nDescription=OpenLia encrypted backup\n\n[Service]\nType=oneshot\nStandardOutput=null\nStandardError=journal\nEnvironment=OPENLIA_CONFIG=" + systemdEscape(config.OperatorConfigFile) + "\nExecStart=" + systemdEscape(program) + " backup tick\n"
-	timer := "[Unit]\nDescription=OpenLia backup schedule\n\n[Timer]\nOnCalendar=*-*-* *:*:00\nPersistent=true\nAccuracySec=1s\nUnit=" + unitName + ".service\n\n[Install]\nWantedBy=timers.target\n"
-	if err := AtomicWriteFile(filepath.Join(unitDirectory, unitName+".service"), []byte(service), 0o600); err != nil {
-		return err
-	}
-	if err := AtomicWriteFile(filepath.Join(unitDirectory, unitName+".timer"), []byte(timer), 0o600); err != nil {
-		return err
-	}
-	return reloadAndEnableSystemdTimer(runSystemctlUser, unitName)
+	return nil
 }
 
 func removeUserSystemdBackupSchedule(config Config) error {
@@ -303,51 +309,29 @@ func runSystemctlUser(args ...string) error {
 	return nil
 }
 
-func reloadAndEnableSystemdTimer(run func(...string) error, unitName string) error {
-	if err := run("daemon-reload"); err != nil {
-		return err
-	}
-	return run("enable", "--now", unitName+".timer")
-}
-
 func scheduleRuntimeConfig(config Config) Config {
-	current := filepath.Join(config.InstallRoot, "current")
-	config.RepositoryRoot = current
-	config.ComposeFile = filepath.Join(current, "docker", "compose.yaml")
-	config.ComposeProjectDir = filepath.Join(current, "docker")
-	config.GeneratedCompose = filepath.Join(current, "docker", "compose.generated.yaml")
+	config.BackupNamespaceRoot = config.InstallRoot
+	config.RepositoryRoot = "/opt/openlia/current"
+	config.RuntimeRoot = "/runtime"
+	config.InstallRoot = "/opt/openlia"
+	config.ComposeFile = "/opt/openlia/current/docker/compose.yaml"
+	config.ComposeProjectDir = "/opt/openlia/current/docker"
+	config.GeneratedCompose = "/opt/openlia/current/docker/compose.generated.yaml"
+	config.DataRoot = "/runtime/hermes"
+	config.SystemSkillsRoot = "/runtime/system-skills"
+	config.LochoRoot = "/runtime/locho"
+	config.SecretDir = "/runtime/secrets"
+	config.SecretFile = "/runtime/secrets/hermes.env"
+	config.BackupRoot = "/runtime/backups"
+	config.MetaRoot = "/runtime/meta"
+	config.StateFile = "/runtime/state"
+	config.OperatorConfigFile = "/etc/openlia/backup-schedule-config.json"
+	for index := range config.BackupDestinations {
+		if config.BackupDestinations[index].IdentityFile != "" {
+			config.BackupDestinations[index].IdentityFile = "/run/openlia-destinations/" + config.BackupDestinations[index].Name
+		}
+	}
 	return config
-}
-
-func installSystemdBackupSchedule(config Config, configPath string) error {
-	if _, err := exec.LookPath("systemctl"); err != nil {
-		return fmt.Errorf("systemctl is required to install the target backup schedule")
-	}
-	flockPath, err := exec.LookPath("flock")
-	if err != nil {
-		return fmt.Errorf("flock is required to serialize the target backup schedule")
-	}
-	architecture := runtime.GOARCH
-	if architecture != "amd64" && architecture != "arm64" {
-		return fmt.Errorf("unsupported target architecture for backup schedule: %s", architecture)
-	}
-	unitName := "openlia-backup-" + config.ProjectName
-	operatorPath := filepath.Join(config.InstallRoot, "current", "operator", "linux-"+architecture, "openlia-operator")
-	servicePath := filepath.Join("/etc/systemd/system", unitName+".service")
-	timerPath := filepath.Join("/etc/systemd/system", unitName+".timer")
-	lockPath := config.InstallRoot + ".operation.lock"
-	service := "[Unit]\nDescription=OpenLia encrypted backup\nAfter=network-online.target\n\n[Service]\nType=oneshot\nStandardOutput=null\nStandardError=journal\nEnvironment=OPENLIA_OPERATOR_CONFIG_FILE=" + systemdEscape(configPath) + "\nExecStart=" + systemdEscape(flockPath) + " -n " + systemdEscape(lockPath) + " " + systemdEscape(operatorPath) + " backup tick\n"
-	timer := "[Unit]\nDescription=OpenLia backup schedule\n\n[Timer]\nOnCalendar=*-*-* *:*:00\nPersistent=true\nAccuracySec=1s\nUnit=" + unitName + ".service\n\n[Install]\nWantedBy=timers.target\n"
-	if err := AtomicWriteFile(servicePath, []byte(service), 0o644); err != nil {
-		return err
-	}
-	if err := AtomicWriteFile(timerPath, []byte(timer), 0o644); err != nil {
-		return err
-	}
-	if err := reloadAndEnableSystemdTimer(runSystemctl, unitName); err != nil {
-		return fmt.Errorf("enable backup timer: %w", err)
-	}
-	return nil
 }
 
 func removeSystemdBackupSchedule(config Config) error {
@@ -381,34 +365,6 @@ func systemdEscape(value string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(value, "\\", "\\\\"), " ", "\\x20")
 }
 
-func installLaunchdBackupSchedule(config Config) error {
-	if config.OperatorConfigFile == "" {
-		return fmt.Errorf("operator config path is not available for launchd")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Join(home, "Library", "LaunchAgents"), 0o700); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Join(home, "Library", "Logs"), 0o700); err != nil {
-		return err
-	}
-	program, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	label := "com.openlia.backup." + config.ProjectName
-	plistPath := filepath.Join(home, "Library", "LaunchAgents", label+".plist")
-	logPath := filepath.Join(home, "Library", "Logs", "openlia-backup-"+config.ProjectName+".log")
-	plist := fmt.Sprintf("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>%s</string><key>ProgramArguments</key><array><string>%s</string><string>backup</string><string>tick</string></array><key>StartInterval</key><integer>60</integer><key>EnvironmentVariables</key><dict><key>OPENLIA_CONFIG</key><string>%s</string></dict><key>StandardOutPath</key><string>/dev/null</string><key>StandardErrorPath</key><string>%s</string><key>RunAtLoad</key><true/></dict></plist>\n", xmlEscape(label), xmlEscape(program), xmlEscape(config.OperatorConfigFile), xmlEscape(logPath))
-	if err := AtomicWriteFile(plistPath, []byte(plist), 0o600); err != nil {
-		return err
-	}
-	return exec.Command("launchctl", "load", "-w", plistPath).Run()
-}
-
 func removeLaunchdBackupSchedule(config Config) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -425,11 +381,4 @@ func removeLaunchdBackupSchedule(config Config) error {
 		return err
 	}
 	return nil
-}
-
-func xmlEscape(value string) string {
-	value = strings.ReplaceAll(value, "&", "&amp;")
-	value = strings.ReplaceAll(value, "<", "&lt;")
-	value = strings.ReplaceAll(value, ">", "&gt;")
-	return strings.ReplaceAll(value, "\"", "&quot;")
 }

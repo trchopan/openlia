@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -127,12 +129,45 @@ func (c Compose) Run(ctx context.Context, args ...string) (CommandResult, error)
 }
 
 func (c Compose) composeEnvironment() []string {
+	knownHosts := os.Getenv("OPENLIA_BACKUP_KNOWN_HOSTS_SOURCE")
+	if knownHosts == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			knownHosts = filepath.Join(home, ".ssh", "known_hosts")
+		}
+	}
+	if info, err := os.Stat(knownHosts); err != nil || !info.Mode().IsRegular() {
+		knownHosts = "/dev/null"
+	}
+	awsCredentials := os.Getenv("OPENLIA_AWS_CREDENTIALS_SOURCE")
+	awsConfig := os.Getenv("OPENLIA_AWS_CONFIG_SOURCE")
+	if home, err := os.UserHomeDir(); err == nil {
+		if awsCredentials == "" {
+			awsCredentials = filepath.Join(home, ".aws", "credentials")
+		}
+		if awsConfig == "" {
+			awsConfig = filepath.Join(home, ".aws", "config")
+		}
+	}
+	if info, err := os.Stat(awsCredentials); err != nil || !info.Mode().IsRegular() {
+		awsCredentials = "/dev/null"
+	}
+	if info, err := os.Stat(awsConfig); err != nil || !info.Mode().IsRegular() {
+		awsConfig = "/dev/null"
+	}
 	return []string{
 		"OPENLIA_DATA_ROOT=" + c.Config.DataRoot,
 		"OPENLIA_SYSTEM_SKILLS_ROOT=" + c.Config.SystemSkillsRoot,
 		"OPENLIA_SKILLS_CACHE_ROOT=" + c.Config.SkillsCacheRoot,
 		"OPENLIA_SKILLS_ENV_ROOT=" + c.Config.SkillsEnvRoot,
 		"OPENLIA_SECRET_DIR=" + c.Config.SecretDir,
+		"OPENLIA_META_ROOT=" + c.Config.MetaRoot,
+		"OPENLIA_BACKUP_ROOT=" + c.Config.BackupRoot,
+		"OPENLIA_RUNTIME_UID=" + strconv.Itoa(c.Config.RuntimeUID),
+		"OPENLIA_RUNTIME_GID=" + strconv.Itoa(c.Config.RuntimeGID),
+		"OPENLIA_OPERATION_LOCK=" + c.Config.InstallRoot + ".operation.lock",
+		"OPENLIA_BACKUP_KNOWN_HOSTS_SOURCE=" + knownHosts,
+		"OPENLIA_AWS_CREDENTIALS_SOURCE=" + awsCredentials,
+		"OPENLIA_AWS_CONFIG_SOURCE=" + awsConfig,
 		"OPENLIA_NETWORK_NAME=" + c.Config.NetworkName,
 		"OPENLIA_ENABLED_TOOLS=" + strings.Join(c.Config.EnabledTools, ","),
 	}

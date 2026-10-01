@@ -73,6 +73,83 @@ services:
         max-size: "20m"
         max-file: "5"
 
+  backup-scheduler:
+    image: "${OPENLIA_BACKUP_SCHEDULER_IMAGE:-openlia-backup-scheduler:v2026.9.14}"
+    profiles: ["backup"]
+    build:
+      context: ..
+      dockerfile: docker/backup-scheduler.Dockerfile
+      args:
+        BACKUP_SCHEDULER_BASE_IMAGE: "${BACKUP_SCHEDULER_BASE_IMAGE:-debian}"
+        BACKUP_SCHEDULER_BASE_TAG: "${BACKUP_SCHEDULER_BASE_TAG:-13.4-slim}"
+        BACKUP_SCHEDULER_BASE_DIGEST: "${BACKUP_SCHEDULER_BASE_DIGEST:-sha256:109e2c65005bf160609e4ba6acf7783752f8502ad218e298253428690b9eaa4b}"
+        DEBIAN_SNAPSHOT: "${DEBIAN_SNAPSHOT:-20260505T000000Z}"
+    entrypoint: ["/usr/local/bin/openlia-backup-scheduler"]
+    restart: unless-stopped
+    environment:
+      OPENLIA_OPERATOR_CONFIG_FILE: /etc/openlia/backup-schedule-config.json
+      OPENLIA_BACKUP_KNOWN_HOSTS: /etc/ssh/known_hosts
+      OPENLIA_RUNTIME_UID: "${OPENLIA_RUNTIME_UID:?OPENLIA_RUNTIME_UID is required}"
+      OPENLIA_RUNTIME_GID: "${OPENLIA_RUNTIME_GID:?OPENLIA_RUNTIME_GID is required}"
+      TZ: "${HERMES_TIMEZONE:-Asia/Ho_Chi_Minh}"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
+      AWS_SESSION_TOKEN: "${AWS_SESSION_TOKEN:-}"
+      AWS_PROFILE: "${AWS_PROFILE:-}"
+      AWS_REGION: "${AWS_REGION:-}"
+      AWS_DEFAULT_REGION: "${AWS_DEFAULT_REGION:-}"
+      AWS_SHARED_CREDENTIALS_FILE: /root/.aws/credentials
+      AWS_CONFIG_FILE: /root/.aws/config
+      AWS_SDK_LOAD_CONFIG: "1"
+    read_only: true
+    pids_limit: 64
+    tmpfs:
+      - /run:rw,exec,nosuid,size=16m
+      - /tmp:rw,exec,nosuid,size=64m
+    volumes:
+      - type: bind
+        source: "${OPENLIA_DATA_ROOT:?OPENLIA_DATA_ROOT is required}"
+        target: /runtime/hermes
+        read_only: true
+      - type: bind
+        source: "${OPENLIA_META_ROOT:?OPENLIA_META_ROOT is required}"
+        target: /runtime/meta
+      - type: bind
+        source: "${OPENLIA_BACKUP_ROOT:?OPENLIA_BACKUP_ROOT is required}"
+        target: /runtime/backups
+      - type: bind
+        source: "${OPENLIA_META_ROOT:?OPENLIA_META_ROOT is required}/backup-schedule-config.json"
+        target: /etc/openlia/backup-schedule-config.json
+        read_only: true
+      - type: bind
+        source: "${OPENLIA_OPERATION_LOCK:?OPENLIA_OPERATION_LOCK is required}"
+        target: /run/openlia/operation.lock
+      - type: bind
+        source: "${OPENLIA_BACKUP_KNOWN_HOSTS_SOURCE:-/dev/null}"
+        target: /etc/ssh/known_hosts
+        read_only: true
+      - type: bind
+        source: "${OPENLIA_AWS_CREDENTIALS_SOURCE:-/dev/null}"
+        target: /root/.aws/credentials
+        read_only: true
+      - type: bind
+        source: "${OPENLIA_AWS_CONFIG_SOURCE:-/dev/null}"
+        target: /root/.aws/config
+        read_only: true
+    networks:
+      - openlia-private
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /run/openlia/last-success && test -n \"$$(find /run/openlia/last-success -mmin -3 -print)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
   skill-env-builder:
     image: "${OPENLIA_HERMES_IMAGE:-openlia-hermes:v2026.9.14}"
     profiles: ["operator"]

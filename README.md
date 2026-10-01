@@ -881,14 +881,17 @@ UI while it creates and validates a consistent archive, then restarts them
 before remote upload. Its retained local archive and any S3/rsync copies are
 ciphertext.
 
-New installations install a target-host daily schedule, defaulting to 04:20 in
-the configured IANA timezone. Change `[backup].schedule` with a five-field cron
-expression (for example `"0 2 * * 1"` for Mondays at 02:00), set
+New installations start a Compose backup-scheduler sidecar with a daily
+schedule defaulting to 04:20 in the configured IANA timezone. The sidecar is
+used for both remote Linux and local macOS deployments; no host systemd or
+launchd schedule is required. Change `[backup].schedule` with a five-field
+cron expression (for example `"0 2 * * 1"` for Mondays at 02:00), set
 `schedule_enabled = false` to disable it, and run `openlia backup schedule
 install` after changing the schedule. Scheduled capture is live and
 best-effort: Hermes remains available, but files being changed during capture
 may be retried or cause that backup run to fail. Missed schedule occurrences
-are coalesced into at most one run when the target returns.
+are coalesced into at most one run when the target returns. Existing host
+systemd or launchd schedules are removed when the sidecar is installed.
 
 Configure zero, one, or both remote destinations under `[[backup.destinations]]`:
 
@@ -897,6 +900,8 @@ Configure zero, one, or both remote destinations under `[[backup.destinations]]`
 schedule = "20 4 * * *"
 schedule_enabled = true
 remote_retention = 30
+# Optional target-side SSH known-hosts file used by the backup sidecar.
+# known_hosts = "/root/.ssh/known_hosts"
 
 [[backup.destinations]]
 name = "primary"
@@ -916,15 +921,17 @@ operator_identity_file = "/Users/me/.ssh/openlia-backup-read"
 ```
 
 S3 uses the target's standard AWS credential chain; grant it only the required
-put/list/delete permissions for the configured prefix. The operator machine
-also needs read access to retrieve remote backups. For rsync, provision the
-target-side SSH key at `identity_file` outside `runtime/secrets` and the Hermes
-data directory so the agent container cannot read it. Pin the host in the
-backup service account's `known_hosts`, and configure
-`operator_identity_file` (or an operator-side SSH agent) for recovery. Remote
-retention defaults to 30 successful backups per destination; local retention
-remains five durable archives. `openlia backup status` shows the latest local
-archive and last upload result; `openlia backup list` lists remote archives.
+put/list/delete permissions for the configured prefix. The scheduler sidecar
+forwards target AWS environment credentials and uses the target user's shared
+AWS credentials/config files when present. The operator machine also needs read
+access to retrieve remote backups. For rsync, provision the target-side SSH key
+at `identity_file` outside `runtime/secrets` and the Hermes data directory so
+the agent container cannot read it. Pin the host in the configured target
+`known_hosts` file, and configure `operator_identity_file` (or an operator-side
+SSH agent) for recovery. Remote retention defaults to 30 successful backups per
+destination; local retention remains five durable archives. `openlia backup
+status` shows the latest local archive and last upload result; `openlia backup
+list` lists remote archives.
 If one destination fails, the encrypted local archive remains and the other
 destination is still attempted. Retry the newest artifact with
 `openlia backup push`, or select one retained encrypted archive with

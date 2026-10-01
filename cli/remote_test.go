@@ -17,6 +17,22 @@ func TestOperationCommandIncludesTimezone(t *testing.T) {
 	}
 }
 
+func TestOperationCommandPropagatesBackupCredentialInputs(t *testing.T) {
+	config := defaultConfig()
+	config.Target = "operator@example.test"
+	config.BackupKnownHosts = "/root/.ssh/known_hosts"
+	command := (Remote{Config: config}).operationCommand("backup", "schedule-install", "--json")
+	for _, expected := range []string{
+		"OPENLIA_BACKUP_KNOWN_HOSTS_SOURCE='/root/.ssh/known_hosts'",
+		`AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID-}"`,
+		`AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY-}"`,
+	} {
+		if !strings.Contains(command, expected) {
+			t.Fatalf("operation command missing %q: %s", expected, command)
+		}
+	}
+}
+
 func TestOperationCommandUsesPrivilegedAndUnprivilegedRuntimeIdentities(t *testing.T) {
 	config := defaultConfig()
 	config.Target = "operator@example.test"

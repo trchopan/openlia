@@ -277,8 +277,8 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	if err := validateConfig(config); err != nil {
 		return fail(options, ExitUsage, err.Error(), nil)
 	}
-	if config.Mode != "local" && !targetOperatorAssetsAvailable() {
-		return fail(options, ExitPrereq, "remote deployment requires Linux operator artifacts; run `make build` first", nil)
+	if !targetOperatorAssetsAvailable() {
+		return fail(options, ExitPrereq, "deployment requires Linux operator artifacts for the backup scheduler; run `make build` first", nil)
 	}
 	if err := ensureBackupIdentity(&config); err != nil {
 		return fail(options, ExitFailure, "backup encryption key setup failed: "+err.Error(), nil)
@@ -468,6 +468,13 @@ func commandLifecycle(options Options, action string, args []string) int {
 	raw, err := deployment.deploy(ctx, action, start, "all")
 	if err != nil {
 		return fail(options, ExitFailure, err.Error(), map[string]any{"action": action})
+	}
+	scheduleAction := "schedule-install"
+	if action == "stop" || !config.BackupScheduleEnabled {
+		scheduleAction = "schedule-remove"
+	}
+	if _, err := deployment.operation(ctx, "backup", nil, scheduleAction, "--json"); err != nil {
+		return fail(options, ExitFailure, "backup scheduler reconciliation failed: "+err.Error(), map[string]any{"action": action})
 	}
 	if action == "deploy" {
 		if _, err := deployment.operation(ctx, "profile", nil, "sync", "--json"); err != nil {
@@ -732,8 +739,8 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 		}
 	}
 	if component == "openlia" {
-		if config.Mode != "local" && !targetOperatorAssetsAvailable() {
-			return fail(options, ExitPrereq, "remote OpenLia updates require Linux operator artifacts; run `make build` first", nil)
+		if !targetOperatorAssetsAvailable() {
+			return fail(options, ExitPrereq, "OpenLia updates require Linux operator artifacts for the backup scheduler; run `make build` first", nil)
 		}
 		archive, digest, err := releaseArchive(assets)
 		if err != nil {
@@ -763,6 +770,13 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 			if err != nil {
 				return fail(options, ExitFailure, "optional runtime reconciliation failed: "+err.Error(), nil)
 			}
+		}
+		scheduleAction := "schedule-install"
+		if !config.BackupScheduleEnabled {
+			scheduleAction = "schedule-remove"
+		}
+		if _, err := deployment.operation(ctx, "backup", nil, scheduleAction, "--json"); err != nil {
+			return fail(options, ExitFailure, "backup scheduler reconciliation failed: "+err.Error(), nil)
 		}
 		healthRaw, healthErr := deployment.health(ctx, true, false)
 		state, stateOK := deploymentResultState(healthRaw)
@@ -1725,7 +1739,13 @@ func commandBackupSchedule(options Options, args []string, config Config, ctx co
 		}
 		config.BackupScheduleEnabled = true
 	}
-	raw, err := newDeployment(config).operation(ctx, "backup", nil, action, "--json")
+	deployment := newDeployment(config)
+	if action == "schedule-install" {
+		if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
+			return fail(options, ExitFailure, "backup scheduler mount generation failed: "+err.Error(), nil)
+		}
+	}
+	raw, err := deployment.operation(ctx, "backup", nil, action, "--json")
 	if err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}

@@ -101,6 +101,7 @@ type Config struct {
 	EnabledTools            []string
 	WorkspaceGit            WorkspaceGitConfig
 	BackupIdentityFile      string
+	BackupKnownHosts        string
 	BackupRecipient         string
 	BackupSchedule          string
 	BackupScheduleEnabled   bool
@@ -508,6 +509,11 @@ func parseConfigUnchecked(data string) (Config, error) {
 				if err == nil {
 					config.BackupIdentityFile = expandTilde(config.BackupIdentityFile)
 				}
+			case "backup.known_hosts":
+				config.BackupKnownHosts, err = parseString(value)
+				if err == nil {
+					config.BackupKnownHosts = expandTilde(config.BackupKnownHosts)
+				}
 			case "backup.recipient":
 				config.BackupRecipient, err = parseString(value)
 			case "backup.schedule":
@@ -598,6 +604,11 @@ func validateConfig(config Config) error {
 		}
 		if isInsideWorkingTree(config.BackupIdentityFile) {
 			return errors.New("backup.identity_file must be outside the OpenLia checkout")
+		}
+	}
+	if config.BackupKnownHosts != "" {
+		if err := validateAbsoluteRoot(config.BackupKnownHosts, "backup.known_hosts"); err != nil {
+			return err
 		}
 	}
 	if config.BackupScheduleEnabled || config.BackupSchedule != "" {
@@ -1215,6 +1226,9 @@ func renderConfig(config Config) string {
 	builder.WriteString("]\n")
 	fmt.Fprintf(&builder, "\n[workspace_git]\nenabled = %t\nprovider = %q\nremote = %q\nbranch = %q\nschedule = %q\nauthor_name = %q\nauthor_email = %q\n", config.WorkspaceGit.Enabled, config.WorkspaceGit.Provider, config.WorkspaceGit.Remote, config.WorkspaceGit.Branch, config.WorkspaceGit.Schedule, config.WorkspaceGit.AuthorName, config.WorkspaceGit.AuthorEmail)
 	fmt.Fprintf(&builder, "\n[backup]\nschedule = %q\nschedule_enabled = %t\nremote_retention = %d\n", config.BackupSchedule, config.BackupScheduleEnabled, config.BackupRemoteRetention)
+	if config.BackupKnownHosts != "" {
+		fmt.Fprintf(&builder, "known_hosts = %q\n", config.BackupKnownHosts)
+	}
 	if config.BackupIdentityFile != "" {
 		fmt.Fprintf(&builder, "identity_file = %q\n", config.BackupIdentityFile)
 	}

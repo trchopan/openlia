@@ -39,6 +39,7 @@ type Config struct {
 	BackupScheduleEnabled       bool
 	BackupRemoteRetention       int
 	BackupDestinations          []BackupDestination
+	BackupNamespaceRoot         string
 	OperatorConfigFile          string
 	MetaRoot                    string
 	StateFile                   string

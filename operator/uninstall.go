@@ -49,7 +49,7 @@ func Uninstall(ctx context.Context, config Config, compose Compose) (UninstallRe
 		return UninstallResult{}, fmt.Errorf("cannot quiesce backup before uninstall: %w", err)
 	}
 	defer backupUnlock()
-	if _, err := RemoveBackupSchedule(config); err != nil {
+	if _, err := RemoveBackupScheduleContext(ctx, config, compose); err != nil {
 		return UninstallResult{}, fmt.Errorf("backup schedule cleanup failed; installation root was preserved: %w", err)
 	}
 	current := filepath.Join(config.InstallRoot, "current")
