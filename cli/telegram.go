@@ -369,6 +369,7 @@ func formatTelegramHumanOutput(bot tgUser, events []TelegramActivityEvent, users
 		sb.WriteString("  2. Click 'Start' or send a message (e.g. '/start')\n")
 		sb.WriteString(fmt.Sprintf("  3. (Optional) Add %s to your group and send a message\n", botDisplay))
 		sb.WriteString("  4. Run 'openlia telegram id' again\n")
+		sb.WriteString("\nThe bot must receive a message before its chat ID can be discovered.\n")
 		return sb.String()
 	}
 
@@ -409,7 +410,7 @@ func formatTelegramHumanOutput(bot tgUser, events []TelegramActivityEvent, users
 		}
 	}
 
-	sb.WriteString("\nSuggested OpenLia configuration (in your secret source / hermes.env):\n")
+	sb.WriteString("\nSuggested OpenLia configuration (in your protected dotenv source / hermes.env):\n")
 	sb.WriteString(fmt.Sprintf("TELEGRAM_BOT_TOKEN=%s\n", token))
 	if len(users) > 0 {
 		var userIDs []string
@@ -418,6 +419,9 @@ func formatTelegramHumanOutput(bot tgUser, events []TelegramActivityEvent, users
 		}
 		sb.WriteString(fmt.Sprintf("TELEGRAM_ALLOWED_USERS=%s\n", strings.Join(userIDs, ",")))
 	}
+	sb.WriteString("\nTo make scheduled tasks deliver to one of the chats above, add:\n")
+	sb.WriteString("TELEGRAM_HOME_CHANNEL=<copy the selected Chat ID above>\n")
+	sb.WriteString("Then run 'openlia auth rotate'; a running Hermes service is recreated automatically.\n")
 
 	return sb.String()
 }
@@ -449,7 +453,9 @@ Usage:
   openlia telegram id [--token TOKEN]
 
 Retrieve Telegram user IDs, chat IDs, and recent messages using your BotFather bot token.
-The discovered IDs can be used for TELEGRAM_ALLOWED_USERS in your OpenLia runtime secrets.
+The discovered user IDs can be used for TELEGRAM_ALLOWED_USERS, and a selected
+chat ID can be used for TELEGRAM_HOME_CHANNEL, in your protected dotenv source.
+The bot must have received an update from a chat before its ID can be discovered.
 
 Flags:
   --token string   Telegram bot token (format: '<bot_id>:<secret>')

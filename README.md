@@ -770,6 +770,20 @@ The source file may contain `COPILOT_GITHUB_TOKEN`, `OPENAI_GATEWAY_API_KEY`,
 Classic `ghp_*` tokens are not valid for Copilot. Hermes reads the file through
 its `secrets.command` source; its values are never printed by OpenLia.
 
+Telegram home-channel settings belong in this same protected dotenv source. Use
+the numeric chat ID shown by `openlia telegram id`:
+
+```dotenv
+TELEGRAM_HOME_CHANNEL=-1001234567890
+TELEGRAM_HOME_CHANNEL_NAME="OpenLia home"
+```
+
+`TELEGRAM_HOME_CHANNEL` may be a private-chat ID or a group/channel ID. Group
+and supergroup IDs are normally negative. The bot must have received an update
+from the chat before `openlia telegram id` can discover its ID. After editing
+the source, run `openlia auth rotate`; if Hermes is running, OpenLia recreates
+it automatically. The setting survives OpenLia updates.
+
 Do not set `OPENAI_BASE_URL` for this provider chain. Assign the Locho service
 the `openai-gateway` role and declare its explicit `/v1` URL in the matching
 `fallback_providers` entry. Hermes keeps `openai-api` pointed at official OpenAI.

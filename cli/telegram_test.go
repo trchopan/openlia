@@ -193,6 +193,9 @@ func TestTelegramIDSuccess(t *testing.T) {
 	if !strings.Contains(out, "TELEGRAM_ALLOWED_USERS=") {
 		t.Errorf("expected TELEGRAM_ALLOWED_USERS in output: %s", out)
 	}
+	if !strings.Contains(out, "TELEGRAM_HOME_CHANNEL=<copy the selected Chat ID above>") || !strings.Contains(out, "openlia auth rotate") {
+		t.Errorf("expected home channel setup guidance in output: %s", out)
+	}
 }
 
 func TestTelegramIDJSONOutput(t *testing.T) {
@@ -345,6 +348,9 @@ func TestTelegramIDEmptyUpdates(t *testing.T) {
 	}
 	if !strings.Contains(out, "search for @OpenLiaTestBot") || !strings.Contains(out, "/start") {
 		t.Errorf("expected step-by-step guidance in output: %s", out)
+	}
+	if !strings.Contains(out, "must receive a message before its chat ID can be discovered") {
+		t.Errorf("expected chat discovery guidance in output: %s", out)
 	}
 }
 
