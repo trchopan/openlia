@@ -11,6 +11,7 @@ import type {
   WorkspaceWriteRequest,
 } from "../shared/api";
 import { Authenticator } from "./auth";
+import { exportArchive } from "./export";
 import { SkillService } from "./skills";
 import { WorkspaceError, WorkspaceService } from "./workspace";
 
@@ -283,6 +284,24 @@ export function createWorkspaceHandler(
             ...securityHeaders(),
             "Content-Disposition": `attachment; filename="${file.filename}"`,
             "Content-Type": "application/octet-stream",
+          },
+        });
+      }
+      if (
+        request.method === "GET" &&
+        url.pathname === "/api/workspace/export"
+      ) {
+        const zipBytes = exportArchive({
+          maxDownloadBytes: options.maxDownloadBytes,
+          skillsRoot,
+          workspaceRoot: options.workspaceRoot,
+        });
+        const dateStr = new Date().toISOString().slice(0, 10);
+        return new Response(zipBytes, {
+          headers: {
+            ...securityHeaders(),
+            "Content-Disposition": `attachment; filename="openlia-workspace-${dateStr}.zip"`,
+            "Content-Type": "application/zip",
           },
         });
       }

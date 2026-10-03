@@ -269,6 +269,51 @@ describe("CopyLinkButton and document copy integration", () => {
     expect(copied).toBe(expectedLink);
   });
 
+  test("WorkspaceHeader renders export button and calls onExport on click", () => {
+    let exported = false;
+    const { rerender } = render(
+      <WorkspaceHeader
+        authRequired={false}
+        dirty={false}
+        exporting={false}
+        file={null}
+        filesButtonRef={{ current: null }}
+        git={null}
+        onExport={() => {
+          exported = true;
+        }}
+        onOpenFiles={() => undefined}
+        onSignOut={() => undefined}
+      />,
+    );
+
+    const exportBtn = screen.getByRole("button", {
+      name: "Export workspace and skills to ZIP",
+    });
+    expect(exportBtn).toBeInTheDocument();
+    expect(exportBtn).toBeEnabled();
+    expect(exportBtn).toHaveTextContent("Export");
+
+    fireEvent.click(exportBtn);
+    expect(exported).toBe(true);
+
+    rerender(
+      <WorkspaceHeader
+        authRequired={false}
+        dirty={false}
+        exporting={true}
+        file={null}
+        filesButtonRef={{ current: null }}
+        git={null}
+        onExport={() => undefined}
+        onOpenFiles={() => undefined}
+        onSignOut={() => undefined}
+      />,
+    );
+    expect(exportBtn).toBeDisabled();
+    expect(exportBtn).toHaveTextContent("Exporting...");
+  });
+
   test("DocumentPane renders copy link button in toolbar", async () => {
     let copied = "";
     Object.defineProperty(navigator, "clipboard", {

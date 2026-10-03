@@ -635,4 +635,58 @@ describe("workspace HTTP handler", () => {
       rmSync(staticDir, { force: true, recursive: true });
     }
   });
+
+  test("exports workspace and skills as a downloadable zip archive", async () => {
+    const skillsDir = mkdtempSync(join(tmpdir(), "openlia-skills-export-"));
+    try {
+      writeFileSync(join(root, "notes.md"), "# Hello Notes");
+      mkdirSync(join(skillsDir, "test-skill"), { recursive: true });
+      writeFileSync(
+        join(skillsDir, "test-skill", "SKILL.md"),
+        "---\nname: test-skill\n---",
+      );
+
+      const customHandler = createWorkspaceHandler({
+        skillsRoot: skillsDir,
+        workspaceRoot: root,
+      });
+
+      const response = await customHandler(
+        new Request("http://localhost/api/workspace/export"),
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("application/zip");
+      expect(response.headers.get("content-disposition")).toMatch(
+        /^attachment; filename="openlia-workspace-\d{4}-\d{2}-\d{2}\.zip"$/,
+      );
+
+      const zipBytes = new Uint8Array(await response.arrayBuffer());
+      const tempZip = join(root, "exported.zip");
+      writeFileSync(tempZip, zipBytes);
+
+      const proc = Bun.spawnSync(["unzip", "-l", tempZip]);
+      expect(proc.exitCode).toBe(0);
+      const output = new TextDecoder().decode(proc.stdout);
+      expect(output).toContain("workspace/notes.md");
+      expect(output).toContain("skills/test-skill/SKILL.md");
+    } finally {
+      rmSync(skillsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("requires authentication for /api/workspace/export when auth is enabled", async () => {
+    const authHandler = createWorkspaceHandler({
+      authRequired: true,
+      passwordHash: await Bun.password.hash("pw", { algorithm: "argon2id" }),
+      workspaceRoot: root,
+    });
+
+    const response = await authHandler(
+      new Request("http://localhost/api/workspace/export"),
+    );
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({
+      error: "authentication_required",
+    });
+  });
 });

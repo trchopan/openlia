@@ -48,6 +48,8 @@ export interface WorkspaceApi {
   loadGitStatus(): Promise<WorkspaceGitStatus>;
   loadActivity(): Promise<WorkspaceActivityResponse>;
   downloadUrl(path: string): string;
+  exportWorkspaceUrl(): string;
+  downloadWorkspaceExport(): Promise<void>;
 
   loadSkills(): Promise<SkillsListResponse>;
   loadSkillDetail(id: string): Promise<SkillDetailResponse>;
@@ -322,6 +324,33 @@ export const httpWorkspaceApi: WorkspaceApi = {
     ),
   downloadUrl: (path) =>
     `/api/workspace/download?${new URLSearchParams({ path })}`,
+  exportWorkspaceUrl: () => "/api/workspace/export",
+  downloadWorkspaceExport: async () => {
+    const res = await fetch("/api/workspace/export");
+    if (!res.ok) {
+      let errorMsg = "Export failed";
+      try {
+        const payload = (await res.json()) as { error?: string };
+        if (payload?.error) errorMsg = payload.error;
+      } catch {}
+      throw new Error(errorMsg);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get("content-disposition");
+    let filename = "openlia-workspace-export.zip";
+    if (disposition) {
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      if (match?.[1]) filename = match[1];
+    }
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  },
 
   loadSkills: () =>
     requestJson<SkillsListResponse>("/api/skills/list", isSkillsListResponse),
