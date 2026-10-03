@@ -909,6 +909,32 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 	if strings.Index(text, "env_file:") < strings.Index(text, "OPENLIA_BROWSER_MCP_URL:") {
 		t.Fatal("Hermes env_file interrupts its generated environment mapping")
 	}
+	start := strings.Index(text, "  locho-laptop:\n")
+	if start < 0 {
+		t.Fatalf("generated Compose has no locho-laptop service:\n%s", text)
+	}
+	serviceStart := start + len("  locho-laptop:\n")
+	end := len(text)
+	if relative := strings.Index(text[serviceStart:], "\n  locho-"); relative >= 0 {
+		end = serviceStart + relative
+	} else if relative := strings.Index(text[serviceStart:], "\nnetworks:"); relative >= 0 {
+		end = serviceStart + relative
+	}
+	block := text[start:end]
+	relayVolume := "        target: /etc/locho/relay.toml\n        read_only: true\n"
+	relayEnvFile := fmt.Sprintf("    env_file:\n      - %q\n", config.LochoRelaySecrets)
+	volumeIndex := strings.Index(block, relayVolume)
+	envFileIndex := strings.Index(block, relayEnvFile)
+	networksIndex := strings.Index(block, "    networks:\n")
+	if volumeIndex < 0 || envFileIndex < 0 || networksIndex < 0 || volumeIndex > envFileIndex || envFileIndex > networksIndex {
+		t.Fatalf("attachment relay fields are not service-level siblings in order:\n%s", block)
+	}
+	if !strings.Contains(block, "\"--relay-config\", \"/etc/locho/relay.toml\"") {
+		t.Fatalf("attachment command is missing relay config:\n%s", block)
+	}
+	if strings.Contains(block, filepath.Join(config.SecretDir, "locho-relay.env")) {
+		t.Fatalf("attachment relay secrets were placed in Hermes' mounted secrets directory:\n%s", block)
+	}
 }
 
 func TestAttachmentInventoryCarriesHTTPTimeout(t *testing.T) {
@@ -989,6 +1015,17 @@ func TestGeneratedLochoHostHasOneRelayEnvFile(t *testing.T) {
 	block := text[start:end]
 	if strings.Count(block, "    env_file:\n") != 1 {
 		t.Fatalf("locho-host env_file count = %d:\n%s", strings.Count(block, "    env_file:\n"), block)
+	}
+	relayVolume := "        target: /etc/locho/relay.toml\n        read_only: true\n"
+	relayEnvFile := fmt.Sprintf("    env_file:\n      - %q\n", config.LochoRelaySecrets)
+	volumeIndex := strings.Index(block, relayVolume)
+	envFileIndex := strings.Index(block, relayEnvFile)
+	dependsOnIndex := strings.Index(block, "    depends_on:\n")
+	if volumeIndex < 0 || envFileIndex < 0 || dependsOnIndex < 0 || volumeIndex > envFileIndex || envFileIndex > dependsOnIndex {
+		t.Fatalf("locho-host relay fields are not service-level siblings in order:\n%s", block)
+	}
+	if !strings.Contains(block, "--relay-config /etc/locho/relay.toml") {
+		t.Fatalf("locho-host command is missing relay config:\n%s", block)
 	}
 }
 
@@ -1241,7 +1278,7 @@ func TestLochoHostRuntimeConfigIsValidTOML(t *testing.T) {
 	}
 }
 
-func TestGeneratedLochoHostComposeValidates(t *testing.T) {
+func TestGeneratedLochoComposeValidates(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker CLI is unavailable")
 	}
@@ -1281,11 +1318,18 @@ func TestGeneratedLochoHostComposeValidates(t *testing.T) {
 	if err := os.WriteFile(config.LochoRelaySecrets, []byte("LOCHO_RELAY_TOKEN=test\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	attachment := filepath.Join(config.LochoRoot, "laptop", "attachments.toml")
+	if err := os.MkdirAll(filepath.Dir(attachment), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(attachment, []byte("host_id = \"laptop\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"genai:http:capability\"\nlisten_port = 8088\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := GenerateAttachments(config); err != nil {
 		t.Fatal(err)
 	}
 	if result, err := NewCompose(config, nil).Run(context.Background(), "config", "--quiet"); err != nil {
-		t.Fatalf("generated Locho host Compose is invalid: %v\n%s\n%s", err, result.Stdout, result.Stderr)
+		t.Fatalf("generated Locho Compose is invalid: %v\n%s\n%s", err, result.Stdout, result.Stderr)
 	}
 }
 
