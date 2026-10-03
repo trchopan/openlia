@@ -847,10 +847,30 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 	config.ServiceRoles = map[string]string{"laptop.openlia-browser": "openlia-browser"}
 	config.OpenWebUIHost = "127.0.0.1"
 	config.OpenWebUIPort = 8090
+	config.LochoRelayConfig = filepath.Join(runtimeRoot, "locho", "relay.toml")
+	config.LochoRelaySecrets = filepath.Join(runtimeRoot, "locho-relay-secrets", "relay.env")
+	if err := os.MkdirAll(filepath.Dir(config.LochoRelayConfig), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.LochoRelayConfig, []byte("include_n0_relays = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(config.SecretDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(config.SecretFile, []byte("COPILOT_GITHUB_TOKEN=gho_testtoken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(config.LochoRelayConfig), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.LochoRelayConfig, []byte("include_n0_relays = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(config.LochoRelaySecrets), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.LochoRelaySecrets, []byte("LOCHO_RELAY_TOKEN=test\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(repo, "docker"), 0o755); err != nil {
@@ -866,18 +886,109 @@ func TestGeneratedAttachmentsContainLochoBuildAndHardening(t *testing.T) {
 	if err := GenerateAttachments(config); err != nil {
 		t.Fatal(err)
 	}
+	info, err := os.Stat(config.LochoRelayConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("relay config permissions = %o", info.Mode().Perm())
+	}
 	data, err := os.ReadFile(config.GeneratedCompose)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, expected := range []string{"locho-laptop:", "build:", "docker/locho.Dockerfile", fmt.Sprintf("user: \"%d:%d\"", config.RuntimeUID, config.RuntimeGID), "cap_drop: [ALL]", "no-new-privileges:true", "OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8932\""} {
+	for _, expected := range []string{"locho-laptop:", "build:", "docker/locho.Dockerfile", fmt.Sprintf("user: \"%d:%d\"", config.RuntimeUID, config.RuntimeGID), "cap_drop: [ALL]", "no-new-privileges:true", "OPENLIA_BROWSER_MCP_URL: \"http://locho-laptop:8932\"", "--relay-config", "/etc/locho/relay.toml", "target: /etc/locho/relay.toml", "locho-relay-secrets/relay.env"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("generated Compose missing %q:\n%s", expected, text)
 		}
 	}
+	if strings.Contains(text, "/runtime/secrets/locho-relay.env") {
+		t.Fatal("relay secrets were placed in Hermes' mounted secrets directory")
+	}
 	if strings.Index(text, "env_file:") < strings.Index(text, "OPENLIA_BROWSER_MCP_URL:") {
 		t.Fatal("Hermes env_file interrupts its generated environment mapping")
+	}
+}
+
+func TestAttachmentInventoryCarriesHTTPTimeout(t *testing.T) {
+	config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+	if err := os.MkdirAll(filepath.Join(config.LochoRoot, "api"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(config.LochoRoot, "api", "attachments.toml")
+	if err := os.WriteFile(path, []byte("host_id = \"api\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"gateway:http:secret\"\nlisten_port = 8765\nhttp_timeout_secs = 9_0 # comment\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ListAttachments(config)
+	if err != nil || len(result.Hosts) != 1 || result.Hosts[0].Services[0].HTTPTimeoutSecs != 90 {
+		t.Fatalf("attachment timeout inventory = %#v, err=%v", result, err)
+	}
+	for _, value := range []string{"0", "301"} {
+		if err := os.WriteFile(path, []byte("host_id = \"api\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"gateway:http:secret\"\nlisten_port = 8765\nhttp_timeout_secs = "+value+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ListAttachments(config); err == nil {
+			t.Fatalf("invalid HTTP timeout %s was accepted", value)
+		}
+	}
+	if err := os.WriteFile(path, []byte("host_id = \"api\"\nlisten_host = \"127.0.0.1\"\n[[services]]\ncapability = \"database:tcp:secret\"\nlisten_port = 5432\nhttp_timeout_secs = 90\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ListAttachments(config); err == nil {
+		t.Fatal("HTTP timeout on TCP service was accepted")
+	}
+}
+
+func TestGeneratedLochoHostHasOneRelayEnvFile(t *testing.T) {
+	repo := t.TempDir()
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	config := testConfig(repo, runtimeRoot)
+	config.WorkspaceUIHost = "127.0.0.1"
+	config.WorkspaceUIAuthRequired = true
+	config.WorkspaceUIPasswordHashFile = filepath.Join(runtimeRoot, "secrets", "workspace-ui-password.hash")
+	config.OpenWebUIHost = "127.0.0.1"
+	config.OpenWebUIAuth = true
+	config.LochoHostEnabled = true
+	config.LochoHostRoot = filepath.Join(runtimeRoot, "locho-host")
+	config.LochoHostConfig = filepath.Join(config.LochoHostRoot, "locho.toml")
+	config.LochoHostStateRoot = filepath.Join(config.LochoHostRoot, "state")
+	config.LochoRelayConfig = filepath.Join(runtimeRoot, "locho", "relay.toml")
+	config.LochoRelaySecrets = filepath.Join(runtimeRoot, "locho-relay-secrets", "relay.env")
+	if err := os.MkdirAll(filepath.Dir(config.LochoRelayConfig), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.LochoRelayConfig, []byte("include_n0_relays = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "docker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := GenerateAttachments(config); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(config.GeneratedCompose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	start := strings.Index(text, "  locho-host:\n")
+	end := -1
+	if start >= 0 {
+		serviceStart := start + len("  locho-host:\n")
+		end = len(text)
+		if relative := strings.Index(text[serviceStart:], "\n  locho-"); relative >= 0 {
+			end = serviceStart + relative
+		} else if relative := strings.Index(text[serviceStart:], "\nnetworks:"); relative >= 0 {
+			end = serviceStart + relative
+		}
+	}
+	if start < 0 || end < 0 {
+		t.Fatalf("generated Compose has no isolated locho-host service:\n%s", text)
+	}
+	block := text[start:end]
+	if strings.Count(block, "    env_file:\n") != 1 {
+		t.Fatalf("locho-host env_file count = %d:\n%s", strings.Count(block, "    env_file:\n"), block)
 	}
 }
 
@@ -1145,6 +1256,8 @@ func TestGeneratedLochoHostComposeValidates(t *testing.T) {
 	config.LochoHostRoot = filepath.Join(runtimeRoot, "locho-host")
 	config.LochoHostConfig = filepath.Join(config.LochoHostRoot, "locho.toml")
 	config.LochoHostStateRoot = filepath.Join(config.LochoHostRoot, "state")
+	config.LochoRelayConfig = filepath.Join(runtimeRoot, "locho", "relay.toml")
+	config.LochoRelaySecrets = filepath.Join(runtimeRoot, "locho-relay-secrets", "relay.env")
 	config.WorkspaceUIHost = "127.0.0.1"
 	config.WorkspaceUIAuthRequired = true
 	config.WorkspaceUIPasswordHashFile = filepath.Join(config.SecretDir, "workspace-ui-password.hash")
@@ -1154,6 +1267,18 @@ func TestGeneratedLochoHostComposeValidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(config.SecretFile, []byte("COPILOT_GITHUB_TOKEN=gho_testtoken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(config.LochoRelayConfig), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.LochoRelayConfig, []byte("include_n0_relays = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(config.LochoRelaySecrets), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.LochoRelaySecrets, []byte("LOCHO_RELAY_TOKEN=test\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := GenerateAttachments(config); err != nil {

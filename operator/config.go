@@ -53,6 +53,8 @@ type Config struct {
 	LochoVersion                string
 	LochoX8664SHA256            string
 	LochoARM64SHA256            string
+	LochoRelayConfig            string
+	LochoRelaySecrets           string
 	EnabledSkills               []string
 	EnabledTools                []string
 	SkillsConfigured            bool
@@ -245,6 +247,8 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		LochoVersion:            getOr(values, "OPENLIA_LOCHO_VERSION", "1.2.0"),
 		LochoX8664SHA256:        getOr(values, "OPENLIA_LOCHO_X86_64_SHA256", "7687311a3fe9671ac6f75427712dc556b15517493e892d9f81be7d0355bdd5f1"),
 		LochoARM64SHA256:        getOr(values, "OPENLIA_LOCHO_ARM64_SHA256", "80d089b3fdabe063b4c89fc6685e9bd0f297190d1af86d0f54624ba63d217b97"),
+		LochoRelayConfig:        values["OPENLIA_LOCHO_RELAY_CONFIG"],
+		LochoRelaySecrets:       values["OPENLIA_LOCHO_RELAY_SECRETS"],
 		ExternalNetwork:         values["OPENLIA_EXTERNAL_NETWORK"],
 		APIHost:                 getOr(values, "OPENLIA_API_HOST", "127.0.0.1"),
 		WorkspaceUIPort:         8089,
@@ -563,6 +567,9 @@ func (c Config) ValidatePaths() error {
 			return fmt.Errorf("locho-host requires Open WebUI authentication")
 		}
 	}
+	if c.LochoRelaySecrets != "" && c.LochoRelayConfig == "" {
+		return fmt.Errorf("Locho relay secrets require a relay configuration")
+	}
 	if err := validateFallbackProviders(c.FallbackProviders); err != nil {
 		return err
 	}
@@ -610,6 +617,18 @@ func (c Config) ValidatePaths() error {
 		{"secret-dir", c.SecretDir},
 		{"skills-cache-root", c.SkillsCacheRoot},
 		{"skills-env-root", c.SkillsEnvRoot},
+	}
+	if c.LochoRelayConfig != "" {
+		paths = append(paths, struct {
+			label string
+			path  string
+		}{"locho-relay-config", c.LochoRelayConfig})
+	}
+	if c.LochoRelaySecrets != "" {
+		paths = append(paths, struct {
+			label string
+			path  string
+		}{"locho-relay-secrets", c.LochoRelaySecrets})
 	}
 	if c.OpenWebUIHost != "" {
 		paths = append(paths, struct {

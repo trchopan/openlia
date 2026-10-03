@@ -703,6 +703,15 @@ mode-`0600` file through a trusted channel, and start both local listeners:
 locho attach --config openlia-attachments.toml
 ```
 
+Locho `1.2.0` also supports custom relay transports and configurable HTTP
+timeouts. Set `relay_config` in a `[locho]` section to a protected relay TOML
+file and, when needed, set `relay_secrets` there to a separate mode-0600 dotenv file. The
+relay file is mounted into OpenLia's Locho containers; relay bearer tokens are
+injected only into Locho processes and never written to generated Compose or
+OpenLia configuration. Clients must export matching `token_env` variables and
+use the same relay file with `--relay-config`. Attachment HTTP services may set
+`http_timeout_secs = 1..300` per service; the default remains 60 seconds.
+
 Then open `http://127.0.0.1:8089` for Workspace UI and
 `http://127.0.0.1:8090` for Open WebUI. The attachment file contains service
 capabilities equivalent to passwords. Do not commit it, email it, or place it in

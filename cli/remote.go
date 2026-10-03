@@ -131,6 +131,13 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 	if knownHosts == "" {
 		knownHosts = "/root/.ssh/known_hosts"
 	}
+	relayConfigPath, relaySecretsPath := "", ""
+	if remote.Config.LochoRelayConfigSource != "" {
+		relayConfigPath = remote.rootPath("runtime", "locho", "relay.toml")
+	}
+	if remote.Config.LochoRelaySecretsSource != "" {
+		relaySecretsPath = remote.rootPath("runtime", "locho-relay-secrets", "relay.env")
+	}
 	environment := []string{
 		"OPENLIA_LOCAL_MODE='false'",
 		"OPENLIA_RUNTIME_UID='10000'",
@@ -151,6 +158,8 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"OPENLIA_LOCHO_VERSION=" + shellQuote(remote.Config.LochoVersion),
 		"OPENLIA_LOCHO_X86_64_SHA256=" + shellQuote(remote.Config.LochoX8664SHA256),
 		"OPENLIA_LOCHO_ARM64_SHA256=" + shellQuote(remote.Config.LochoARM64SHA256),
+		"OPENLIA_LOCHO_RELAY_CONFIG=" + shellQuote(relayConfigPath),
+		"OPENLIA_LOCHO_RELAY_SECRETS=" + shellQuote(relaySecretsPath),
 		"HERMES_BASE_TAG=" + shellQuote(remote.Config.HermesTag),
 		"HERMES_BASE_DIGEST=" + shellQuote(remote.Config.HermesDigest),
 		"DEBIAN_SNAPSHOT=" + shellQuote(toolcatalog.DefaultDebianSnapshot),
@@ -581,6 +590,13 @@ func operationEnvironment(config Config, operationRoot string) []string {
 	if knownHosts == "" {
 		knownHosts = filepath.Join(home, ".ssh", "known_hosts")
 	}
+	relayConfigPath, relaySecretsPath := "", ""
+	if config.LochoRelayConfigSource != "" {
+		relayConfigPath = filepath.Join(config.InstallRoot, "runtime", "locho", "relay.toml")
+	}
+	if config.LochoRelaySecretsSource != "" {
+		relaySecretsPath = filepath.Join(config.InstallRoot, "runtime", "locho-relay-secrets", "relay.env")
+	}
 	return []string{
 		"OPENLIA_CLI_CONFIG_FILE=" + operatorConfigFile,
 		"OPENLIA_LOCAL_MODE=true",
@@ -602,6 +618,8 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_LOCHO_VERSION=" + config.LochoVersion,
 		"OPENLIA_LOCHO_X86_64_SHA256=" + config.LochoX8664SHA256,
 		"OPENLIA_LOCHO_ARM64_SHA256=" + config.LochoARM64SHA256,
+		"OPENLIA_LOCHO_RELAY_CONFIG=" + relayConfigPath,
+		"OPENLIA_LOCHO_RELAY_SECRETS=" + relaySecretsPath,
 		"HERMES_BASE_TAG=" + config.HermesTag,
 		"HERMES_BASE_DIGEST=" + config.HermesDigest,
 		"DEBIAN_SNAPSHOT=" + toolcatalog.DefaultDebianSnapshot,

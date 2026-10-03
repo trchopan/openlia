@@ -265,6 +265,12 @@ func scheduleRuntimeConfig(config Config) Config {
 	config.DataRoot = "/runtime/hermes"
 	config.SystemSkillsRoot = "/runtime/system-skills"
 	config.LochoRoot = "/runtime/locho"
+	if config.LochoRelayConfig != "" {
+		config.LochoRelayConfig = "/runtime/locho/relay.toml"
+	}
+	if config.LochoRelaySecrets != "" {
+		config.LochoRelaySecrets = "/runtime/locho-relay-secrets/relay.env"
+	}
 	config.SecretDir = "/runtime/secrets"
 	config.SecretFile = "/runtime/secrets/hermes.env"
 	config.BackupRoot = "/runtime/backups"

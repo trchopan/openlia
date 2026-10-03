@@ -16,6 +16,7 @@ type DeployOptions struct {
 	Action             string
 	Component          string
 	ForceStart         bool
+	ForceRecreate      bool
 	HealthAttempts     int
 	HealthPollInterval time.Duration
 }
@@ -159,6 +160,9 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 			args = []string{"up", "-d", "--force-recreate"}
 		case options.Component == "all":
 			args = []string{"up", "-d", "--remove-orphans"}
+			if options.ForceRecreate {
+				args = []string{"up", "-d", "--force-recreate", "--remove-orphans"}
+			}
 		case options.Component == "hermes":
 			args = []string{"up", "-d", "--no-deps", "hermes"}
 		case options.Component == "workspace-ui":
@@ -171,6 +175,9 @@ func Deploy(ctx context.Context, config Config, compose Compose, options DeployO
 				return DeployResult{}, fmt.Errorf("stack was not started")
 			}
 			args = []string{"up", "-d"}
+			if options.ForceRecreate {
+				args = append(args, "--force-recreate")
+			}
 			args = append(args, append([]string{"--no-deps"}, services...)...)
 		}
 		lochoHostWasRunning := false

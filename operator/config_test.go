@@ -75,6 +75,20 @@ func TestConfigValidatePaths(t *testing.T) {
 	}
 }
 
+func TestConfigValidatesLochoRelayPaths(t *testing.T) {
+	config := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "runtime"))
+	config.LochoRelayConfig = filepath.Join(config.RuntimeRoot, "locho", "relay.toml")
+	config.LochoRelaySecrets = filepath.Join(config.RuntimeRoot, "secrets", "locho-relay.env")
+	if err := config.ValidatePaths(); err != nil {
+		t.Fatalf("valid relay paths rejected: %v", err)
+	}
+	config.LochoRelaySecrets = filepath.Join(config.RuntimeRoot, "relay.env")
+	config.LochoRelayConfig = ""
+	if err := config.ValidatePaths(); err == nil || !strings.Contains(err.Error(), "relay secrets require") {
+		t.Fatalf("relay secrets without config error = %v", err)
+	}
+}
+
 func TestConfigRejectsRsyncIdentityMountedIntoHermes(t *testing.T) {
 	repo := t.TempDir()
 	runtimeRoot := filepath.Join(t.TempDir(), "runtime")

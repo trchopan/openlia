@@ -52,7 +52,11 @@ func ShareLochoHost(ctx context.Context, config Config, compose Compose) (LochoH
 		{name: "open-webui", port: config.OpenWebUIPort},
 	}
 	for _, service := range services {
-		result, err := compose.Run(ctx, "exec", "-T", "locho-host", "locho", "share", service.name, "--config", "/var/lib/openlia-locho-host/locho.toml")
+		args := []string{"exec", "-T", "locho-host", "locho", "share", service.name, "--config", "/var/lib/openlia-locho-host/locho.toml"}
+		if config.LochoRelayConfig != "" {
+			args = append(args, "--relay-config", "/etc/locho/relay.toml")
+		}
+		result, err := compose.Run(ctx, args...)
 		if err != nil {
 			return LochoHostShareResult{}, fmt.Errorf("share %s capability: %w", service.name, err)
 		}

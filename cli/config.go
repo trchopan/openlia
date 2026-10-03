@@ -95,6 +95,8 @@ type Config struct {
 	OpenWebUIImage          string
 	OpenWebUIAuth           bool
 	LochoHostEnabled        bool
+	LochoRelayConfigSource  string
+	LochoRelaySecretsSource string
 	SecretSource            string
 	ReleaseSource           string
 	EnabledSkills           []string
@@ -452,6 +454,16 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.OpenWebUIAuth, err = parseBool(value)
 			case "locho-host.enabled":
 				config.LochoHostEnabled, err = parseBool(value)
+			case "locho.relay_config":
+				config.LochoRelayConfigSource, err = parseString(value)
+				if err == nil {
+					config.LochoRelayConfigSource = expandTilde(config.LochoRelayConfigSource)
+				}
+			case "locho.relay_secrets":
+				config.LochoRelaySecretsSource, err = parseString(value)
+				if err == nil {
+					config.LochoRelaySecretsSource = expandTilde(config.LochoRelaySecretsSource)
+				}
 			case "openlia-browser.mode":
 				config.OpenLiaBrowser.Mode, err = parseString(value)
 			case "openlia-browser.target":
@@ -684,6 +696,19 @@ func validateConfig(config Config) error {
 		}
 		if !config.OpenWebUIAuth {
 			return errors.New("locho-host requires open-webui authentication")
+		}
+	}
+	if config.LochoRelayConfigSource != "" {
+		if err := validateAbsoluteRoot(config.LochoRelayConfigSource, "locho.relay_config"); err != nil {
+			return err
+		}
+	}
+	if config.LochoRelaySecretsSource != "" {
+		if config.LochoRelayConfigSource == "" {
+			return errors.New("locho.relay_secrets requires locho.relay_config")
+		}
+		if err := validateAbsoluteRoot(config.LochoRelaySecretsSource, "locho.relay_secrets"); err != nil {
+			return err
 		}
 	}
 	if config.OpenLiaBrowser.Configured {
@@ -1178,6 +1203,16 @@ func renderConfig(config Config) string {
 	}
 	if config.LochoHostEnabled {
 		builder.WriteString("[locho-host]\nenabled = true\n\n")
+	}
+	if config.LochoRelayConfigSource != "" || config.LochoRelaySecretsSource != "" {
+		builder.WriteString("[locho]\n")
+		if config.LochoRelayConfigSource != "" {
+			fmt.Fprintf(&builder, "relay_config = %q\n", config.LochoRelayConfigSource)
+		}
+		if config.LochoRelaySecretsSource != "" {
+			fmt.Fprintf(&builder, "relay_secrets = %q\n", config.LochoRelaySecretsSource)
+		}
+		builder.WriteString("\n")
 	}
 	if config.OpenWebUIHost != "" {
 		fmt.Fprintf(&builder, "[open-webui]\nhost = %q\nport = %d\n", config.OpenWebUIHost, config.OpenWebUIPort)
