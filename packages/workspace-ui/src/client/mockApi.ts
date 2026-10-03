@@ -430,6 +430,12 @@ export function createMockWorkspaceApi({
       if (current === undefined) return "#";
       return `data:text/plain;charset=utf-8,${encodeURIComponent(current)}`;
     },
+    exportWorkspaceUrl() {
+      return "#";
+    },
+    async downloadWorkspaceExport() {
+      requireAuthentication();
+    },
 
     async loadSkills() {
       requireAuthentication();

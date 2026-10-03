@@ -560,4 +560,44 @@ messages:
       await screen.findByRole("heading", { name: "Recent Changes" }),
     ).toBeInTheDocument();
   });
+
+  test("triggers export when clicking Export button in header", async () => {
+    let exportCalled = false;
+    const customApi = createMockWorkspaceApi();
+    customApi.downloadWorkspaceExport = async () => {
+      exportCalled = true;
+    };
+
+    render(<App api={customApi} />);
+
+    const exportBtn = await screen.findByRole("button", {
+      name: "Export workspace and skills to ZIP",
+    });
+    expect(exportBtn).toBeInTheDocument();
+
+    fireEvent.click(exportBtn);
+    await waitFor(() => {
+      expect(exportCalled).toBe(true);
+    });
+  });
+
+  test("displays error message if export fails", async () => {
+    const customApi = createMockWorkspaceApi();
+    customApi.downloadWorkspaceExport = async () => {
+      throw new Error("Network error during export");
+    };
+
+    render(<App api={customApi} />);
+
+    const exportBtn = await screen.findByRole("button", {
+      name: "Export workspace and skills to ZIP",
+    });
+    fireEvent.click(exportBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Network error during export",
+      );
+    });
+  });
 });

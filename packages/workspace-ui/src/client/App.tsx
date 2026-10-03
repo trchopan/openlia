@@ -214,6 +214,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     null,
   );
   const [activityLoading, setActivityLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // Skills state
   const [skills, setSkills] = useState<SkillSummary[]>([]);
@@ -1206,6 +1207,20 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     setRevealToken((prev) => prev + 1);
   }
 
+  const handleExport = useCallback(async () => {
+    if (exporting) return;
+    try {
+      setExporting(true);
+      await api.downloadWorkspaceExport();
+    } catch (error) {
+      setWorkspaceError(
+        error instanceof Error ? error.message : "Failed to export workspace",
+      );
+    } finally {
+      setExporting(false);
+    }
+  }, [api, exporting]);
+
   if (!authReady)
     return (
       <main className="grid min-h-dvh place-items-center bg-base-300 p-4 text-base-content">
@@ -1240,9 +1255,11 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         authRequired={authRequired}
         currentLink={currentLink}
         dirty={dirty}
+        exporting={exporting}
         file={activeTab === "skills" ? null : file}
         filesButtonRef={filesButtonRef}
         git={git}
+        onExport={handleExport}
         onOpenFiles={() => setFilesOpen(true)}
         onOpenGoTo={() => setIsGoToOpen(true)}
         onSignOut={requestSignOut}

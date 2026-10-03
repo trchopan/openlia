@@ -213,9 +213,11 @@ export function WorkspaceHeader({
   authRequired,
   currentLink,
   dirty,
+  exporting = false,
   filesButtonRef,
   file,
   git,
+  onExport,
   onOpenFiles,
   onOpenGoTo,
   onSignOut,
@@ -225,9 +227,11 @@ export function WorkspaceHeader({
   authRequired: boolean;
   currentLink?: string | undefined;
   dirty: boolean;
+  exporting?: boolean | undefined;
   filesButtonRef: RefObject<HTMLButtonElement | null>;
   file: WorkspaceFile | null;
   git: WorkspaceGitStatus | null;
+  onExport?: (() => void) | undefined;
   onOpenFiles: () => void;
   onOpenGoTo?: (() => void) | undefined;
   onSignOut: () => void;
@@ -328,6 +332,38 @@ export function WorkspaceHeader({
             <kbd className="kbd kbd-xs hidden md:inline-flex bg-base-200/80 text-[10px]">
               ⌘P
             </kbd>
+          </button>
+        )}
+        {onExport && (
+          <button
+            aria-label="Export workspace and skills to ZIP"
+            className="btn btn-ghost btn-sm gap-1.5 text-base-content/80 hover:text-base-content"
+            disabled={exporting}
+            onClick={onExport}
+            title="Export workspace and skills to ZIP"
+            type="button"
+          >
+            {exporting ? (
+              <span className="loading loading-spinner loading-xs" />
+            ) : (
+              <svg
+                className="h-3.5 w-3.5 opacity-70"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+              >
+                <title>Export icon</title>
+                <path
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+            <span className="hidden sm:inline">
+              {exporting ? "Exporting..." : "Export"}
+            </span>
           </button>
         )}
         <StatusBadge tone={dirty ? "warning" : "success"}>
