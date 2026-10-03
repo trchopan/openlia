@@ -12,6 +12,21 @@ never commit them or pass them as ordinary command arguments. Use
 `openlia attachments rotate <host> --source /path/to/attachments.toml` to
 validate and replace one host without restarting unrelated sidecars.
 
+HTTP services may set `http_timeout_secs` per service, from 1 to 300 seconds.
+The default is 60 seconds. TCP services must not set this field.
+
+For private relay infrastructure, configure `relay_config` and, if needed,
+`relay_secrets` in a `[locho]` section of the OpenLia operator config. OpenLia
+bind-mounts the relay TOML into Locho containers and injects dotenv values as
+environment variables. The same relay configuration must be available to the
+client, and `token_env` values must be exported in the client environment:
+See `locho/relay.toml.example` and `locho/relay.env.example` for templates.
+
+```sh
+export LOCHO_RELAY_TOKEN="..."
+locho attach --config openlia-attachments.toml --relay-config relay.toml
+```
+
 Run `openlia` on the operator machine. For a remote deployment, the
 `--source` path is read from the operator machine and the validated attachment
 file is uploaded to the selected agent runtime. The remote agent machine does

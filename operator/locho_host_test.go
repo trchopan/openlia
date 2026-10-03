@@ -45,6 +45,7 @@ func TestShareLochoHostBuildsCombinedAttachmentConfig(t *testing.T) {
 	config.LochoHostRoot = filepath.Join(config.RuntimeRoot, "locho-host")
 	config.LochoHostConfig = filepath.Join(config.LochoHostRoot, "locho.toml")
 	config.LochoHostStateRoot = filepath.Join(config.LochoHostRoot, "state")
+	config.LochoRelayConfig = filepath.Join(config.RuntimeRoot, "locho", "relay.toml")
 	config.WorkspaceUIHost = "127.0.0.1"
 	config.WorkspaceUIAuthRequired = true
 	config.WorkspaceUIPasswordHashFile = filepath.Join(config.RuntimeRoot, "secrets", "workspace-ui-password.hash")
@@ -73,6 +74,9 @@ func TestShareLochoHostBuildsCombinedAttachmentConfig(t *testing.T) {
 	}
 	if calls := strings.Join(runner.calls, "\n"); !strings.Contains(calls, "--config /var/lib/openlia-locho-host/locho.toml") {
 		t.Fatalf("share did not use the active host config: %s", calls)
+	}
+	if calls := strings.Join(runner.calls, "\n"); !strings.Contains(calls, "--relay-config /etc/locho/relay.toml") {
+		t.Fatalf("share did not use the relay config: %s", calls)
 	}
 }
 

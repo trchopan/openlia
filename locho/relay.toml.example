@@ -1,0 +1,9 @@
+# Optional Locho 1.2.0 relay transport configuration.
+# Set relay_config in a [locho] section to a protected copy of this file.
+include_n0_relays = false
+
+[[relays]]
+url = "https://relay.example.org"
+# Optional: name an environment variable containing the bearer token.
+# token_env = "LOCHO_RELAY_TOKEN"
+quic_address_discovery = true

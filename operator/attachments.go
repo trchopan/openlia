@@ -16,12 +16,13 @@ import (
 )
 
 type LochoService struct {
-	Host     string `json:"host"`
-	Name     string `json:"name"`
-	Protocol string `json:"protocol"`
-	Port     int    `json:"port"`
-	Endpoint string `json:"endpoint"`
-	Role     string `json:"role"`
+	Host            string `json:"host"`
+	Name            string `json:"name"`
+	Protocol        string `json:"protocol"`
+	Port            int    `json:"port"`
+	Endpoint        string `json:"endpoint"`
+	Role            string `json:"role"`
+	HTTPTimeoutSecs int    `json:"http_timeout_secs,omitempty"`
 }
 
 type AttachmentHost struct {
@@ -375,6 +376,9 @@ func generateAttachmentsFile(config Config) error {
 	if config.LochoHostEnabled {
 		lochoRoot, _ := json.Marshal(config.LochoHostRoot)
 		lochoCommand := "set -eu; set -- $(getent ahostsv4 workspace-ui); workspace_ip=\"$$1\"; set -- $(getent ahostsv4 open-webui); open_webui_ip=\"$$1\"; config=/var/lib/openlia-locho-host/locho.toml; temporary=\"$$config.tmp\"; trap 'rm -f \"$$temporary\"' EXIT; printf '" + lochoHostConfigFormat(config.WorkspaceUIPort, 8080) + "' \"$$workspace_ip\" \"$$open_webui_ip\" > \"$$temporary\"; chmod 600 \"$$temporary\"; mv -f \"$$temporary\" \"$$config\"; trap - EXIT; exec locho host --config \"$$config\""
+		if config.LochoRelayConfig != "" {
+			lochoCommand += " --relay-config /etc/locho/relay.toml"
+		}
 		quotedLochoCommand, _ := json.Marshal(lochoCommand)
 		builder.WriteString("  locho-host:\n")
 		builder.WriteString("    image: \"${OPENLIA_LOCHO_IMAGE:-openlia-locho:v1.2.0}\"\n")
@@ -405,7 +409,24 @@ func generateAttachmentsFile(config Config) error {
 	if config.ExternalNetwork != "" {
 		fmt.Fprintf(&builder, "networks:\n  openlia-external:\n    name: %q\n    external: true\n", config.ExternalNetwork)
 	}
-	if err := AtomicWriteFile(config.GeneratedCompose, []byte(builder.String()), 0o600); err != nil {
+	generated := builder.String()
+	if config.LochoRelayConfig != "" {
+		if err := ensureLochoReadable(config, config.LochoRelayConfig); err != nil {
+			return fmt.Errorf("prepare Locho relay configuration: %w", err)
+		}
+	}
+	if config.LochoRelayConfig != "" {
+		relayMount := fmt.Sprintf("      - type: bind\n        source: %q\n        target: /etc/locho/relay.toml\n        read_only: true\n", config.LochoRelayConfig)
+		generated = strings.ReplaceAll(generated, "        target: /var/lib/openlia-locho-host\n    depends_on:", "        target: /var/lib/openlia-locho-host\n"+relayMount+"    depends_on:")
+		generated = strings.ReplaceAll(generated, "        target: /etc/locho/attachments.toml\n        read_only: true\n    networks:", "        target: /etc/locho/attachments.toml\n        read_only: true\n"+relayMount+"    networks:")
+		generated = strings.ReplaceAll(generated, "command: [\"attach\", \"--config\", \"/etc/locho/attachments.toml\"]", "command: [\"attach\", \"--config\", \"/etc/locho/attachments.toml\", \"--relay-config\", \"/etc/locho/relay.toml\"]")
+	}
+	if config.LochoRelaySecrets != "" {
+		relayEnvFile := fmt.Sprintf("    env_file:\n      - %q\n", config.LochoRelaySecrets)
+		generated = strings.ReplaceAll(generated, "    depends_on:\n      - workspace-ui\n      - open-webui\n", relayEnvFile+"    depends_on:\n      - workspace-ui\n      - open-webui\n")
+		generated = strings.ReplaceAll(generated, "        target: /etc/locho/attachments.toml\n        read_only: true\n", "        target: /etc/locho/attachments.toml\n        read_only: true\n"+relayEnvFile)
+	}
+	if err := AtomicWriteFile(config.GeneratedCompose, []byte(generated), 0o600); err != nil {
 		return err
 	}
 	if err := ReconcileBrowserPolicy(config, hasOpenLiaBrowserRole, browserURL); err != nil {
@@ -685,9 +706,11 @@ func serviceInventory(host, path string, roles map[string]string) ([]LochoServic
 	inService := false
 	capability := ""
 	listenPort := 0
-	flush := func() {
+	httpTimeoutSecs := 0
+	httpTimeoutConfigured := false
+	flush := func() error {
 		if !inService {
-			return
+			return nil
 		}
 		parts := strings.Split(capability, ":")
 		name := ""
@@ -703,6 +726,12 @@ func serviceInventory(host, path string, roles map[string]string) ([]LochoServic
 		} else if len(parts) == 1 {
 			name = parts[0]
 		}
+		if httpTimeoutConfigured && (httpTimeoutSecs < 1 || httpTimeoutSecs > 300) {
+			return fmt.Errorf("HTTP timeout for %s must be between 1 and 300 seconds", name)
+		}
+		if proto == "tcp" && httpTimeoutConfigured {
+			return fmt.Errorf("TCP service %s cannot define an HTTP timeout", name)
+		}
 		if name == "" {
 			name = fmt.Sprintf("service-%d", len(services)+1)
 		}
@@ -717,21 +746,27 @@ func serviceInventory(host, path string, roles map[string]string) ([]LochoServic
 			endpoint = fmt.Sprintf("locho-%s:%d", host, listenPort)
 		}
 		services = append(services, LochoService{
-			Host:     host,
-			Name:     name,
-			Protocol: proto,
-			Port:     listenPort,
-			Endpoint: endpoint,
-			Role:     role,
+			Host:            host,
+			Name:            name,
+			Protocol:        proto,
+			Port:            listenPort,
+			Endpoint:        endpoint,
+			Role:            role,
+			HTTPTimeoutSecs: httpTimeoutSecs,
 		})
+		return nil
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
 		if line == "[[services]]" {
-			flush()
+			if err := flush(); err != nil {
+				return nil, err
+			}
 			inService = true
 			capability = ""
 			listenPort = 0
+			httpTimeoutSecs = 0
+			httpTimeoutConfigured = false
 			continue
 		}
 		if !inService {
@@ -750,9 +785,20 @@ func serviceInventory(host, path string, roles map[string]string) ([]LochoServic
 			if parsed, parseErr := strconv.Atoi(strings.TrimSpace(value)); parseErr == nil {
 				listenPort = parsed
 			}
+		case "http_timeout_secs":
+			httpTimeoutConfigured = true
+			rawTimeout := strings.TrimSpace(strings.SplitN(value, "#", 2)[0])
+			rawTimeout = strings.ReplaceAll(rawTimeout, "_", "")
+			if parsed, parseErr := strconv.Atoi(rawTimeout); parseErr == nil {
+				httpTimeoutSecs = parsed
+			} else {
+				return nil, fmt.Errorf("invalid HTTP timeout")
+			}
 		}
 	}
-	flush()
+	if err := flush(); err != nil {
+		return nil, err
+	}
 	return services, nil
 }
 

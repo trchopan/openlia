@@ -422,7 +422,8 @@ func runDeploy(ctx context.Context, config Config, args []string, output, errorO
 		human := fmt.Sprintf("openlia deploy: profile assets synchronized; workspace preserved; updated=%d; forked=%d; updates_available=%d; customized=%d; unmanaged=%d", result.Skills.Updated, result.Skills.Forked, result.Skills.UpdatesAvailable, result.Skills.Customized, result.Skills.Unmanaged)
 		return emit(output, map[string]any{"ok": true, "action": "profile", "backup": backup.Archive, "workspace": "preserved", "attention_required": result.Instructions.AttentionRequired, "profile_sync": result}, jsonOutput, human)
 	}
-	result, err := Deploy(ctx, config, NewCompose(config, &ExecRunner{Stderr: errorOutput}), DeployOptions{Action: action, Component: component, ForceStart: forceStart}, now)
+	forceRecreate := config.LochoRelayConfig != "" || config.LochoRelaySecrets != ""
+	result, err := Deploy(ctx, config, NewCompose(config, &ExecRunner{Stderr: errorOutput}), DeployOptions{Action: action, Component: component, ForceStart: forceStart, ForceRecreate: forceRecreate}, now)
 	if err != nil {
 		return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 	}

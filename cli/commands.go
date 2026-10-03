@@ -254,6 +254,16 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 			return fail(options, ExitUsage, err.Error(), nil)
 		}
 	}
+	for path, label := range map[string]string{
+		config.LochoRelayConfigSource:  "Locho relay configuration",
+		config.LochoRelaySecretsSource: "Locho relay secrets",
+	} {
+		if path != "" {
+			if err := validateProtectedSourcePath(path, label); err != nil {
+				return fail(options, ExitUsage, err.Error(), nil)
+			}
+		}
+	}
 	if config.LochoHostEnabled && config.WorkspaceUIPasswordHash == "" {
 		if options.NonInteractive {
 			return fail(options, ExitUsage, "--locho-host requires an interactive Workspace UI password setup", nil)
@@ -303,6 +313,9 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 		if err := deployment.uploadFile(ctx, sourcePath, deployment.rootPath("runtime", "secrets", "hermes.env"), 0o600); err != nil {
 			return fail(options, ExitFailure, "could not stage secret source: "+err.Error(), nil)
 		}
+	}
+	if err := syncLochoSources(ctx, deployment, config); err != nil {
+		return fail(options, ExitFailure, "could not stage Locho relay configuration: "+err.Error(), nil)
 	}
 	for _, host := range config.Services {
 		if host.Source != "" && host.Name != "" {
@@ -448,6 +461,9 @@ func commandLifecycle(options Options, action string, args []string) int {
 		}
 	}
 	if action == "deploy" {
+		if err := syncLochoSources(ctx, deployment, config); err != nil {
+			return fail(options, ExitFailure, "could not stage Locho relay configuration: "+err.Error(), nil)
+		}
 		for _, host := range config.Services {
 			if host.Source != "" && host.Name != "" {
 				if err := syncAttachmentSource(ctx, deployment, host.Name, host.Source); err != nil {
@@ -462,6 +478,14 @@ func commandLifecycle(options Options, action string, args []string) int {
 	if action == "restart" {
 		if _, err := deployment.operation(ctx, "profile", nil, "sync", "--json"); err != nil {
 			return fail(options, ExitFailure, "profile synchronization failed: "+err.Error(), map[string]any{"action": action})
+		}
+	}
+	if action == "start" || action == "restart" {
+		if err := syncLochoSources(ctx, deployment, config); err != nil {
+			return fail(options, ExitFailure, "could not stage Locho relay configuration: "+err.Error(), nil)
+		}
+		if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
+			return fail(options, ExitFailure, "attachment Compose generation failed: "+err.Error(), nil)
 		}
 	}
 	start := action == "start" || action == "restart"
@@ -755,6 +779,9 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 		// A version-isolated release does not inherit generated Compose state.
 		// Generate it before profile backup so running optional services can be
 		// stopped consistently against the newly activated release.
+		if err := syncLochoSources(ctx, deployment, config); err != nil {
+			return fail(options, ExitFailure, "could not stage Locho relay configuration: "+err.Error(), nil)
+		}
 		if config.WorkspaceUIHost != "" || len(config.Services) > 0 {
 			if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
 				return fail(options, ExitFailure, "optional runtime Compose generation failed: "+err.Error(), nil)
@@ -797,6 +824,9 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 	// The command does not silently change a tag or digest; operators update the
 	// desired pin in their operator config before invoking this boundary.
 	if component == "locho" {
+		if err := syncLochoSources(ctx, deployment, config); err != nil {
+			return fail(options, ExitFailure, "could not stage Locho relay configuration: "+err.Error(), nil)
+		}
 		if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
 			return fail(options, ExitFailure, "attachment Compose generation failed: "+err.Error(), nil)
 		}
@@ -804,6 +834,9 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 	if component == "open-webui" {
 		if config.OpenWebUIHost == "" {
 			return fail(options, ExitUsage, "open-webui is not configured in config.toml", nil)
+		}
+		if err := syncLochoSources(ctx, deployment, config); err != nil {
+			return fail(options, ExitFailure, "could not stage Locho relay configuration: "+err.Error(), nil)
 		}
 		if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
 			return fail(options, ExitFailure, "attachment Compose generation failed: "+err.Error(), nil)
@@ -1576,7 +1609,11 @@ func commandLochoHost(options Options, args []string) int {
 		"host_id":  hostID,
 		"services": []string{"workspace-ui", "open-webui"},
 	}
-	return writeResult(options, payload, fmt.Sprintf("Locho attachment configuration written to %s; run: locho attach --config %s", *output, *output))
+	command := fmt.Sprintf("locho attach --config %s", *output)
+	if config.LochoRelayConfigSource != "" {
+		command += " --relay-config " + filepath.Base(config.LochoRelayConfigSource)
+	}
+	return writeResult(options, payload, fmt.Sprintf("Locho attachment configuration written to %s; run: %s", *output, command))
 }
 
 func attachmentHostID(config string) (string, error) {
@@ -2615,6 +2652,38 @@ func validateProtectedSourcePath(path, label string) error {
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
 		return fmt.Errorf("%s must be a regular mode-0600 file", label)
+	}
+	return nil
+}
+
+func syncLochoSources(ctx context.Context, deployment deployment, config Config) error {
+	files := []struct {
+		source string
+		target string
+		label  string
+	}{
+		{config.LochoRelayConfigSource, deployment.rootPath("runtime", "locho", "relay.toml"), "Locho relay configuration"},
+		{config.LochoRelaySecretsSource, deployment.rootPath("runtime", "locho-relay-secrets", "relay.env"), "Locho relay secrets"},
+	}
+	for _, file := range files {
+		if file.source == "" {
+			if err := deployment.removeFile(ctx, file.target); err != nil {
+				return fmt.Errorf("remove stale %s: %w", file.label, err)
+			}
+			continue
+		}
+		if err := validateProtectedSourcePath(file.source, file.label); err != nil {
+			return err
+		}
+		if err := deployment.uploadFile(ctx, file.source, file.target, 0o600); err != nil {
+			return fmt.Errorf("upload %s: %w", file.label, err)
+		}
+	}
+	// Remove the pre-isolation location so upgrades cannot leave relay tokens
+	// inside Hermes' mounted secrets directory.
+	legacySecrets := deployment.rootPath("runtime", "secrets", "locho-relay.env")
+	if err := deployment.removeFile(ctx, legacySecrets); err != nil {
+		return fmt.Errorf("remove legacy Locho relay secrets: %w", err)
 	}
 	return nil
 }
