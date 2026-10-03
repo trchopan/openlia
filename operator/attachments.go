@@ -383,7 +383,14 @@ func generateAttachmentsFile(config Config) error {
 		builder.WriteString("  locho-host:\n")
 		builder.WriteString("    image: \"${OPENLIA_LOCHO_IMAGE:-openlia-locho:v1.2.0}\"\n")
 		fmt.Fprintf(&builder, "    build:\n      context: ..\n      dockerfile: docker/locho.Dockerfile\n      args:\n        LOCHO_BASE_IMAGE: \"${LOCHO_BASE_IMAGE:-debian}\"\n        LOCHO_BASE_TAG: \"${LOCHO_BASE_TAG:-13.4-slim}\"\n        LOCHO_BASE_DIGEST: \"${LOCHO_BASE_DIGEST:-sha256:109e2c65005bf160609e4ba6acf7783752f8502ad218e298253428690b9eaa4b}\"\n        LOCHO_VERSION: %q\n        LOCHO_X86_64_SHA256: %q\n        LOCHO_AARCH64_SHA256: %q\n", config.LochoVersion, config.LochoX8664SHA256, config.LochoARM64SHA256)
-		builder.WriteString(fmt.Sprintf("    entrypoint: [\"sh\", \"-c\"]\n    command: [%s]\n    restart: unless-stopped\n    user: \"%d:%d\"\n    read_only: true\n    tmpfs:\n      - /tmp\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    environment:\n      LOCHO_STATE_DIR: /var/lib/openlia-locho-host/state\n    volumes:\n      - type: bind\n        source: %s\n        target: /var/lib/openlia-locho-host\n    depends_on:\n      - workspace-ui\n      - open-webui\n    networks:\n      - openlia-private\n    deploy:\n      resources:\n        limits:\n          cpus: \"0.5\"\n          memory: 512M\n    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n", quotedLochoCommand, config.RuntimeUID, config.RuntimeGID, lochoRoot))
+		builder.WriteString(fmt.Sprintf("    entrypoint: [\"sh\", \"-c\"]\n    command: [%s]\n    restart: unless-stopped\n    user: \"%d:%d\"\n    read_only: true\n    tmpfs:\n      - /tmp\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    environment:\n      LOCHO_STATE_DIR: /var/lib/openlia-locho-host/state\n    volumes:\n      - type: bind\n        source: %s\n        target: /var/lib/openlia-locho-host\n", quotedLochoCommand, config.RuntimeUID, config.RuntimeGID, lochoRoot))
+		if config.LochoRelayConfig != "" {
+			fmt.Fprintf(&builder, "      - type: bind\n        source: %q\n        target: /etc/locho/relay.toml\n        read_only: true\n", config.LochoRelayConfig)
+		}
+		if config.LochoRelaySecrets != "" {
+			fmt.Fprintf(&builder, "    env_file:\n      - %q\n", config.LochoRelaySecrets)
+		}
+		builder.WriteString("    depends_on:\n      - workspace-ui\n      - open-webui\n    networks:\n      - openlia-private\n    deploy:\n      resources:\n        limits:\n          cpus: \"0.5\"\n          memory: 512M\n    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n")
 	}
 	for _, host := range hosts.Hosts {
 		configPath := filepath.Join(config.LochoRoot, host.Host, "attachments.toml")
@@ -391,8 +398,18 @@ func generateAttachmentsFile(config Config) error {
 		fmt.Fprintf(&builder, "  locho-%s:\n", host.Host)
 		builder.WriteString("    image: \"${OPENLIA_LOCHO_IMAGE:-openlia-locho:v1.2.0}\"\n")
 		fmt.Fprintf(&builder, "    build:\n      context: ..\n      dockerfile: docker/locho.Dockerfile\n      args:\n        LOCHO_BASE_IMAGE: \"${LOCHO_BASE_IMAGE:-debian}\"\n        LOCHO_BASE_TAG: \"${LOCHO_BASE_TAG:-13.4-slim}\"\n        LOCHO_BASE_DIGEST: \"${LOCHO_BASE_DIGEST:-sha256:109e2c65005bf160609e4ba6acf7783752f8502ad218e298253428690b9eaa4b}\"\n        LOCHO_VERSION: %q\n        LOCHO_X86_64_SHA256: %q\n        LOCHO_AARCH64_SHA256: %q\n", config.LochoVersion, config.LochoX8664SHA256, config.LochoARM64SHA256)
-		builder.WriteString(fmt.Sprintf("    command: [\"attach\", \"--config\", \"/etc/locho/attachments.toml\"]\n    restart: unless-stopped\n    user: \"%d:%d\"\n    read_only: true\n    tmpfs:\n      - /tmp\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    volumes:\n", config.RuntimeUID, config.RuntimeGID))
-		fmt.Fprintf(&builder, "      - type: bind\n        source: %s\n        target: /etc/locho/attachments.toml\n        read_only: true\n    networks:\n      - openlia-private\n", quoted)
+		builder.WriteString("    command: [\"attach\", \"--config\", \"/etc/locho/attachments.toml\"")
+		if config.LochoRelayConfig != "" {
+			builder.WriteString(", \"--relay-config\", \"/etc/locho/relay.toml\"")
+		}
+		fmt.Fprintf(&builder, "]\n    restart: unless-stopped\n    user: \"%d:%d\"\n    read_only: true\n    tmpfs:\n      - /tmp\n    security_opt:\n      - no-new-privileges:true\n    cap_drop: [ALL]\n    volumes:\n      - type: bind\n        source: %s\n        target: /etc/locho/attachments.toml\n        read_only: true\n", config.RuntimeUID, config.RuntimeGID, quoted)
+		if config.LochoRelayConfig != "" {
+			fmt.Fprintf(&builder, "      - type: bind\n        source: %q\n        target: /etc/locho/relay.toml\n        read_only: true\n", config.LochoRelayConfig)
+		}
+		if config.LochoRelaySecrets != "" {
+			fmt.Fprintf(&builder, "    env_file:\n      - %q\n", config.LochoRelaySecrets)
+		}
+		builder.WriteString("    networks:\n      - openlia-private\n")
 		builder.WriteString("    deploy:\n      resources:\n        limits:\n          cpus: \"0.5\"\n          memory: 512M\n")
 		builder.WriteString("    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n")
 	}
@@ -409,23 +426,12 @@ func generateAttachmentsFile(config Config) error {
 	if config.ExternalNetwork != "" {
 		fmt.Fprintf(&builder, "networks:\n  openlia-external:\n    name: %q\n    external: true\n", config.ExternalNetwork)
 	}
-	generated := builder.String()
 	if config.LochoRelayConfig != "" {
 		if err := ensureLochoReadable(config, config.LochoRelayConfig); err != nil {
 			return fmt.Errorf("prepare Locho relay configuration: %w", err)
 		}
 	}
-	if config.LochoRelayConfig != "" {
-		relayMount := fmt.Sprintf("      - type: bind\n        source: %q\n        target: /etc/locho/relay.toml\n        read_only: true\n", config.LochoRelayConfig)
-		generated = strings.ReplaceAll(generated, "        target: /var/lib/openlia-locho-host\n    depends_on:", "        target: /var/lib/openlia-locho-host\n"+relayMount+"    depends_on:")
-		generated = strings.ReplaceAll(generated, "        target: /etc/locho/attachments.toml\n        read_only: true\n    networks:", "        target: /etc/locho/attachments.toml\n        read_only: true\n"+relayMount+"    networks:")
-		generated = strings.ReplaceAll(generated, "command: [\"attach\", \"--config\", \"/etc/locho/attachments.toml\"]", "command: [\"attach\", \"--config\", \"/etc/locho/attachments.toml\", \"--relay-config\", \"/etc/locho/relay.toml\"]")
-	}
-	if config.LochoRelaySecrets != "" {
-		relayEnvFile := fmt.Sprintf("    env_file:\n      - %q\n", config.LochoRelaySecrets)
-		generated = strings.ReplaceAll(generated, "    depends_on:\n      - workspace-ui\n      - open-webui\n", relayEnvFile+"    depends_on:\n      - workspace-ui\n      - open-webui\n")
-		generated = strings.ReplaceAll(generated, "        target: /etc/locho/attachments.toml\n        read_only: true\n", "        target: /etc/locho/attachments.toml\n        read_only: true\n"+relayEnvFile)
-	}
+	generated := builder.String()
 	if err := AtomicWriteFile(config.GeneratedCompose, []byte(generated), 0o600); err != nil {
 		return err
 	}
