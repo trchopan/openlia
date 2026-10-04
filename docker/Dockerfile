@@ -70,9 +70,6 @@ RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache \
 	&& rm -f /tmp/claim-req.txt
 
 COPY --chmod=0755 docker/secret-source.sh /usr/local/bin/openlia-secret-source
-COPY --chmod=0755 docker/git-askpass.sh /usr/local/bin/openlia-git-askpass
-COPY --chmod=0755 docker/skill-env-builder.sh /usr/local/bin/openlia-skill-env-builder
-COPY --chmod=0755 docker/skill-runner.py /usr/local/bin/openlia-skill
 COPY docker/openlia_link_rewriter.py /opt/hermes/.venv/lib/python3.13/site-packages/openlia_link_rewriter.py
 COPY docker/openlia_link_rewriter.pth /opt/hermes/.venv/lib/python3.13/site-packages/openlia_link_rewriter.pth
 

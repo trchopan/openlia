@@ -343,7 +343,7 @@ func createBackupWithRestart(ctx context.Context, config Config, reason string, 
 		SecretValues: "excluded",
 		Capabilities: "excluded",
 		Components:   []string{"hermes", "meta"},
-		Exclusions:   []string{"open-webui", "skill-envs", "secrets", "caches", "bundled-skills", "logs"},
+		Exclusions:   []string{"open-webui", "secrets", "caches", "bundled-skills", "logs"},
 	}
 	manifestData, err := json.Marshal(manifest)
 	if err != nil {
@@ -712,9 +712,6 @@ func restoreBackup(ctx context.Context, config Config, archivePath string, now t
 		}
 	}
 	restoreRoots := []string{"hermes", "meta", "locho"}
-	if info, rootErr := os.Stat(filepath.Join(staging, "skill-envs")); rootErr == nil && info.IsDir() {
-		restoreRoots = append(restoreRoots, "skill-envs")
-	}
 	if info, rootErr := os.Stat(filepath.Join(staging, "open-webui")); rootErr == nil && info.IsDir() {
 		restoreRoots = append(restoreRoots, "open-webui")
 	}
@@ -1333,7 +1330,7 @@ func allowedArchiveMember(name string) bool {
 	if !safeArchiveMember(name) {
 		return false
 	}
-	allowedRoots := []string{"hermes", "meta", "locho", "skill-envs", "open-webui"}
+	allowedRoots := []string{"hermes", "meta", "locho", "open-webui"}
 	for _, root := range allowedRoots {
 		if name == root || strings.HasPrefix(name, root+"/") {
 			return true

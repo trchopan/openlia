@@ -1408,25 +1408,7 @@ func TestBrowserPolicyRefusesUserAgentMapping(t *testing.T) {
 	}
 }
 
-func TestWorkspaceGitValidationAndProtectedPaths(t *testing.T) {
-	for _, remote := range []string{
-		"https://github.com/example/private-vault.git",
-		"https://github.com/example/private-vault",
-	} {
-		if err := validateGitHubRemote(remote); err != nil {
-			t.Fatalf("valid remote rejected: %v", err)
-		}
-	}
-	for _, remote := range []string{
-		"http://github.com/example/private-vault.git",
-		"https://evil.example/example/private-vault.git",
-		"https://github.com/example/private-vault.git?token=leak",
-		"https://github.com/example/private-vault/extra.git",
-	} {
-		if err := validateGitHubRemote(remote); err == nil {
-			t.Fatalf("unsafe remote accepted: %s", remote)
-		}
-	}
+func TestWorkspaceGitProtectsSensitivePaths(t *testing.T) {
 	for _, path := range []string{".env", "nested/auth.json", "logs/hermes.log", "cache/token", "private.key", "notes.md"} {
 		want := path != "notes.md"
 		if protectedWorkspacePath(path) != want {

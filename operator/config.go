@@ -58,9 +58,6 @@ type Config struct {
 	EnabledSkills               []string
 	EnabledTools                []string
 	SkillsConfigured            bool
-	SkillSources                []SkillSourceConfig
-	SkillsCacheRoot             string
-	SkillsEnvRoot               string
 	ExternalNetwork             string
 	APIEnabled                  bool
 	APIHost                     string
@@ -104,40 +101,6 @@ type FallbackProviderConfig struct {
 	Model    string `json:"model"`
 	BaseURL  string `json:"base_url,omitempty"`
 	KeyEnv   string `json:"key_env,omitempty"`
-}
-
-// SkillSourceConfig is transported in OPENLIA_SKILL_SOURCES as a JSON array.
-// Example: [{"id":"team","url":"https://github.com/acme/skills.git","ref":"main","manifest":"openlia-skills.json"}].
-type SkillSourceConfig struct {
-	ID       string `json:"name"`
-	URL      string `json:"repository"`
-	Ref      string `json:"branch"`
-	Manifest string `json:"manifest,omitempty"`
-}
-
-func (s *SkillSourceConfig) UnmarshalJSON(data []byte) error {
-	var value struct {
-		Name, Repository, Branch string
-		ID, URL, Ref             string
-		Manifest                 string
-	}
-	if err := json.Unmarshal(data, &value); err != nil {
-		return err
-	}
-	if value.Name != "" && value.ID != "" && value.Name != value.ID || value.Repository != "" && value.URL != "" && value.Repository != value.URL || value.Branch != "" && value.Ref != "" && value.Branch != value.Ref {
-		return fmt.Errorf("conflicting canonical and legacy skill source fields")
-	}
-	s.ID, s.URL, s.Ref, s.Manifest = value.Name, value.Repository, value.Branch, value.Manifest
-	if s.ID == "" {
-		s.ID = value.ID
-	}
-	if s.URL == "" {
-		s.URL = value.URL
-	}
-	if s.Ref == "" {
-		s.Ref = value.Ref
-	}
-	return nil
 }
 
 // LoadConfig reads the process environment.
@@ -203,13 +166,6 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 			return Config{}, fmt.Errorf("OPENLIA_FALLBACK_PROVIDERS must be valid JSON: %w", err)
 		}
 	}
-	skillSources := []SkillSourceConfig{}
-	if rawSources := values["OPENLIA_SKILL_SOURCES"]; rawSources != "" {
-		if err := json.Unmarshal([]byte(rawSources), &skillSources); err != nil {
-			return Config{}, fmt.Errorf("OPENLIA_SKILL_SOURCES must be valid JSON: %w", err)
-		}
-	}
-
 	config := Config{
 		RepositoryRoot:          repositoryRoot,
 		RuntimeRoot:             runtimeRoot,
@@ -239,9 +195,6 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		Model:                   getOr(values, "OPENLIA_MODEL", "gpt-5.6-luna"),
 		OutputLanguage:          getOr(values, "OPENLIA_OUTPUT_LANGUAGE", "en"),
 		FallbackProviders:       fallbackProviders,
-		SkillSources:            skillSources,
-		SkillsCacheRoot:         getOr(values, "OPENLIA_SKILLS_CACHE_ROOT", filepath.Join(runtimeRoot, "skill-cache")),
-		SkillsEnvRoot:           getOr(values, "OPENLIA_SKILLS_ENV_ROOT", filepath.Join(runtimeRoot, "skill-envs")),
 		HermesImage:             getOr(values, "OPENLIA_HERMES_IMAGE", "openlia-hermes:v2026.9.14"),
 		LochoImage:              getOr(values, "OPENLIA_LOCHO_IMAGE", "openlia-locho:v1.2.0"),
 		LochoVersion:            getOr(values, "OPENLIA_LOCHO_VERSION", "1.2.0"),
@@ -615,8 +568,6 @@ func (c Config) ValidatePaths() error {
 		{"meta-root", c.MetaRoot},
 		{"state-file", c.StateFile},
 		{"secret-dir", c.SecretDir},
-		{"skills-cache-root", c.SkillsCacheRoot},
-		{"skills-env-root", c.SkillsEnvRoot},
 	}
 	if c.LochoRelayConfig != "" {
 		paths = append(paths, struct {
@@ -651,9 +602,6 @@ func (c Config) ValidatePaths() error {
 				path  string
 			}{"locho-host-state-root", c.LochoHostStateRoot},
 		)
-	}
-	if err := validateSkillSources(c.SkillSources); err != nil {
-		return err
 	}
 	for _, item := range paths {
 		if err := ValidateAbsolutePath(item.path, item.label); err != nil {
@@ -716,53 +664,6 @@ func validateBackupDestinations(destinations []BackupDestination) error {
 			}
 		default:
 			return fmt.Errorf("backup destination %s has unsupported type %q", destination.Name, destination.Type)
-		}
-	}
-	return nil
-}
-
-func validateSkillSources(sources []SkillSourceConfig) error {
-	seen := make(map[string]bool)
-	for index, source := range sources {
-		if err := ValidateSafeComponent(source.ID, "skill-source-id"); err != nil {
-			return fmt.Errorf("skill source %d: %w", index, err)
-		}
-		if seen[source.ID] {
-			return fmt.Errorf("duplicate skill source id %q", source.ID)
-		}
-		seen[source.ID] = true
-		if err := validateGitHubSkillURL(source.URL); err != nil {
-			return fmt.Errorf("skill source %s: %w", source.ID, err)
-		}
-		if source.Ref == "" || strings.HasPrefix(source.Ref, "-") || strings.ContainsAny(source.Ref, " \\~^:?*[\r\n\t") || strings.Contains(source.Ref, "..") || strings.Contains(source.Ref, "@{") || strings.HasSuffix(source.Ref, ".") || strings.HasSuffix(source.Ref, "/") {
-			return fmt.Errorf("skill source %s has an invalid ref", source.ID)
-		}
-		manifest := source.Manifest
-		if manifest == "" {
-			manifest = "openlia-skills.json"
-		}
-		clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(manifest)))
-		if clean != manifest || manifest == "." || strings.HasPrefix(manifest, "/") || strings.HasPrefix(manifest, "../") || strings.Contains(manifest, "/../") {
-			return fmt.Errorf("skill source %s has an invalid manifest path", source.ID)
-		}
-	}
-	return nil
-}
-
-func validateGitHubSkillURL(value string) error {
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme != "https" || parsed.Host != "github.com" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return fmt.Errorf("URL must be credential-free GitHub HTTPS")
-	}
-	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	if len(parts) != 2 || parts[0] == "" || strings.TrimSuffix(parts[1], ".git") == "" {
-		return fmt.Errorf("URL must identify a GitHub owner and repository")
-	}
-	for _, part := range []string{parts[0], strings.TrimSuffix(parts[1], ".git")} {
-		for _, character := range part {
-			if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || character == '-' || character == '_' || character == '.') {
-				return fmt.Errorf("URL contains an invalid GitHub path")
-			}
 		}
 	}
 	return nil

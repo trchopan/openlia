@@ -11,14 +11,12 @@ func TestEmbeddedWorkspaceIncludesControlFiles(t *testing.T) {
 		"workspace-template/.gitignore",
 		"workspace-template/inbox/.gitkeep",
 		"docker/.env.example",
-		"docker/git-askpass.sh",
 		"docker/secret-source.sh",
 		"docker/install-tools.sh",
 		"docker/verify-tools.sh",
 		"docker/yt-dlp-requirements.txt",
 		"profile/config.yaml",
 		"profile/distribution.yaml",
-		"profile/cron/scripts/openlia-workspace-git-sync.sh",
 	} {
 		if _, err := fs.ReadFile(releaseAssets, path); err != nil {
 			t.Fatalf("embedded release is missing %s: %v", path, err)

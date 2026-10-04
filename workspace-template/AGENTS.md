@@ -65,12 +65,10 @@ of silently overwriting them.
 
 ## Workspace Git history
 
-OpenLia maintains this workspace as a local Git repository, with an optional
-private GitHub remote. After an approved, coherent workspace update, stage only
-the intended files and create a concise `backup:` commit. Do not create empty
-commits, and do not treat a local commit as approval to push. Never store
+OpenLia maintains this workspace as a local Git repository for history tracking.
+After an approved, coherent workspace update, stage only the intended files and
+create a concise `backup:` commit. Do not create empty commits or configure Git
+remotes; use OpenLia's encrypted backup mechanism for recovery. Never store
 credentials, tokens, OAuth files, private keys, or raw service exports here.
-Automatic pulls only fast-forward a clean branch; manual pushes require an
-explicit request. Review `git status --short --branch` before manual pulls,
-never pull over dirty files, and never use hard resets or force-pushes. Conflicts
-must be reported and resolved without discarding either side.
+Never use Git network operations, hard resets, `git clean`, or destructive
+conflict handling.

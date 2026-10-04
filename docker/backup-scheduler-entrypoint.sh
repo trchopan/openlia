@@ -57,6 +57,7 @@ chmod 0600 /run/openlia/scheduler.env
 
 # Use the same persisted environment for the startup tick as cron uses.
 set -a
+# shellcheck source=/dev/null
 . /run/openlia/scheduler.env
 set +a
 

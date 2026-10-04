@@ -50,9 +50,7 @@ OpenLia:
 - CLI validation, remote-operation boundaries, and generated Compose files.
 - Backup and restore behavior, including path and archive validation.
 - Container isolation, exposed listeners, and generated service configuration.
-- Workspace Git automation and credential handling.
-- External skill source validation, Git credential handling, dependency
-  environment isolation, provenance, and activation approval boundaries.
+- Workspace local Git history handling.
 - Release integrity, provenance, and checksum verification.
 
 Durable backup archives use client-side age encryption. The target receives
@@ -90,17 +88,8 @@ The Workspace UI is unauthenticated only on loopback by default. Binding it to
 `0.0.0.0` requires an Argon2id verifier and protects workspace APIs with
 expiring SQLite-backed sessions. Private HTTP remains available for trusted
 networks, but HTTPS is required for confidentiality on untrusted networks.
-See the [security boundaries in the README](README.md#security-boundaries) and
-the [external skill repository guide](docs/EXTERNAL_SKILLS.md) for the exact
-third-party skill boundary. External skill audit results cover tree structure,
-locked dependency resolution, and known dependency vulnerabilities; they are
-not an endorsement or a source-code review. Review the resolved commit before
-installation and scope `OPENLIA_SKILLS_GIT_TOKEN` to read only the required
-private repositories. Install and update show an audited, immutable commit-bound
-plan before confirmation. The dependency builder uses the local operator UID/GID
-for non-root local deployments and the configured runtime UID/GID for remote or
-root-run operations; it has no deployment secret mount, though it retains
-network access for locked packages and vulnerability data. Locho and Workspace
-UI use the same runtime identity for their bind-mounted state.
+See the [security boundaries in the README](README.md#security-boundaries).
+Locho and Workspace UI use the configured runtime identity for their
+bind-mounted state.
 
 See the [contribution guidelines](CONTRIBUTING.md) for additional requirements.

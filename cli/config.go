@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	configSchema           = 1
+	configSchema           = 2
 	defaultVersion         = "0.1.0"
 	defaultHermesTag       = "v2026.9.14"
 	defaultLochoVersion    = "1.2.0"
@@ -101,7 +101,6 @@ type Config struct {
 	ReleaseSource           string
 	EnabledSkills           []string
 	EnabledTools            []string
-	WorkspaceGit            WorkspaceGitConfig
 	BackupIdentityFile      string
 	BackupKnownHosts        string
 	BackupRecipient         string
@@ -109,7 +108,6 @@ type Config struct {
 	BackupScheduleEnabled   bool
 	BackupRemoteRetention   int
 	BackupDestinations      []BackupDestinationConfig
-	SkillSources            []SkillSourceConfig
 	Services                []ServiceHostConfig
 	OpenLiaBrowser          OpenLiaBrowserConfig
 }
@@ -127,12 +125,6 @@ type BackupDestinationConfig struct {
 	OperatorIdentityFile string
 }
 
-type SkillSourceConfig struct {
-	Name       string `json:"name"`
-	Repository string `json:"repository"`
-	Branch     string `json:"branch"`
-}
-
 type ServiceHostConfig struct {
 	Name   string
 	Source string
@@ -146,16 +138,6 @@ type FallbackProviderConfig struct {
 	KeyEnv   string `json:"key_env,omitempty"`
 }
 
-type WorkspaceGitConfig struct {
-	Enabled     bool
-	Provider    string
-	Remote      string
-	Branch      string
-	Schedule    string
-	AuthorName  string
-	AuthorEmail string
-}
-
 type OpenLiaBrowserConfig struct {
 	Configured         bool
 	Mode               string
@@ -167,38 +149,31 @@ type OpenLiaBrowserConfig struct {
 
 func defaultConfig() Config {
 	return Config{
-		Schema:           configSchema,
-		Version:          defaultVersion,
-		Mode:             "ssh",
-		InstallRoot:      defaultRemoteRoot,
-		Project:          defaultProject,
-		Model:            "gpt-5.6-luna",
-		OutputLanguage:   defaultOutputLanguage,
-		Timezone:         defaultTimezone,
-		Provider:         "copilot",
-		HermesImage:      defaultHermesImage,
-		HermesTag:        defaultHermesTag,
-		HermesDigest:     "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294",
-		LochoImage:       "openlia-locho:v" + defaultLochoVersion,
-		LochoVersion:     defaultLochoVersion,
-		LochoX8664SHA256: "7687311a3fe9671ac6f75427712dc556b15517493e892d9f81be7d0355bdd5f1",
-		LochoARM64SHA256: "80d089b3fdabe063b4c89fc6685e9bd0f297190d1af86d0f54624ba63d217b97",
-		APIHost:          "127.0.0.1",
-		WorkspaceUIHost:  "",
-		WorkspaceUIPort:  defaultWorkspaceUIPort,
-		OpenWebUIHost:    "",
-		OpenWebUIPort:    defaultOpenWebUIPort,
-		OpenWebUIImage:   defaultOpenWebUIImage,
-		OpenWebUIAuth:    true,
-		LochoHostEnabled: false,
-		EnabledSkills:    append([]string(nil), defaultSkills...),
-		WorkspaceGit: WorkspaceGitConfig{
-			Provider:    "github",
-			Branch:      "main",
-			Schedule:    "every 5m",
-			AuthorName:  "OpenLia Agent",
-			AuthorEmail: "openlia@localhost",
-		},
+		Schema:                configSchema,
+		Version:               defaultVersion,
+		Mode:                  "ssh",
+		InstallRoot:           defaultRemoteRoot,
+		Project:               defaultProject,
+		Model:                 "gpt-5.6-luna",
+		OutputLanguage:        defaultOutputLanguage,
+		Timezone:              defaultTimezone,
+		Provider:              "copilot",
+		HermesImage:           defaultHermesImage,
+		HermesTag:             defaultHermesTag,
+		HermesDigest:          "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294",
+		LochoImage:            "openlia-locho:v" + defaultLochoVersion,
+		LochoVersion:          defaultLochoVersion,
+		LochoX8664SHA256:      "7687311a3fe9671ac6f75427712dc556b15517493e892d9f81be7d0355bdd5f1",
+		LochoARM64SHA256:      "80d089b3fdabe063b4c89fc6685e9bd0f297190d1af86d0f54624ba63d217b97",
+		APIHost:               "127.0.0.1",
+		WorkspaceUIHost:       "",
+		WorkspaceUIPort:       defaultWorkspaceUIPort,
+		OpenWebUIHost:         "",
+		OpenWebUIPort:         defaultOpenWebUIPort,
+		OpenWebUIImage:        defaultOpenWebUIImage,
+		OpenWebUIAuth:         true,
+		LochoHostEnabled:      false,
+		EnabledSkills:         append([]string(nil), defaultSkills...),
 		BackupSchedule:        "20 4 * * *",
 		BackupScheduleEnabled: true,
 		BackupRemoteRetention: 30,
@@ -293,8 +268,6 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.Services = append(config.Services, ServiceHostConfig{Roles: make(map[string]string)})
 			case "fallback_providers":
 				config.FallbackProviders = append(config.FallbackProviders, FallbackProviderConfig{})
-			case "skill_sources":
-				config.SkillSources = append(config.SkillSources, SkillSourceConfig{})
 			case "backup.destinations":
 				config.BackupDestinations = append(config.BackupDestinations, BackupDestinationConfig{})
 			}
@@ -362,21 +335,6 @@ func parseConfigUnchecked(data string) (Config, error) {
 				current.KeyEnv, err = parseString(value)
 			default:
 				return Config{}, fmt.Errorf("line %d contains unknown fallback provider setting %q", lineNumber, key)
-			}
-		} else if section == "skill_sources" {
-			if len(config.SkillSources) == 0 {
-				return Config{}, fmt.Errorf("line %d defines skill source fields without a table", lineNumber)
-			}
-			current := &config.SkillSources[len(config.SkillSources)-1]
-			switch strings.Trim(key, "\"") {
-			case "name":
-				current.Name, err = parseString(value)
-			case "repository":
-				current.Repository, err = parseString(value)
-			case "branch":
-				current.Branch, err = parseString(value)
-			default:
-				return Config{}, fmt.Errorf("line %d contains unknown skill source setting %q", lineNumber, key)
 			}
 		} else if section == "backup.destinations" {
 			if len(config.BackupDestinations) == 0 {
@@ -502,20 +460,6 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.EnabledSkills, err = parseStringArray(value)
 			case "tools.enabled":
 				config.EnabledTools, err = parseStringArray(value)
-			case "workspace_git.enabled":
-				config.WorkspaceGit.Enabled, err = parseBool(value)
-			case "workspace_git.provider":
-				config.WorkspaceGit.Provider, err = parseString(value)
-			case "workspace_git.remote":
-				config.WorkspaceGit.Remote, err = parseString(value)
-			case "workspace_git.branch":
-				config.WorkspaceGit.Branch, err = parseString(value)
-			case "workspace_git.schedule":
-				config.WorkspaceGit.Schedule, err = parseString(value)
-			case "workspace_git.author_name":
-				config.WorkspaceGit.AuthorName, err = parseString(value)
-			case "workspace_git.author_email":
-				config.WorkspaceGit.AuthorEmail, err = parseString(value)
 			case "backup.identity_file":
 				config.BackupIdentityFile, err = parseString(value)
 				if err == nil {
@@ -744,25 +688,6 @@ func validateConfig(config Config) error {
 	if err := toolcatalog.Validate(config.EnabledTools); err != nil {
 		return err
 	}
-	sourceNames := make(map[string]bool)
-	for index, source := range config.SkillSources {
-		if !safeComponent(source.Name) {
-			return fmt.Errorf("skill source %d has invalid name %q", index, source.Name)
-		}
-		if sourceNames[source.Name] {
-			return fmt.Errorf("duplicate skill source name %q", source.Name)
-		}
-		sourceNames[source.Name] = true
-		if err := validateGitHubRepository(source.Repository); err != nil {
-			return fmt.Errorf("skill source %q: %w", source.Name, err)
-		}
-		if !safeGitBranch(source.Branch) {
-			return fmt.Errorf("skill source %q branch is invalid", source.Name)
-		}
-	}
-	if err := validateWorkspaceGit(config.WorkspaceGit); err != nil {
-		return err
-	}
 	hostNames := make(map[string]bool)
 	for i, host := range config.Services {
 		if host.Name == "" {
@@ -925,58 +850,6 @@ func validateWorkspaceUIPublicOrigin(value string) error {
 	return nil
 }
 
-func validateWorkspaceGit(gitConfig WorkspaceGitConfig) error {
-	if gitConfig.Provider == "" {
-		gitConfig.Provider = "github"
-	}
-	if gitConfig.Provider != "github" {
-		return errors.New("workspace Git provider must be github")
-	}
-	if gitConfig.Enabled && gitConfig.Remote == "" {
-		return errors.New("workspace Git remote is required when remote synchronization is enabled")
-	}
-	if gitConfig.Remote != "" && !gitConfig.Enabled {
-		return errors.New("workspace Git must be enabled when a remote is configured")
-	}
-	if gitConfig.Remote != "" {
-		if err := validateGitHubRemote(gitConfig.Remote); err != nil {
-			return err
-		}
-	}
-	if !safeGitBranch(gitConfig.Branch) {
-		return errors.New("workspace Git branch is invalid")
-	}
-	if gitConfig.Schedule == "" || len(gitConfig.Schedule) > 120 || strings.ContainsAny(gitConfig.Schedule, "\r\n") {
-		return errors.New("workspace Git schedule is invalid")
-	}
-	if gitConfig.AuthorName == "" || len(gitConfig.AuthorName) > 200 || strings.ContainsAny(gitConfig.AuthorName, "\r\n") {
-		return errors.New("workspace Git author name is invalid")
-	}
-	if gitConfig.AuthorEmail == "" || len(gitConfig.AuthorEmail) > 254 || strings.ContainsAny(gitConfig.AuthorEmail, "\r\n") || !strings.Contains(gitConfig.AuthorEmail, "@") {
-		return errors.New("workspace Git author email is invalid")
-	}
-	return nil
-}
-
-func validateGitHubRemote(remote string) error {
-	if err := validateGitHubRepository(remote); err != nil {
-		return fmt.Errorf("workspace Git remote %w", err)
-	}
-	return nil
-}
-
-func validateGitHubRepository(remote string) error {
-	parsed, err := url.Parse(remote)
-	if err != nil || parsed.Scheme != "https" || parsed.Host != "github.com" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return errors.New("must be an HTTPS github.com repository URL without credentials, query, or fragment")
-	}
-	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	if len(parts) != 2 || !safeGitHubSegment(parts[0]) || !safeGitHubSegment(strings.TrimSuffix(parts[1], ".git")) {
-		return errors.New("must use https://github.com/OWNER/REPOSITORY[.git]")
-	}
-	return nil
-}
-
 func validateOpenAIEndpoint(value string) error {
 	if value == "" {
 		return nil
@@ -997,35 +870,6 @@ func safeEnvName(value string) bool {
 	}
 	for _, character := range value[1:] {
 		if !((character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '_') {
-			return false
-		}
-	}
-	return true
-}
-
-func safeGitHubSegment(value string) bool {
-	if value == "" || value == "." || value == ".." {
-		return false
-	}
-	for _, character := range value {
-		if !(character >= 'a' && character <= 'z') && !(character >= 'A' && character <= 'Z') && !(character >= '0' && character <= '9') && !strings.ContainsRune("._-", character) {
-			return false
-		}
-	}
-	return true
-}
-
-func safeGitBranch(value string) bool {
-	if value == "" || strings.HasPrefix(value, ".") || strings.HasPrefix(value, "-") || strings.HasSuffix(value, ".") || strings.HasSuffix(value, "/") || strings.Contains(value, "..") || strings.Contains(value, "//") || strings.Contains(value, "@{") || strings.ContainsAny(value, " ~^:?*[\\\"\r\n") {
-		return false
-	}
-	for _, part := range strings.Split(value, "/") {
-		if part == "" || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
-			return false
-		}
-	}
-	for _, character := range value {
-		if !(character >= 'a' && character <= 'z') && !(character >= 'A' && character <= 'Z') && !(character >= '0' && character <= '9') && !strings.ContainsRune("._/-", character) {
 			return false
 		}
 	}
@@ -1239,10 +1083,6 @@ func renderConfig(config Config) string {
 	fmt.Fprintf(&builder, "[components]\nhermes_image = %q\nhermes_tag = %q\nhermes_digest = %q\nlocho_image = %q\nlocho_version = %q\nlocho_x86_64_sha256 = %q\nlocho_arm64_sha256 = %q\n\n", config.HermesImage, config.HermesTag, config.HermesDigest, config.LochoImage, config.LochoVersion, config.LochoX8664SHA256, config.LochoARM64SHA256)
 	fmt.Fprintf(&builder, "[api]\nenabled = %t\nhost = %q\n\n", config.APIEnabled, config.APIHost)
 	fmt.Fprintf(&builder, "[secrets]\nsource = %q\n\n", config.SecretSource)
-	for _, source := range config.SkillSources {
-		builder.WriteString("[[skill_sources]]\n")
-		fmt.Fprintf(&builder, "name = %q\nrepository = %q\nbranch = %q\n\n", source.Name, source.Repository, source.Branch)
-	}
 	builder.WriteString("[skills]\nenabled = [")
 	for index, skill := range config.EnabledSkills {
 		if index > 0 {
@@ -1259,7 +1099,6 @@ func renderConfig(config Config) string {
 		fmt.Fprintf(&builder, "%q", tool)
 	}
 	builder.WriteString("]\n")
-	fmt.Fprintf(&builder, "\n[workspace_git]\nenabled = %t\nprovider = %q\nremote = %q\nbranch = %q\nschedule = %q\nauthor_name = %q\nauthor_email = %q\n", config.WorkspaceGit.Enabled, config.WorkspaceGit.Provider, config.WorkspaceGit.Remote, config.WorkspaceGit.Branch, config.WorkspaceGit.Schedule, config.WorkspaceGit.AuthorName, config.WorkspaceGit.AuthorEmail)
 	fmt.Fprintf(&builder, "\n[backup]\nschedule = %q\nschedule_enabled = %t\nremote_retention = %d\n", config.BackupSchedule, config.BackupScheduleEnabled, config.BackupRemoteRetention)
 	if config.BackupKnownHosts != "" {
 		fmt.Fprintf(&builder, "known_hosts = %q\n", config.BackupKnownHosts)

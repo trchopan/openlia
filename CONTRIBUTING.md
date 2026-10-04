@@ -48,9 +48,7 @@ See [`packages/workspace-ui/README.md`](packages/workspace-ui/README.md) for
 package-local checks, scenarios, and preview commands.
 
 For bundled skill development, see
-[`docs/SKILL_DEVELOPMENT.md`](docs/SKILL_DEVELOPMENT.md). For the separate
-external repository contract, see
-[`docs/EXTERNAL_SKILLS.md`](docs/EXTERNAL_SKILLS.md).
+[`docs/SKILL_DEVELOPMENT.md`](docs/SKILL_DEVELOPMENT.md).
 
 The CLI smoke mode uses synthetic data and must not require provider
 credentials, Telegram, Locho, SSH, or a remote target. The local deployment

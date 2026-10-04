@@ -1,10 +1,8 @@
 # Skill Development And Testing
 
-OpenLia supports two different skill workflows. Bundled skills are developed in
-this repository and shipped with OpenLia. External skills are fetched from
-configured GitHub repositories and use the external manager described in
-[`EXTERNAL_SKILLS.md`](EXTERNAL_SKILLS.md). Their dependency and test contracts
-are intentionally different.
+Bundled skills are developed in this repository and shipped with OpenLia.
+Bundled skill customization follows the managed fork and migration workflow.
+Remote-repository skill import and update are not currently supported.
 
 ## Bundled Skills
 
@@ -35,10 +33,9 @@ go run . skills test SKILL_NAME
 OpenLia does not ship browser-backed skills or live browser canaries. The
 optional `openlia-browser` package is only a Playwright supervisor and MCP relay;
 its lifecycle is tested as part of the runtime package rather than as a skill.
-External skills may use an explicitly attached Playwright endpoint, but their
-browser behavior is outside the bundled OpenLia skill set and must be reviewed
-by the operator. Because the attached browser uses one shared authenticated
-profile, an external multi-call workflow must reserve the browser lease through
+Operator-created browser workflows must use the explicitly attached
+Playwright endpoint. Because the attached browser uses one shared authenticated
+profile, a multi-call workflow must reserve the browser lease through
 `openlia_browser_session_request`, pass its lease to every Playwright call,
 renew it during long reasoning or human handoff, and release it when finished.
 Browser tools are exposed directly and eagerly from the relay's conservative
@@ -63,22 +60,9 @@ file, the explicit Docker build inputs, development requirements when needed,
 third-party notices, and tests together. Rebuild the image before expecting the
 dependency in Hermes.
 
-## External Skills
-
-External skills do not use bundled `requirements.txt` aggregation and are not
-installed into Hermes' global Python environment. Their repository must provide
-`openlia-skills.json`; each skill must provide `SKILL.md`. Optional dependencies
-use these exact pairs:
-
-- `pyproject.toml` and `uv.lock`
-- `package.json` and `bun.lock`
-
-OpenLia audits frozen production dependencies in an isolated one-shot container
-and stores a content-addressed environment outside the skill tree. A manifest
-`test` argv array is also run in an isolated, networkless container. See the
-[external repository guide](EXTERNAL_SKILLS.md) for the schema, commands,
-approval requirements, customization flow, isolation guarantees, and current
-limitations.
+OpenLia currently distributes bundled skills. Remote-repository skill import,
+installation, and update commands are not available. Bundled skill customization
+continues through the managed fork and migration workflow.
 
 ## Safety
 
@@ -95,12 +79,6 @@ limitations.
 ## Deployment
 
 Bundled skill changes are synchronized by `openlia update openlia` and follow
-the bundled managed/fork migration flow. External repositories are not included
-in that release synchronization. Add a source once with `skill-sources add`;
-initialized deployments validate and fetch it automatically. `skills install`
-and `skills update` fetch and audit automatically, show a commit-bound plan, and
-then request confirmation. Explicit `skill-sources check`, `skill-sources fetch`,
-and `skills audit` commands are diagnostics. In both workflows, fork a managed
-installed skill before intentional local customization so future updates do not
-overwrite it. For external skills, rerunning `skills fork` refreshes an existing
-fork; the `fork-refresh` command is an advanced alias.
+the bundled managed/fork migration flow. Fork a managed skill before intentional
+local customization so future distribution updates preserve the fork and can
+stage a migration proposal.

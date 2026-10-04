@@ -157,8 +157,6 @@ func (c Compose) composeEnvironment() []string {
 	return []string{
 		"OPENLIA_DATA_ROOT=" + c.Config.DataRoot,
 		"OPENLIA_SYSTEM_SKILLS_ROOT=" + c.Config.SystemSkillsRoot,
-		"OPENLIA_SKILLS_CACHE_ROOT=" + c.Config.SkillsCacheRoot,
-		"OPENLIA_SKILLS_ENV_ROOT=" + c.Config.SkillsEnvRoot,
 		"OPENLIA_SECRET_DIR=" + c.Config.SecretDir,
 		"OPENLIA_META_ROOT=" + c.Config.MetaRoot,
 		"OPENLIA_BACKUP_ROOT=" + c.Config.BackupRoot,

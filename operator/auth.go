@@ -37,6 +37,27 @@ func ListAuth(config Config) (AuthListResult, error) {
 	}, SecretValues: "redacted"}, nil
 }
 
+func readSecretValue(path, wanted string) (string, error) {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return "", os.ErrNotExist
+	}
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
+		return "", fmt.Errorf("protected secret file must be a regular mode-0600 file")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read protected secret file: %w", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		key, value, ok := strings.Cut(strings.TrimSuffix(line, "\r"), "=")
+		if ok && key == wanted {
+			return value, nil
+		}
+	}
+	return "", nil
+}
+
 func RotateAuth(config Config, source string, now time.Time, composers ...Compose) error {
 	if len(composers) > 0 {
 		return rotateAuthWithCompose(context.Background(), config, composers[0], source, now)
@@ -253,9 +274,6 @@ func validateSecretFile(path string) error {
 		}
 		if key == "COPILOT_GITHUB_TOKEN" && !strings.HasPrefix(value, "gho_") && !strings.HasPrefix(value, "github_pat_") && !strings.HasPrefix(value, "ghu_") {
 			return fmt.Errorf("COPILOT_GITHUB_TOKEN must use a supported OAuth, fine-grained, or GitHub App token")
-		}
-		if key == "OPENLIA_GIT_TOKEN" && !strings.HasPrefix(value, "ghp_") && !strings.HasPrefix(value, "gho_") && !strings.HasPrefix(value, "ghu_") && !strings.HasPrefix(value, "github_pat_") {
-			return fmt.Errorf("OPENLIA_GIT_TOKEN must use a supported GitHub personal access token")
 		}
 		count++
 	}

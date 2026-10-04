@@ -80,13 +80,9 @@ in the configured `fallback_providers` entries instead.
 ## Workspace Git
 
 The provider-free CLI and local smoke checks validate the bundled workspace Git
-skill, image tooling, profile sync script, protected workspace template, and
-local repository initialization without a remote.
-Actual remote synchronization requires a repository-scoped GitHub PAT in the
-protected source and a disposable or approved private repository. The setup
-flow performs the initial push, while the scheduled job only pulls clean
-fast-forward changes. Divergent or conflicting histories are refused rather
-than overwriting local workspace files.
+history skill, image tooling, protected workspace template, and local repository
+initialization. Workspace Git is local-only; encrypted OpenLia backups provide
+recovery and off-machine copies.
 
 Run against a disposable Linux target with external local inputs. Replace the
 target and root placeholders with values for your own environment:
