@@ -40,8 +40,56 @@ ALLOWED_ROOT_FILES = {
 
 MD_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((?!https?://|mailto:|/files/)([^)#]+)(?:#[^)]+)?\)")
 WIKI_LINK_PATTERN = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
+URI_SCHEME_PATTERN = re.compile(r"^[a-z][a-z0-9+.-]*:", re.IGNORECASE)
+FENCE_PATTERN = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+INLINE_CODE_PATTERN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.DOTALL)
 CHECKBOX_PATTERN = re.compile(r"^\s*-\s*\[([ xX])\]", re.MULTILINE)
 STATUS_PATTERN = re.compile(r"(?i)^status:\s*([a-z0-9_-]+)", re.MULTILINE)
+
+
+def _blank_code_text(text: str) -> str:
+    return "".join(
+        "\n" if char == "\n" else "\r" if char == "\r" else " "
+        for char in text
+    )
+
+
+def _blank_code(match: re.Match[str]) -> str:
+    return _blank_code_text(match.group())
+
+
+def mask_markdown_code(content: str) -> str:
+    """Blank fenced and inline code so their examples are not treated as links."""
+    masked_lines = []
+    fence_char = None
+    fence_length = 0
+
+    for line in content.splitlines(keepends=True):
+        line_content = line.rstrip("\r\n")
+        if fence_char:
+            closing_fence = re.match(
+                rf"^ {{0,3}}{re.escape(fence_char)}{{{fence_length},}}[ \t]*$",
+                line_content,
+            )
+            masked_lines.append(_blank_code_text(line))
+            if closing_fence:
+                fence_char = None
+                fence_length = 0
+            continue
+
+        opening_fence = FENCE_PATTERN.match(line_content)
+        if opening_fence:
+            marker = opening_fence.group(1)
+            if marker[0] == "~" or "`" not in opening_fence.group(2):
+                fence_char = marker[0]
+                fence_length = len(marker)
+                masked_lines.append(_blank_code_text(line))
+                continue
+
+        masked_lines.append(line)
+
+    masked = "".join(masked_lines)
+    return INLINE_CODE_PATTERN.sub(_blank_code, masked)
 
 
 def audit_root_files(workspace: Path) -> list[dict[str, Any]]:
@@ -105,10 +153,17 @@ def audit_broken_links(workspace: Path) -> list[dict[str, Any]]:
             except Exception:
                 continue
 
+            content = mask_markdown_code(content)
+
             # Check markdown links
             for match in MD_LINK_PATTERN.finditer(content):
                 target = match.group(2).strip()
-                if not target or "<" in target or ">" in target:
+                if (
+                    not target
+                    or "<" in target
+                    or ">" in target
+                    or URI_SCHEME_PATTERN.match(target)
+                ):
                     continue
                 # Resolve relative target
                 target_path = (file_path.parent / target).resolve()
@@ -280,6 +335,29 @@ def self_test() -> None:
         (clean_dir / "README.md").write_text("# Clean", encoding="utf-8")
         clean_result = run_audit(clean_dir)
         assert clean_result["total_issues"] == 0, f"Expected 0 issues for clean workspace, got {clean_result}"
+
+        # Example links in code and non-file URIs are not workspace file references.
+        link_test = tmp / "link-test"
+        (link_test / "goals").mkdir(parents=True)
+        (link_test / "goals" / "career.md").write_text("Career goal", encoding="utf-8")
+        (link_test / "AGENTS.md").write_text(
+            "`[Career Goal](openlia://workspace/goals/career.md)`\n"
+            "`[Inbox Triage](openlia://skills/inbox-triage)`\n"
+            "`[Specs](./specs.md)`\n"
+            "[Canonical URI](openlia://workspace/goals/career.md)\n"
+            "[Existing relative link](goals/career.md)\n"
+            "[Broken relative link](goals/missing.md)\n"
+            "```markdown\n"
+            "[Fenced example](./fenced-missing.md)\n"
+            "```\n",
+            encoding="utf-8",
+        )
+        link_result = run_audit(link_test)
+        broken_links = [issue for issue in link_result["issues"] if issue["type"] == "broken-link"]
+        assert len(broken_links) == 1, (
+            f"Expected only the active broken relative link, got {broken_links}"
+        )
+        assert "goals/missing.md" in broken_links[0]["observation"]
 
 
 def main() -> None:
