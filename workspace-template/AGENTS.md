@@ -23,7 +23,8 @@ records and preserve them unless the user explicitly asks for a change.
   - `monitors/monitor-template.md`: standing checks, watch URLs, and triggers.
   - `tasks/task-template.md`: concrete physical actions with priorities and context tags.
   - `people/person-template.md`: relationships, important dates, and open loops.
-  - `knowledge/claims/claim-record.md`: durable personal claims with evidence, status, and temporal scope.
+  - `knowledge/claim-record.md`: starter format for durable personal claims;
+    create actual records under `knowledge/claims/`.
   - `ideas/idea-template.md`: seeds, opportunities, and exploration questions.
   - `travel/trip-template.md`: itineraries, reservations, and packing lists.
   - `shopping/item-template.md`: product research, price targets, and evaluations.
