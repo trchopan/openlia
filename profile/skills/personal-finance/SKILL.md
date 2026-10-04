@@ -40,30 +40,43 @@ existing accounts without explaining the proposed change first.
 
 ## Procedure
 
-1. Identify the journal explicitly. Use `LEDGER_FILE` when it is set; otherwise
-   ask for the journal path instead of guessing or creating one. Never expose
-   the complete journal in a response unless it is specifically requested.
-2. Validate before analyzing with `hledger -f JOURNAL check`. If validation
+1. Identify the journal. Use `LEDGER_FILE` when it is set. Otherwise inspect the
+   runtime workspace's `finance/` directory and use its single, unambiguous
+   existing hledger journal. If there are multiple plausible journals, ask
+   which one to use. Never expose the complete journal in a response unless it
+   is specifically requested.
+2. If no journal exists, do not create one for a read-only request. When the
+   person explicitly approves a specific journal change, such as recording a
+   proposed transaction, create `finance/journal.hledger` in the runtime
+   workspace as part of that approved change. Do not ask for a journal path just
+   to perform this setup; tell the person which default path you used. Preserve
+   any existing file at that path, and ask if it is present but cannot safely be
+   identified as the journal.
+3. For a balanced transaction, use a payment/source account the person has
+   stated or configured as their default. Do not infer `assets:cash` or another
+   balancing account just from wording such as “I spent”. If the source account
+   is unknown, ask which account was used before recording the transaction.
+4. Validate before analyzing with `hledger -f JOURNAL check`. If validation
    fails, report the error and stop rather than producing financial conclusions
    from an invalid ledger.
-3. Run only the reports needed for the question. Common read-only commands are:
+5. Run only the reports needed for the question. Common read-only commands are:
    `stats`, `balance`, `register`, `incomestatement`, `balancesheet`, and
    `cashflow`. Add an explicit period or account query when appropriate, and
    record the journal path, date range, account scope, and currencies used.
-4. For a structured review, normalize the relevant hledger account totals into
+6. For a structured review, normalize the relevant hledger account totals into
    JSON for `scripts/finance_review.py`. Its `income` values use hledger's
    normal sign convention, where income balances are usually negative and
    expense balances are usually positive. Treat the helper as a presentation
    aid, not as a replacement for hledger validation.
-5. Separate reported facts from interpretation. Call out pending or uncleared
+7. Separate reported facts from interpretation. Call out pending or uncleared
    entries, omitted accounts, incomplete periods, missing prices, and any
    assumptions about currency conversion or account classification.
-6. For CSV or other imports, preserve the original export, inspect the columns
+8. For CSV or other imports, preserve the original export, inspect the columns
    and rules, preview the converted postings with hledger, and check for
    duplicates before proposing an import. Do not run `hledger import`,
    `hledger add`, or edit a journal until the person explicitly approves the
    exact change.
-7. After an approved journal change, run `hledger check` again and show a
+9. After an approved journal change, run `hledger check` again and show a
    concise diff or transaction summary. Never send money, place a trade, or
    change an external financial account as part of this workflow.
 
