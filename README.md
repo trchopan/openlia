@@ -1083,6 +1083,9 @@ For the explicit live Telegram and Personal Finance smoke test, see
 identifiers as arguments and leaves the development target running unless
 `--cleanup` is supplied.
 
+For an operational guide on running disposable development drills, Telegram checks,
+and Locho tunneling with `openlia_dev`, see [`docs/E2E_DRILLS.md`](docs/E2E_DRILLS.md).
+
 ## Contributing and License
 
 Development requirements and local checks are documented in

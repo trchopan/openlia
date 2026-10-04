@@ -1,0 +1,76 @@
+# Minimal, secret-free profile template for running disposable or remote development drills.
+# Copy to ~/.config/openlia/dev/config.toml and adjust values for your environment.
+
+[openlia]
+schema = 2
+version = "0.1.0"
+mode = "ssh"              # Use "ssh" for remote deployment; use "local" for local Docker testing
+target = "user@test-host" # SSH user@host (omit when mode = "local")
+root = "/opt/openlia_dev" # Remote installation root
+project = "openlia_dev"   # Docker Compose project name
+model = "gpt-5.6-luna"
+output_language = "vi"    # Language code for agent responses (e.g. "vi", "en")
+timezone = "Asia/Ho_Chi_Minh"
+provider = "copilot"
+external_network = ""
+
+[workspace-ui]
+host = "127.0.0.1"
+port = 8089
+# Argon2id password hash for Workspace UI authentication.
+# Generate via: ./openlia workspace-ui password
+password_hash = ""
+
+[open-webui]
+host = "127.0.0.1"
+port = 8090
+auth = true
+
+[locho-host]
+# Set to true to start the private locho-host sidecar container on the server
+# and allow encrypted peer-to-peer attachment tunnels for Workspace UI and Open WebUI.
+enabled = true
+
+[locho]
+relay_config = "~/.config/openlia/locho/relay.toml"
+relay_secrets = "~/.config/openlia/locho/relay.env"
+
+[release]
+source = ""
+
+[components]
+hermes_image = "openlia-hermes:v2026.9.14"
+hermes_tag = "v2026.9.14"
+hermes_digest = "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294"
+locho_image = "openlia-locho:v1.2.0"
+locho_version = "1.2.0"
+locho_x86_64_sha256 = "7687311a3fe9671ac6f75427712dc556b15517493e892d9f81be7d0355bdd5f1"
+locho_arm64_sha256 = "80d089b3fdabe063b4c89fc6685e9bd0f297190d1af86d0f54624ba63d217b97"
+
+[api]
+enabled = false
+host = "127.0.0.1"
+
+[secrets]
+source = "~/.config/openlia/dev/openlia_dev.env"
+
+[skills]
+enabled = [
+  "inbox-triage",
+  "daily-briefing",
+  "weekly-review",
+  "project-review",
+  "decision-analysis",
+  "deep-research",
+  "personal-finance",
+  "claim-review",
+  "workspace-organize"
+]
+
+[tools]
+enabled = []
+
+[backup]
+schedule = "20 4 * * *"
+schedule_enabled = false
+remote_retention = 30
