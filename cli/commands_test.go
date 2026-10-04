@@ -3,7 +3,6 @@ package cli
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -23,48 +22,6 @@ func TestDeploymentResultStateRejectsMissingOrInvalidState(t *testing.T) {
 	for _, raw := range [][]byte{[]byte(`{}`), []byte(`not-json`)} {
 		if state, ok := deploymentResultState(raw); ok || state != "" {
 			t.Fatalf("deployment state %q, %t for %s", state, ok, raw)
-		}
-	}
-}
-
-func TestSkillSourceAddAndRemoveDispatch(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.toml")
-	t.Setenv("OPENLIA_CONFIG", path)
-	if err := saveConfig(defaultConfig()); err != nil {
-		t.Fatal(err)
-	}
-	if code := commandSkillSources(Options{}, []string{"add", "team", "--repository", "https://github.com/example/skills", "--branch", "release/v2"}); code != ExitOK {
-		t.Fatalf("add exit code = %d", code)
-	}
-	config, err := loadConfig()
-	if err != nil || len(config.SkillSources) != 1 || config.SkillSources[0].Name != "team" {
-		t.Fatalf("source was not persisted: %#v, %v", config.SkillSources, err)
-	}
-	if code := commandSkillSources(Options{}, []string{"remove", "team"}); code != ExitOK {
-		t.Fatalf("remove exit code = %d", code)
-	}
-	config, err = loadConfig()
-	if err != nil || len(config.SkillSources) != 0 {
-		t.Fatalf("source was not removed: %#v, %v", config.SkillSources, err)
-	}
-}
-
-func TestSkillParsersAcceptExternalIdentifiers(t *testing.T) {
-	if !validExternalSkillIdentifier("team/research") || !validSkillIdentifier("team/research") || !validSkillIdentifier("daily-briefing") {
-		t.Fatal("valid skill identifier was rejected")
-	}
-	for _, value := range []string{"team", "team/research/extra", "../research", "team/.hidden", "team/re search"} {
-		if validExternalSkillIdentifier(value) {
-			t.Fatalf("invalid external identifier %q was accepted", value)
-		}
-	}
-}
-
-func TestSkillMutationsRejectNonInteractiveApproval(t *testing.T) {
-	t.Setenv("OPENLIA_CONFIG", filepath.Join(t.TempDir(), "missing.toml"))
-	for _, args := range [][]string{{"install", "team/research"}, {"update", "team/research"}, {"uninstall", "research"}, {"reset", "research"}} {
-		if code := commandSkills(Options{NonInteractive: true}, args, fstest.MapFS{}); code != ExitUsage {
-			t.Fatalf("skills %v exit code = %d, want %d", args, code, ExitUsage)
 		}
 	}
 }
@@ -112,10 +69,39 @@ func TestAuthSetupPersistsPromptedSourceBeforeDeployment(t *testing.T) {
 	}
 }
 
-func TestRunDispatchesSkillSources(t *testing.T) {
+func TestRunRejectsRetiredSkillSourceCommand(t *testing.T) {
 	t.Setenv("OPENLIA_CONFIG", filepath.Join(t.TempDir(), "missing.toml"))
-	if code := Run([]string{"skill-sources", "list"}, fstest.MapFS{}); code != ExitPrereq {
-		t.Fatalf("skill-sources dispatch exit code = %d, want %d", code, ExitPrereq)
+	if code := Run([]string{"skill-sources", "list"}, fstest.MapFS{}); code != ExitUsage {
+		t.Fatalf("retired skill-sources command exit code = %d, want %d", code, ExitUsage)
+	}
+}
+
+func TestInitRejectsWorkspaceGitRemoteFlag(t *testing.T) {
+	if code := commandInit(Options{}, []string{"--local", "--workspace-git-remote", "https://github.com/example/workspace.git"}, fstest.MapFS{}); code != ExitUsage {
+		t.Fatalf("retired workspace Git remote flag exit code = %d, want %d", code, ExitUsage)
+	}
+}
+
+func TestWorkspaceGitSetupRejectsRemoteOptions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("OPENLIA_CONFIG", path)
+	config := defaultConfig()
+	config.Mode = "local"
+	config.Target = ""
+	config.InstallRoot = filepath.Join(t.TempDir(), "openlia")
+	if err := saveConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	if code := commandWorkspaceGit(Options{}, []string{"setup", "--remote", "https://github.com/example/workspace.git"}); code != ExitUsage {
+		t.Fatalf("retired workspace Git remote option exit code = %d, want %d", code, ExitUsage)
+	}
+}
+
+func TestSkillsRejectsRetiredExternalLifecycleActions(t *testing.T) {
+	for _, action := range []string{"install", "update", "uninstall", "reset", "audit", "fork-refresh"} {
+		if code := commandSkills(Options{NonInteractive: true}, []string{action}, fstest.MapFS{}); code != ExitUsage {
+			t.Fatalf("retired skills %s action exit code = %d, want %d", action, code, ExitUsage)
+		}
 	}
 }
 
@@ -158,25 +144,6 @@ func TestAttachmentHostIDValidation(t *testing.T) {
 		if _, err := attachmentHostID(value); err == nil {
 			t.Fatalf("invalid attachment config was accepted: %q", value)
 		}
-	}
-}
-
-func TestSkillSourceAddDoesNotPersistEnvironmentToken(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.toml")
-	t.Setenv("OPENLIA_CONFIG", path)
-	t.Setenv("OPENLIA_SKILLS_GIT_TOKEN", "github_pat_super_secret")
-	if err := saveConfig(defaultConfig()); err != nil {
-		t.Fatal(err)
-	}
-	if code := commandSkillSources(Options{}, []string{"add", "team", "--repository", "https://github.com/example/skills"}); code != ExitOK {
-		t.Fatalf("add exit code = %d", code)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "github_pat_super_secret") || strings.Contains(string(data), "OPENLIA_SKILLS_GIT_TOKEN") {
-		t.Fatalf("token leaked to config: %s", data)
 	}
 }
 

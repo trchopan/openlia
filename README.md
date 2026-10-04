@@ -17,9 +17,7 @@ or a remote Linux VM:
 - A workspace template organizes personal information around durable concepts.
 - A claim ledger records reusable personal context with evidence and lifecycle
   metadata rather than treating every model inference as a fact.
-- Hermes skills provide workflows that operate across those concepts.
-- Audited external skill repositories add optional workflows without folding
-  their dependencies into the Hermes global environment.
+- Bundled Hermes skills provide workflows that operate across those concepts.
 - Locho attachments provide private access to selected external services.
 - Authentication is kept outside Git and supports provider credential rotation.
 - A derived image makes `bun` and `uv` available to Hermes and its skills.
@@ -406,9 +404,8 @@ underlying personal model consistent.
 
 The first implementation is a thin operations layer, not a new agent runtime.
 It provides a Go operator CLI, pinned Docker/Compose assets, a file-based
-Personal OS template, twelve bundled workflow skills, external skill repository
-management, credential rotation, Locho attachments, and backup/recovery
-operations for local or remote deployments.
+Personal OS template, bundled workflow skills, credential rotation, Locho
+attachments, and backup/recovery operations for local or remote deployments.
 
 The initial implementation will establish:
 
@@ -417,8 +414,8 @@ The initial implementation will establish:
 2. A versioned Hermes workspace template with `SOUL.md`, `AGENTS.md`, skills,
    and optional review automations.
 3. Docker deployment with persistent state, pinned runtime dependencies, and
-   operational commands for update, backup, restore, health checks, and
-   workspace Git synchronization.
+   operational commands for update, backup, restore, health checks, and local
+   workspace Git history tracking.
 4. Credential rotation for OpenAI-compatible endpoints and GitHub Copilot
    without placing secrets in Git.
 5. Locho attachment management for multiple hosts and multiple services per
@@ -774,8 +771,7 @@ runtime backups when that recovery point is no longer needed.
 as command-line arguments.
 
 The source file may contain `COPILOT_GITHUB_TOKEN`, `OPENAI_GATEWAY_API_KEY`,
-`OPENAI_API_KEY`, numbered OpenAI key siblings, `OPENLIA_GIT_TOKEN`, or
-`OPENLIA_SKILLS_GIT_TOKEN` for private external skill repositories.
+`OPENAI_API_KEY`, and numbered OpenAI key siblings.
 Classic `ghp_*` tokens are not valid for Copilot. Hermes reads the file through
 its `secrets.command` source; its values are never printed by OpenLia.
 
@@ -797,36 +793,12 @@ Do not set `OPENAI_BASE_URL` for this provider chain. Assign the Locho service
 the `openai-gateway` role and declare its explicit `/v1` URL in the matching
 `fallback_providers` entry. Hermes keeps `openai-api` pointed at official OpenAI.
 
-OpenLia initializes the workspace as a local Git repository even when no remote
-is configured. It creates an initial commit and preserves subsequent approved
-workspace updates as local history. Local commits use concise `backup:` subjects
-and do not authorize a remote push.
-
-To additionally enable GitHub backup, add a repository-scoped GitHub personal
-access token to the same protected source. The token must be limited to the
-target repository and use a supported GitHub PAT format:
-
-```dotenv
-OPENLIA_GIT_TOKEN=github_pat_...
-```
-
-Configure the non-secret repository settings during initialization:
-
-```sh
-./openlia init --local --root "$HOME/.openlia" \
-  --workspace-git-remote https://github.com/OWNER/REPOSITORY.git
-```
-
-The remote URL, branch, schedule, and commit identity are stored in the
-operator `config.toml`; the PAT remains only in the protected secret source.
-OpenLia safely reconciles an existing remote `main` history, performs the
-initial push, and enables a no-agent Hermes pull job. The default schedule is
-every five minutes. Conflicting histories stop without discarding either side.
-
-When configured, the automatic job only fast-forwards a clean local branch from the remote. It
-does not stage, commit, rebase, or push workspace changes, and does not invoke a
-model. Use the bundled `workspace-git` skill for status checks, requested
-pushes, structural branches, and GitHub pull requests.
+OpenLia initializes the workspace as a local Git repository and records an
+initial commit. Use local Git history to track approved workspace changes; do
+not configure a Git remote or use Git network operations. Encrypted OpenLia
+backups preserve the workspace, including its local Git history, and are the
+recovery mechanism. See the backup section below for scheduling and remote
+destinations.
 
 The Hermes agent uses `Asia/Ho_Chi_Minh` by default. Set another IANA timezone
 per target during initialization:
@@ -892,7 +864,7 @@ OPENLIA_CONFIG="$HOME/.config/openlia/remote.toml" openlia status
 
 `openlia backup create` creates an encrypted durable backup of the workspace,
 workspace Git history, Hermes agent state, profile-managed files, metadata, and
-custom or external skills. The operator machine holds the age private identity;
+custom skills. The operator machine holds the age private identity;
 the target receives only its public recipient and can encrypt but cannot
 decrypt. `openlia init` creates the operator identity at
 `~/.config/openlia/backup-identity.txt`; `openlia backup keygen` creates it for
@@ -1046,39 +1018,12 @@ Skills are workflow-oriented rather than domain-specific:
   openlia skills test deep-research
 ```
 
-External skills can be sourced from public or private GitHub HTTPS repositories,
-resolved to immutable commits, audited with frozen per-skill dependencies, and
-installed with explicit approval. For a private repository, put
-`OPENLIA_SKILLS_GIT_TOKEN` in the protected dotenv configured by
-`[secrets].source`, then run `openlia auth rotate` on an initialized deployment
-(`openlia auth setup` can persist the source path when it has not been set):
-
-```text
-  openlia skill-sources add team https://github.com/OWNER/REPOSITORY --branch main
-  openlia skills list
-  openlia skills show team/release-notes
-  openlia skills install team/release-notes
-  openlia skills update release-notes
-  openlia skills uninstall release-notes
-```
-
-On an initialized deployment, source addition validates and fetches
-automatically. Install fetches, audits, and displays an immutable commit-bound
-plan before confirmation, then enables the skill by default; use `--disabled`
-to install without exposing it to Hermes. Update likewise fetches, audits, and
-shows a commit-bound plan before confirmation. `skill-sources check`,
-`skill-sources fetch`, and `skills audit` remain available as diagnostics, not
-required ceremony. For an installed external skill, `skills fork` is
-idempotent and refreshes the recorded patch when the skill is already forked;
-`skills fork-refresh` is the advanced refresh-only alias.
-
-External Python and JavaScript dependencies use checked-in `uv.lock` and
-`bun.lock` files and content-addressed isolated environments. They are not
-installed into Hermes globally. See
-[`docs/EXTERNAL_SKILLS.md`](docs/EXTERNAL_SKILLS.md) for repository format,
-commands, approvals, testing, updates, customization, and limitations. See
-[`docs/SKILL_DEVELOPMENT.md`](docs/SKILL_DEVELOPMENT.md) for the distinction
-between bundled and external development.
+OpenLia currently provides the bundled skills and supports local customization
+of bundled skills through `openlia skills fork` and `openlia skills migrate`.
+Git-repository-based external skill import and update commands have been
+removed; a replacement design will be documented separately. See
+[`docs/SKILL_DEVELOPMENT.md`](docs/SKILL_DEVELOPMENT.md) for bundled skill
+development.
 
 ## Security Boundaries
 
@@ -1086,16 +1031,6 @@ between bundled and external development.
 - `/opt/data` is the only mutable Hermes volume.
 - The OpenLia migration resolver is distribution-owned and mounted read-only;
   it can propose migrations but cannot edit active skills.
-- External sources are resolved to immutable Git commits and cached with a
-  SHA-256 digest; unsafe trees and bundled-name collisions are rejected.
-- External dependency builds use frozen lockfiles in a restricted one-shot
-  container. In local non-root mode the builder uses the operator account's
-  UID/GID; remote and root-run operations use UID/GID `10000`. The builder has
-  no deployment secret mount. External tests run without a network or
-  deployment secrets.
-- External install, update, uninstall, reset, and migration apply operations
-  require exact interactive confirmation where documented; audits do not prove
-  that third-party instructions or code are safe.
 - The default Compose stack has no public ports and no Docker socket mount.
 - Workspace UI all-interface bindings require an Argon2id password and protect
   workspace APIs with expiring in-memory sessions; direct HTTP should only be
@@ -1103,18 +1038,13 @@ between bundled and external development.
 - Locho listeners use the private Compose network and are never published.
 - Workspace initialization is copy-once; later deployments preserve user files.
 - Durable backups exclude Open WebUI, secret files, OAuth state, bundled image
-  skills, rebuildable caches/environments, and Locho capabilities. Protected
+  skills, rebuildable caches, and Locho capabilities. Protected
   durable archive files are encrypted to an operator-held age identity before
   retention or remote upload. Operation-scoped rollback snapshots contain only
   the specific files required to undo an approved mutation; they remain
   local-only protected files and are not part of the remote backup format.
 - Dangerous unattended actions are denied and skill writes are staged for review.
 - Local workspace Git history does not require credentials or a remote.
-- Optional GitHub backup uses a repository-scoped PAT through a mounted askpass
-  helper; credentials are not stored in Git remotes or workspace files.
-- Configured automatic workspace pulls use a static no-agent cron script and
-  refuse dirty-branch conflicts, instruction-file changes, hard resets, and
-  force-pushes.
 
 ## Local Verification
 

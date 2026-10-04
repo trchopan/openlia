@@ -276,8 +276,6 @@ func scheduleRuntimeConfig(config Config) Config {
 	config.BackupRoot = "/runtime/backups"
 	config.MetaRoot = "/runtime/meta"
 	config.StateFile = "/runtime/state"
-	config.SkillsCacheRoot = "/runtime/skill-cache"
-	config.SkillsEnvRoot = "/runtime/skill-envs"
 	config.OpenWebUIDataRoot = "/runtime/open-webui"
 	config.LochoHostRoot = "/runtime/locho-host"
 	config.LochoHostConfig = "/runtime/locho-host/locho.toml"

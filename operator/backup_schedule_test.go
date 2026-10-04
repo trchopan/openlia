@@ -55,8 +55,6 @@ func TestScheduleRuntimeConfigProjectsOptionalRuntimePaths(t *testing.T) {
 		t.Fatalf("projected scheduler config is invalid: %v", err)
 	}
 	for name, path := range map[string]string{
-		"skills cache":          runtimeConfig.SkillsCacheRoot,
-		"skills env":            runtimeConfig.SkillsEnvRoot,
 		"Open WebUI":            runtimeConfig.OpenWebUIDataRoot,
 		"Locho root":            runtimeConfig.LochoHostRoot,
 		"Locho config":          runtimeConfig.LochoHostConfig,

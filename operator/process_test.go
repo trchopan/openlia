@@ -34,8 +34,6 @@ func TestComposeRunPassesResolvedRuntimeEnvironment(t *testing.T) {
 	for _, expected := range []string{
 		"OPENLIA_DATA_ROOT=" + config.DataRoot,
 		"OPENLIA_SYSTEM_SKILLS_ROOT=" + config.SystemSkillsRoot,
-		"OPENLIA_SKILLS_CACHE_ROOT=" + config.SkillsCacheRoot,
-		"OPENLIA_SKILLS_ENV_ROOT=" + config.SkillsEnvRoot,
 		"OPENLIA_SECRET_DIR=" + config.SecretDir,
 		"OPENLIA_NETWORK_NAME=" + config.NetworkName,
 		"OPENLIA_ENABLED_TOOLS=pdf,ocr",

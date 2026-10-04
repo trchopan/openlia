@@ -73,19 +73,13 @@ func TestWorkspaceGitMaintainsLocalHistoryWithoutRemote(t *testing.T) {
 	}
 	runner := &localWorkspaceGitRunner{workspace: workspace}
 	compose := NewCompose(Config{ProjectName: "test", ComposeProjectDir: t.TempDir(), ComposeFile: filepath.Join(t.TempDir(), "compose.yaml")}, runner)
-	options := WorkspaceGitOptions{
-		Action:      "setup",
-		Branch:      "main",
-		Schedule:    "every 5m",
-		AuthorName:  "OpenLia Agent",
-		AuthorEmail: "openlia@localhost",
-	}
+	options := WorkspaceGitOptions{Action: "setup"}
 
 	result, err := WorkspaceGit(context.Background(), compose, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.OK || result.AutomaticPull || result.InitialPush || result.Remote != "" {
+	if !result.OK {
 		t.Fatalf("unexpected local setup result: %+v", result)
 	}
 	if got := runWorkspaceGitCommand(t, workspace, "log", "-1", "--format=%s"); got != "chore: initialize OpenLia workspace" {
@@ -93,9 +87,6 @@ func TestWorkspaceGitMaintainsLocalHistoryWithoutRemote(t *testing.T) {
 	}
 	if got := runWorkspaceGitCommand(t, workspace, "remote"); got != "" {
 		t.Fatalf("local workspace has unexpected remote %q", got)
-	}
-	if got := runWorkspaceGitCommand(t, workspace, "config", "--bool", "--get", "openlia.workspace-remote-enabled"); got != "false" {
-		t.Fatalf("local workspace remote state = %q", got)
 	}
 	if runner.cronCalls != 0 || runner.remoteCalls != 0 {
 		t.Fatalf("local setup used remote synchronization: cron=%d remote=%d", runner.cronCalls, runner.remoteCalls)
@@ -124,15 +115,12 @@ func TestWorkspaceGitEnsureInitializesEmptyLocalRepository(t *testing.T) {
 	runner := &localWorkspaceGitRunner{workspace: workspace}
 	compose := NewCompose(Config{ProjectName: "test", ComposeProjectDir: t.TempDir(), ComposeFile: filepath.Join(t.TempDir(), "compose.yaml")}, runner)
 	result, err := WorkspaceGit(context.Background(), compose, WorkspaceGitOptions{
-		Action:      "ensure",
-		Branch:      "main",
-		AuthorName:  "OpenLia Agent",
-		AuthorEmail: "openlia@localhost",
+		Action: "ensure",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.OK || result.AutomaticPull {
+	if !result.OK {
 		t.Fatalf("unexpected ensure result: %+v", result)
 	}
 	if got := runWorkspaceGitCommand(t, workspace, "log", "-1", "--format=%s"); got != "chore: initialize OpenLia workspace" {
@@ -160,10 +148,7 @@ func TestWorkspaceGitSetupUnstagesProtectedPathsOnFailure(t *testing.T) {
 	runner := &localWorkspaceGitRunner{workspace: workspace}
 	compose := NewCompose(Config{ProjectName: "test", ComposeProjectDir: t.TempDir(), ComposeFile: filepath.Join(t.TempDir(), "compose.yaml")}, runner)
 	_, err := WorkspaceGit(context.Background(), compose, WorkspaceGitOptions{
-		Action:      "setup",
-		Branch:      "main",
-		AuthorName:  "OpenLia Agent",
-		AuthorEmail: "openlia@localhost",
+		Action: "setup",
 	})
 	if err == nil || !strings.Contains(err.Error(), "refused a credential or runtime path") {
 		t.Fatalf("setup error = %v", err)
@@ -173,71 +158,6 @@ func TestWorkspaceGitSetupUnstagesProtectedPathsOnFailure(t *testing.T) {
 	}
 	if got := runWorkspaceGitCommand(t, workspace, "status", "--short"); got != "A  safe.md\n?? .env" {
 		t.Fatalf("protected file was not preserved as untracked: %q", got)
-	}
-}
-
-func TestWorkspaceGitSetupRetainsRemoteSynchronization(t *testing.T) {
-	workspace := t.TempDir()
-	remote := filepath.Join(t.TempDir(), "workspace.git")
-	if output, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
-		t.Fatalf("initialize bare remote: %v: %s", err, output)
-	}
-	if output, err := exec.Command("git", "-C", workspace, "init").CombinedOutput(); err != nil {
-		t.Fatalf("initialize workspace: %v: %s", err, output)
-	}
-	remoteURL := "https://github.com/example/private-vault.git"
-	if output, err := exec.Command("git", "-C", workspace, "config", "url.file://"+remote+".insteadOf", remoteURL).CombinedOutput(); err != nil {
-		t.Fatalf("configure test URL rewrite: %v: %s", err, output)
-	}
-	if err := os.WriteFile(filepath.Join(workspace, "record.md"), []byte("workspace record\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	runner := &localWorkspaceGitRunner{workspace: workspace}
-	compose := NewCompose(Config{ProjectName: "test", ComposeProjectDir: t.TempDir(), ComposeFile: filepath.Join(t.TempDir(), "compose.yaml")}, runner)
-	result, err := WorkspaceGit(context.Background(), compose, WorkspaceGitOptions{
-		Action:      "setup",
-		Remote:      remoteURL,
-		Branch:      "main",
-		Schedule:    "every 5m",
-		AuthorName:  "OpenLia Agent",
-		AuthorEmail: "openlia@localhost",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.OK || !result.AutomaticPull || !result.InitialPush || result.Remote != remoteURL {
-		t.Fatalf("unexpected remote setup result: %+v", result)
-	}
-	if got := runWorkspaceGitCommand(t, workspace, "config", "--get", "remote.origin.url"); got != remoteURL {
-		t.Fatalf("origin = %q", got)
-	}
-	localHead := runWorkspaceGitCommand(t, workspace, "rev-parse", "HEAD")
-	remoteHeadOutput, err := exec.Command("git", "--git-dir", remote, "rev-parse", "refs/heads/main").CombinedOutput()
-	if err != nil {
-		t.Fatalf("read remote main: %v: %s", err, remoteHeadOutput)
-	}
-	if remoteHead := strings.TrimSpace(string(remoteHeadOutput)); remoteHead != localHead {
-		t.Fatalf("remote HEAD = %q, local HEAD = %q", remoteHead, localHead)
-	}
-	if runner.cronCalls == 0 || runner.remoteCalls == 0 {
-		t.Fatalf("remote setup did not synchronize: cron=%d remote=%d", runner.cronCalls, runner.remoteCalls)
-	}
-
-	_, err = WorkspaceGit(context.Background(), compose, WorkspaceGitOptions{
-		Action:      "ensure",
-		Branch:      "main",
-		AuthorName:  "OpenLia Agent",
-		AuthorEmail: "openlia@localhost",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := runWorkspaceGitCommand(t, workspace, "config", "--get", "remote.origin.url"); got != remoteURL {
-		t.Fatalf("user-visible origin was changed: %q", got)
-	}
-	if got := runWorkspaceGitCommand(t, workspace, "config", "--bool", "--get", "openlia.workspace-remote-enabled"); got != "false" {
-		t.Fatalf("disabled remote state = %q", got)
 	}
 }
 

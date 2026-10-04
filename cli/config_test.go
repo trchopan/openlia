@@ -47,21 +47,8 @@ func TestConfigRoundTrip(t *testing.T) {
 		{Name: "nas", Type: "rsync", RsyncTarget: "backup@nas.example.test:/srv/backups/openlia", IdentityFile: "/srv/openlia/backup-ssh-key", OperatorIdentityFile: filepath.Join(temporary, "rsync-key")},
 	}
 	want.SecretSource = filepath.Join(temporary, "hermes.env")
-	want.SkillSources = []SkillSourceConfig{
-		{Name: "official", Repository: "https://github.com/openlia/skills.git", Branch: "main"},
-		{Name: "team", Repository: "https://github.com/example/team-skills", Branch: "release/v2"},
-	}
 	want.EnabledSkills = []string{"daily-briefing", "deep-research"}
 	want.EnabledTools = []string{"pdf", "ocr", "media-transcripts"}
-	want.WorkspaceGit = WorkspaceGitConfig{
-		Enabled:     true,
-		Provider:    "github",
-		Remote:      "https://github.com/example/private-vault.git",
-		Branch:      "main",
-		Schedule:    "every 5m",
-		AuthorName:  "OpenLia Agent",
-		AuthorEmail: "openlia@example.test",
-	}
 	want.OpenLiaBrowser = OpenLiaBrowserConfig{
 		Configured:         true,
 		Mode:               "ssh",
@@ -77,7 +64,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Target != want.Target || got.Model != want.Model || got.OutputLanguage != want.OutputLanguage || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || got.LochoRelayConfigSource != want.LochoRelayConfigSource || got.LochoRelaySecretsSource != want.LochoRelaySecretsSource || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || strings.Join(got.EnabledTools, ",") != strings.Join(want.EnabledTools, ",") || got.WorkspaceGit != want.WorkspaceGit || got.BackupIdentityFile != want.BackupIdentityFile || got.BackupKnownHosts != want.BackupKnownHosts || got.BackupRecipient != want.BackupRecipient || got.BackupSchedule != want.BackupSchedule || got.BackupScheduleEnabled != want.BackupScheduleEnabled || got.BackupRemoteRetention != want.BackupRemoteRetention || len(got.BackupDestinations) != len(want.BackupDestinations) || got.BackupDestinations[0] != want.BackupDestinations[0] || got.BackupDestinations[1] != want.BackupDestinations[1] || got.OpenLiaBrowser != want.OpenLiaBrowser || len(got.SkillSources) != 2 || got.SkillSources[0] != want.SkillSources[0] || got.SkillSources[1] != want.SkillSources[1] {
+	if got.Target != want.Target || got.Model != want.Model || got.OutputLanguage != want.OutputLanguage || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || got.LochoRelayConfigSource != want.LochoRelayConfigSource || got.LochoRelaySecretsSource != want.LochoRelaySecretsSource || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || strings.Join(got.EnabledTools, ",") != strings.Join(want.EnabledTools, ",") || got.BackupIdentityFile != want.BackupIdentityFile || got.BackupKnownHosts != want.BackupKnownHosts || got.BackupRecipient != want.BackupRecipient || got.BackupSchedule != want.BackupSchedule || got.BackupScheduleEnabled != want.BackupScheduleEnabled || got.BackupRemoteRetention != want.BackupRemoteRetention || len(got.BackupDestinations) != len(want.BackupDestinations) || got.BackupDestinations[0] != want.BackupDestinations[0] || got.BackupDestinations[1] != want.BackupDestinations[1] || got.OpenLiaBrowser != want.OpenLiaBrowser {
 		t.Fatalf("round trip mismatch: got %#v want %#v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -126,7 +113,7 @@ func TestOpenLiaBrowserConfigValidation(t *testing.T) {
 }
 
 func TestOpenLiaBrowserConfigAbsentFromLegacyConfig(t *testing.T) {
-	config, err := parseConfig("[openlia]\nschema = 1\n")
+	config, err := parseConfig("[openlia]\nschema = 2\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,38 +122,6 @@ func TestOpenLiaBrowserConfigAbsentFromLegacyConfig(t *testing.T) {
 	}
 	if strings.Contains(renderConfig(config), "[openlia-browser]") {
 		t.Fatal("legacy config unexpectedly rendered openlia-browser")
-	}
-}
-
-func TestSkillSourcesRejectUnsafeConfiguration(t *testing.T) {
-	for _, repository := range []string{"http://github.com/example/skills", "https://user:token@github.com/example/skills", "https://github.com/example/skills?token=secret", "https://github.com/example/skills#main", "https://gitlab.com/example/skills", "https://github.com/example/skills/extra"} {
-		config := defaultConfig()
-		config.SkillSources = []SkillSourceConfig{{Name: "team", Repository: repository, Branch: "main"}}
-		if err := validateConfig(config); err == nil {
-			t.Fatalf("skill source repository %q was accepted", repository)
-		}
-	}
-	for _, branch := range []string{"", "../main", "feature//one", "main.lock", "main@{1}", "main/"} {
-		config := defaultConfig()
-		config.SkillSources = []SkillSourceConfig{{Name: "team", Repository: "https://github.com/example/skills", Branch: branch}}
-		if err := validateConfig(config); err == nil {
-			t.Fatalf("skill source branch %q was accepted", branch)
-		}
-	}
-	config := defaultConfig()
-	config.SkillSources = []SkillSourceConfig{{Name: "team", Repository: "https://github.com/example/one", Branch: "main"}, {Name: "team", Repository: "https://github.com/example/two", Branch: "main"}}
-	if err := validateConfig(config); err == nil {
-		t.Fatal("duplicate skill source names were accepted")
-	}
-}
-
-func TestSkillSourceConfigNeverContainsToken(t *testing.T) {
-	config := defaultConfig()
-	config.SkillSources = []SkillSourceConfig{{Name: "team", Repository: "https://github.com/example/skills", Branch: "main"}}
-	config.SecretSource = "/tmp/hermes.env"
-	rendered := renderConfig(config)
-	if strings.Contains(rendered, "OPENLIA_SKILLS_GIT_TOKEN") || strings.Contains(rendered, "github_pat_") {
-		t.Fatalf("token material leaked into config: %s", rendered)
 	}
 }
 
@@ -201,8 +156,8 @@ func TestConfigAcceptsFallbackProviders(t *testing.T) {
 	}
 }
 
-func TestConfigDefaultsTimezoneForLegacyConfig(t *testing.T) {
-	got, err := parseConfig("[openlia]\nschema = 1\n")
+func TestConfigDefaultsTimezoneForMinimalConfig(t *testing.T) {
+	got, err := parseConfig("[openlia]\nschema = 2\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,8 +191,8 @@ func TestConfigRejectsInvalidOutputLanguage(t *testing.T) {
 
 func TestConfigRejectsLegacyWorkspaceUI(t *testing.T) {
 	for _, data := range []string{
-		"[openlia]\nschema = 1\nworkspace-ui = true\n",
-		"[openlia]\nschema = 1\nworkspace-ui-host = \"127.0.0.1:8089\"\n",
+		"[openlia]\nschema = 2\nworkspace-ui = true\n",
+		"[openlia]\nschema = 2\nworkspace-ui-host = \"127.0.0.1:8089\"\n",
 	} {
 		if _, err := parseConfig(data); err == nil {
 			t.Fatalf("legacy Workspace UI setting was accepted: %s", data)
@@ -365,7 +320,7 @@ func TestLocalConfigRoundTrip(t *testing.T) {
 }
 
 func TestLegacyRemoteRootConfigIsReadable(t *testing.T) {
-	got, err := parseConfig("[openlia]\nschema = 1\nremote_root = \"/srv/openlia-test\"\n")
+	got, err := parseConfig("[openlia]\nschema = 2\nremote_root = \"/srv/openlia-test\"\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,35 +394,21 @@ func TestConfigRejectsRelativeSecretSource(t *testing.T) {
 	}
 }
 
-func TestWorkspaceGitRejectsUnsafeRemote(t *testing.T) {
-	for _, remote := range []string{
-		"https://github.com/example/private-vault.git?token=secret",
-		"https://github.com/example/private-vault/extra.git",
-		"http://github.com/example/private-vault.git",
-		"git@github.com:example/private-vault.git",
-	} {
-		config := defaultConfig()
-		config.WorkspaceGit.Enabled = true
-		config.WorkspaceGit.Remote = remote
-		if err := validateConfig(config); err == nil {
-			t.Fatalf("workspace Git remote %q was accepted", remote)
-		}
-	}
-}
-
-func TestWorkspaceGitAcceptsConfiguredRemote(t *testing.T) {
-	config := defaultConfig()
-	config.WorkspaceGit.Enabled = true
-	config.WorkspaceGit.Remote = "https://github.com/example/private-vault.git"
-	if err := validateConfig(config); err != nil {
-		t.Fatalf("valid workspace Git config was rejected: %v", err)
-	}
-}
-
 func TestWorkspaceGitAcceptsLocalHistoryWithoutRemote(t *testing.T) {
 	config := defaultConfig()
 	if err := validateConfig(config); err != nil {
 		t.Fatalf("local workspace Git config was rejected: %v", err)
+	}
+}
+
+func TestConfigRejectsRetiredRemoteGitSettings(t *testing.T) {
+	for _, text := range []string{
+		"[openlia]\nschema = 2\n\n[workspace_git]\nremote = \"https://github.com/example/workspace.git\"\n",
+		"[openlia]\nschema = 2\n\n[[skill_sources]]\nname = \"team\"\nrepository = \"https://github.com/example/skills\"\nbranch = \"main\"\n",
+	} {
+		if _, err := parseConfig(text); err == nil {
+			t.Fatalf("retired remote Git config was accepted:\n%s", text)
+		}
 	}
 }
 
@@ -582,7 +523,7 @@ func TestConfigServicesRejectsInvalidRole(t *testing.T) {
 func TestConfigServicesRejectsDottedKey(t *testing.T) {
 	data := `
 [openlia]
-schema = 1
+schema = 2
 version = "0.1.0"
 mode = "local"
 root = ".openlia"

@@ -38,7 +38,7 @@ type deployment interface {
 	deploy(ctx context.Context, action string, start bool, component string) ([]byte, error)
 	health(ctx context.Context, allowStopped, providerCheck bool) ([]byte, error)
 	operation(ctx context.Context, script string, input []byte, args ...string) ([]byte, error)
-	workspaceGit(ctx context.Context, action string, config WorkspaceGitConfig) ([]byte, error)
+	workspaceGit(ctx context.Context, action string) ([]byte, error)
 	uninstall(ctx context.Context) ([]byte, error)
 	composeLogs(ctx context.Context, follow bool) ([]byte, error)
 }
@@ -112,8 +112,6 @@ func (remote Remote) composeEnvironment() string {
 	values := []string{
 		"OPENLIA_DATA_ROOT=" + shellQuote(remote.rootPath("runtime", "hermes")),
 		"OPENLIA_SYSTEM_SKILLS_ROOT=" + shellQuote(remote.rootPath("runtime", "system-skills")),
-		"OPENLIA_SKILLS_CACHE_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-cache")),
-		"OPENLIA_SKILLS_ENV_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-envs")),
 		"OPENLIA_SECRET_DIR=" + shellQuote(remote.rootPath("runtime", "secrets")),
 		"OPENLIA_META_ROOT=" + shellQuote(remote.rootPath("runtime", "meta")),
 		"OPENLIA_BACKUP_ROOT=" + shellQuote(remote.rootPath("runtime", "backups")),
@@ -189,15 +187,12 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"OPENLIA_BACKUP_SCHEDULE_ENABLED=" + shellQuote(strconv.FormatBool(remote.Config.BackupScheduleEnabled)),
 		"OPENLIA_BACKUP_REMOTE_RETENTION=" + shellQuote(strconv.Itoa(remote.Config.BackupRemoteRetention)),
 		"OPENLIA_BACKUP_DESTINATIONS=" + shellQuote(renderBackupDestinationsJSON(remote.Config.BackupDestinations)),
-		"OPENLIA_SKILLS_CACHE_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-cache")),
-		"OPENLIA_SKILLS_ENV_ROOT=" + shellQuote(remote.rootPath("runtime", "skill-envs")),
 		"OPENLIA_COMPOSE_FILE=" + shellQuote(filepath.Join(operationRoot, "docker", "compose.yaml")),
 		"OPENLIA_COMPOSE_PROJECT_DIR=" + shellQuote(filepath.Join(operationRoot, "docker")),
 		"OPENLIA_GENERATED_COMPOSE=" + shellQuote(filepath.Join(operationRoot, "docker", "compose.generated.yaml")),
 		"OPENLIA_ENABLED_SKILLS=" + shellQuote(strings.Join(remote.Config.EnabledSkills, ",")),
 		"OPENLIA_ENABLED_TOOLS=" + shellQuote(strings.Join(remote.Config.EnabledTools, ",")),
 		"OPENLIA_SKILLS_CONFIGURED='true'",
-		"OPENLIA_SKILL_SOURCES=" + shellQuote(renderSkillSourcesJSON(remote.Config.SkillSources)),
 		"OPENLIA_SERVICE_ROLES=" + shellQuote(renderServicesJSON(remote.Config.Services)),
 		"OPENLIA_CONFIGURED_HOSTS=" + shellQuote(configuredHosts(remote.Config.Services)),
 	}
@@ -232,10 +227,6 @@ func remoteOperationReadOnly(script string, args []string) bool {
 		return len(args) > 0 && (args[0] == "status" || args[0] == "diff")
 	case "workspace-git":
 		return len(args) > 0 && args[0] == "status"
-	case "skills":
-		return len(args) > 0 && (args[0] == "list" || args[0] == "show" || args[0] == "status")
-	case "skill-sources":
-		return len(args) > 0 && args[0] == "list"
 	default:
 		return false
 	}
@@ -314,10 +305,6 @@ func operatorArguments(operation string, args []string) ([]string, bool) {
 		command = "workspace-git"
 	case "uninstall":
 		command = "uninstall"
-	case "skill-sources":
-		command = "skill-sources"
-	case "skills":
-		command = "skills"
 	case "workspace-migrate":
 		command = "workspace-migrate"
 	case "instructions":
@@ -350,7 +337,7 @@ func operatorArguments(operation string, args []string) ([]string, bool) {
 
 func operatorOnlyOperation(operation string) bool {
 	switch filepath.ToSlash(operation) {
-	case "skill-sources", "skills", "workspace-git", "ops/workspace-git.sh", "workspace-migrate", "instructions":
+	case "workspace-git", "ops/workspace-git.sh", "workspace-migrate", "instructions":
 		return true
 	default:
 		return false
@@ -388,20 +375,12 @@ func legacyOperationScript(operation string) string {
 	}
 }
 
-func workspaceGitArguments(action string, gitConfig WorkspaceGitConfig) []string {
-	return []string{
-		action,
-		"--remote", gitConfig.Remote,
-		"--branch", gitConfig.Branch,
-		"--schedule", gitConfig.Schedule,
-		"--author-name", gitConfig.AuthorName,
-		"--author-email", gitConfig.AuthorEmail,
-		"--json",
-	}
+func workspaceGitArguments(action string) []string {
+	return []string{action, "--json"}
 }
 
-func (remote Remote) workspaceGit(ctx context.Context, action string, gitConfig WorkspaceGitConfig) ([]byte, error) {
-	return remote.operation(ctx, "workspace-git", nil, workspaceGitArguments(action, gitConfig)...)
+func (remote Remote) workspaceGit(ctx context.Context, action string) ([]byte, error) {
+	return remote.operation(ctx, "workspace-git", nil, workspaceGitArguments(action)...)
 }
 
 func (remote Remote) uninstall(ctx context.Context) ([]byte, error) {
@@ -650,15 +629,12 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_BACKUP_REMOTE_RETENTION=" + strconv.Itoa(config.BackupRemoteRetention),
 		"OPENLIA_BACKUP_DESTINATIONS=" + renderBackupDestinationsJSON(config.BackupDestinations),
 		"OPENLIA_META_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "meta"),
-		"OPENLIA_SKILLS_CACHE_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "skill-cache"),
-		"OPENLIA_SKILLS_ENV_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "skill-envs"),
 		"OPENLIA_COMPOSE_FILE=" + filepath.Join(operationRoot, "docker", "compose.yaml"),
 		"OPENLIA_COMPOSE_PROJECT_DIR=" + filepath.Join(operationRoot, "docker"),
 		"OPENLIA_GENERATED_COMPOSE=" + filepath.Join(operationRoot, "docker", "compose.generated.yaml"),
 		"OPENLIA_ENABLED_SKILLS=" + strings.Join(config.EnabledSkills, ","),
 		"OPENLIA_ENABLED_TOOLS=" + strings.Join(config.EnabledTools, ","),
 		"OPENLIA_SKILLS_CONFIGURED=true",
-		"OPENLIA_SKILL_SOURCES=" + renderSkillSourcesJSON(config.SkillSources),
 		"OPENLIA_SERVICE_ROLES=" + renderServicesJSON(config.Services),
 		"OPENLIA_CONFIGURED_HOSTS=" + configuredHosts(config.Services),
 	}
@@ -687,14 +663,6 @@ func renderBackupDestinationsJSON(values []BackupDestinationConfig) string {
 }
 
 func renderFallbackProvidersJSON(values []FallbackProviderConfig) string {
-	data, err := json.Marshal(values)
-	if err != nil {
-		return "[]"
-	}
-	return string(data)
-}
-
-func renderSkillSourcesJSON(values []SkillSourceConfig) string {
 	data, err := json.Marshal(values)
 	if err != nil {
 		return "[]"
@@ -824,8 +792,8 @@ func operatorError(data []byte) string {
 	return ""
 }
 
-func (local Local) workspaceGit(ctx context.Context, action string, gitConfig WorkspaceGitConfig) ([]byte, error) {
-	return local.operation(ctx, "workspace-git", nil, workspaceGitArguments(action, gitConfig)...)
+func (local Local) workspaceGit(ctx context.Context, action string) ([]byte, error) {
+	return local.operation(ctx, "workspace-git", nil, workspaceGitArguments(action)...)
 }
 
 func (local Local) releasePath() string {

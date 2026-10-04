@@ -12,14 +12,13 @@ func TestFilesystemOperatorWorkflow(t *testing.T) {
 	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
 	config := testConfig(repo, runtimeRoot)
 	for path, contents := range map[string]string{
-		filepath.Join(repo, "profile", "SOUL.md"):                                          "soul\n",
-		filepath.Join(repo, "profile", "AGENTS.md"):                                        "agents\n",
-		filepath.Join(repo, "profile", "config.yaml"):                                      "secrets: {}\n",
-		filepath.Join(repo, "profile", "skills", "example", "SKILL.md"):                    "skill\n",
-		filepath.Join(repo, "profile", "cron", "scripts", "openlia-workspace-git-sync.sh"): "#!/usr/bin/env bash\n",
-		filepath.Join(repo, "release", "manifest.json"):                                    `{"openlia":"test"}`,
-		filepath.Join(repo, "workspace-template", "inbox", ".gitkeep"):                     "",
-		filepath.Join(repo, "docker", ".gitkeep"):                                          "",
+		filepath.Join(repo, "profile", "SOUL.md"):                       "soul\n",
+		filepath.Join(repo, "profile", "AGENTS.md"):                     "agents\n",
+		filepath.Join(repo, "profile", "config.yaml"):                   "secrets: {}\n",
+		filepath.Join(repo, "profile", "skills", "example", "SKILL.md"): "skill\n",
+		filepath.Join(repo, "release", "manifest.json"):                 `{"openlia":"test"}`,
+		filepath.Join(repo, "workspace-template", "inbox", ".gitkeep"):  "",
+		filepath.Join(repo, "docker", ".gitkeep"):                       "",
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -53,13 +52,6 @@ func TestFilesystemOperatorWorkflow(t *testing.T) {
 	}
 	if _, err := NewProfileOperator(config).Sync(); err != nil {
 		t.Fatal(err)
-	}
-	scriptInfo, err := os.Stat(filepath.Join(config.DataRoot, "scripts", "openlia-workspace-git-sync.sh"))
-	if err != nil {
-		t.Fatalf("workspace Git sync script was not installed: %v", err)
-	}
-	if scriptInfo.Mode().Perm() != 0o755 {
-		t.Fatalf("workspace Git sync script mode = %v, want 0755", scriptInfo.Mode().Perm())
 	}
 	if _, err := os.Stat(filepath.Join(config.DataRoot, "workspace", "inbox")); err != nil {
 		t.Fatalf("workspace template was not initialized: %v", err)

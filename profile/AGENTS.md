@@ -39,19 +39,13 @@ rather than editing its generated state files directly.
 
 ## Workspace Git history
 
-- OpenLia maintains local Git history whether or not a remote is configured.
+- OpenLia maintains the workspace as a local Git repository for history only.
 - After an approved, coherent workspace update, stage only the intended files
   and commit them with `backup: <concise description>`. Do not create empty
-  commits, and do not treat a local commit as approval to push.
-- An optional workspace Git remote is configured by OpenLia; non-secret settings
-  belong in the operator `config.toml`.
-- The repository PAT belongs only in the protected secret source as
-  `OPENLIA_GIT_TOKEN`. Never place it in workspace files, remote URLs, Git
-  config, prompts, reports, or command output.
-- Use the `workspace-git` skill for local history, manual pushes, and structural
-  changes. When configured, the bundled no-agent cron job performs pulls only.
-- Do not use hard resets, force-pushes, destructive conflict resolution, or
-  pulls over dirty files. Stop and report the exact Git state instead.
+  commits. Encrypted OpenLia backups are the recovery mechanism.
+- Do not configure Git remotes or use Git network operations. Use the
+  `workspace-git` skill for local history tracking.
+- Never use hard resets, `git clean`, or destructive conflict resolution.
 
 ## Browser Boundary
 

@@ -25,8 +25,11 @@ workspace_ui_port = 8089
 COMPOSE_RUNTIME_KEYS = (
     "OPENLIA_DATA_ROOT",
     "OPENLIA_SYSTEM_SKILLS_ROOT",
-    "OPENLIA_SKILLS_CACHE_ROOT",
-    "OPENLIA_SKILLS_ENV_ROOT",
+    "OPENLIA_META_ROOT",
+    "OPENLIA_BACKUP_ROOT",
+    "OPENLIA_RUNTIME_UID",
+    "OPENLIA_RUNTIME_GID",
+    "OPENLIA_OPERATION_LOCK",
     "OPENLIA_SECRET_DIR",
     "OPENLIA_NETWORK_NAME",
 )
@@ -103,12 +106,16 @@ def run_expected_failure(
 
 
 def compose_environment(root: str, project: str) -> dict[str, str]:
-    runtime = f"{root.rstrip('/')}/runtime"
+    root = root.rstrip("/")
+    runtime = f"{root}/runtime"
     return {
         "OPENLIA_DATA_ROOT": f"{runtime}/hermes",
         "OPENLIA_SYSTEM_SKILLS_ROOT": f"{runtime}/system-skills",
-        "OPENLIA_SKILLS_CACHE_ROOT": f"{runtime}/skill-cache",
-        "OPENLIA_SKILLS_ENV_ROOT": f"{runtime}/skill-envs",
+        "OPENLIA_META_ROOT": f"{runtime}/meta",
+        "OPENLIA_BACKUP_ROOT": f"{runtime}/backups",
+        "OPENLIA_RUNTIME_UID": "10000",
+        "OPENLIA_RUNTIME_GID": "10000",
+        "OPENLIA_OPERATION_LOCK": f"{root}.operation.lock",
         "OPENLIA_SECRET_DIR": f"{runtime}/secrets",
         "OPENLIA_NETWORK_NAME": f"{project}-private",
     }

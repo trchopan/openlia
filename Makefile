@@ -74,14 +74,12 @@ lint:
 	bun run format:check
 	bun run lint
 	gofmt -d main.go cli operator cmd internal
-	bash -n docker/*.sh profile/cron/scripts/*.sh
-	shellcheck docker/*.sh profile/cron/scripts/*.sh
+	bash -n docker/*.sh
+	shellcheck docker/*.sh
 
 compose-config:
 	OPENLIA_DATA_ROOT=/tmp/openlia-compose-check/runtime/hermes \
 	OPENLIA_SYSTEM_SKILLS_ROOT=/tmp/openlia-compose-check/runtime/system-skills \
-	OPENLIA_SKILLS_CACHE_ROOT=/tmp/openlia-compose-check/runtime/skill-cache \
-	OPENLIA_SKILLS_ENV_ROOT=/tmp/openlia-compose-check/runtime/skill-envs \
 	OPENLIA_META_ROOT=/tmp/openlia-compose-check/runtime/meta \
 	OPENLIA_BACKUP_ROOT=/tmp/openlia-compose-check/runtime/backups \
 	OPENLIA_RUNTIME_UID=$$(id -u) \

@@ -86,10 +86,6 @@ func RunContext(ctx context.Context, args []string, input io.Reader, output, err
 		return emit(output, result, jsonOutput, "openlia skill-fork: skill forked; active files preserved")
 	case "skill-migration":
 		return runSkillMigration(config, args, output, errorOutput, jsonOutput, now)
-	case "skill-sources":
-		return runSkillSources(ctx, config, args, output, errorOutput, jsonOutput)
-	case "skills":
-		return runExternalSkills(ctx, config, args, output, errorOutput, jsonOutput)
 	case "backup":
 		return runBackup(ctx, config, args, input, output, errorOutput, jsonOutput, now)
 	case "attachments":
@@ -397,7 +393,6 @@ func runDeploy(ctx context.Context, config Config, args []string, output, errorO
 			runtimeRelativePath(config, filepath.Join(config.DataRoot, "config.yaml")),
 			runtimeRelativePath(config, filepath.Join(config.DataRoot, "AGENTS.md")),
 			runtimeRelativePath(config, filepath.Join(config.DataRoot, "SOUL.md")),
-			runtimeRelativePath(config, filepath.Join(config.DataRoot, "scripts", "openlia-workspace-git-sync.sh")),
 			runtimeRelativePath(config, config.MetaRoot),
 		}
 		for _, skill := range config.EnabledSkills {
@@ -470,30 +465,10 @@ func runWorkspaceGit(ctx context.Context, config Config, args []string, output, 
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		action, args = args[0], args[1:]
 	}
-	options := WorkspaceGitOptions{Action: action, Branch: "main", Schedule: "every 5m", AuthorName: "OpenLia Agent", AuthorEmail: "openlia@localhost"}
-	for len(args) > 0 {
-		name := args[0]
-		if len(args) < 2 {
-			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("%s requires a value", name))
-		}
-		value := args[1]
-		args = args[2:]
-		switch name {
-		case "--remote":
-			options.Remote = value
-		case "--branch":
-			options.Branch = value
-		case "--schedule":
-			options.Schedule = value
-		case "--author-name":
-			options.AuthorName = value
-		case "--author-email":
-			options.AuthorEmail = value
-		default:
-			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("unknown workspace-git option %s", name))
-		}
+	if len(args) != 0 {
+		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("workspace-git accepts only setup, ensure, or status"))
 	}
-	result, err := WorkspaceGit(ctx, NewCompose(config, nil), options)
+	result, err := WorkspaceGit(ctx, NewCompose(config, nil), WorkspaceGitOptions{Action: action})
 	if err != nil {
 		return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 	}
@@ -634,7 +609,7 @@ Usage:
   openlia-operator <subcommand> [--json]
 
 Subcommands:
-	  bootstrap profile skill-status skill-fork skill-migration skill-sources skills backup attachments locho-host auth deploy
+	  bootstrap profile skill-status skill-fork skill-migration backup attachments locho-host auth deploy
 	  healthcheck workspace-git workspace-migrate instructions uninstall`)
 }
 
@@ -695,169 +670,6 @@ func runWorkspaceMigrate(ctx context.Context, config Config, args []string, outp
 
 	default:
 		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("unknown workspace-migrate action %s", action))
-	}
-}
-
-func runSkillSources(ctx context.Context, config Config, args []string, output, errorOutput io.Writer, jsonOutput bool) int {
-	if len(args) == 0 {
-		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("skill-sources requires check, fetch, or list"))
-	}
-	manager := NewExternalSkillManager(config, nil, NewCompose(config, nil))
-	action, args := args[0], args[1:]
-	if action == "list" {
-		if len(args) != 0 {
-			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("skill-sources list accepts no arguments"))
-		}
-		return emit(output, config.SkillSources, jsonOutput, fmt.Sprintf("openlia skill-sources: %d configured", len(config.SkillSources)))
-	}
-	if action == "used" {
-		if len(args) != 1 || ValidateSafeComponent(args[0], "source") != nil {
-			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("skill-sources used requires SOURCE"))
-		}
-		used, err := installedExternalSkillsForSource(config, args[0])
-		if err != nil {
-			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
-		}
-		return emit(output, map[string]any{"ok": true, "source": args[0], "installed_skills": used}, jsonOutput, fmt.Sprintf("openlia skill-sources: %d installed skill(s) use %s", len(used), args[0]))
-	}
-	if (action != "check" && action != "fetch") || len(args) > 1 {
-		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("skill-sources %s accepts at most one SOURCE", action))
-	}
-	ids := make([]string, 0, len(config.SkillSources))
-	if len(args) == 1 {
-		ids = append(ids, args[0])
-	} else {
-		for _, source := range config.SkillSources {
-			ids = append(ids, source.ID)
-		}
-	}
-	results := make([]SkillSourceResult, 0, len(ids))
-	for _, id := range ids {
-		var result SkillSourceResult
-		var err error
-		if action == "check" {
-			result, err = manager.CheckSource(ctx, id)
-		} else {
-			result, err = manager.FetchSource(ctx, id)
-		}
-		if err != nil {
-			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
-		}
-		results = append(results, result)
-	}
-	return emit(output, results, jsonOutput, fmt.Sprintf("openlia skill-sources: %s completed for %d source(s)", action, len(results)))
-}
-
-func runExternalSkills(ctx context.Context, config Config, args []string, output, errorOutput io.Writer, jsonOutput bool) int {
-	if len(args) == 0 {
-		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("skills requires list, show, audit, install, update, uninstall, or test"))
-	}
-	manager := NewExternalSkillManager(config, nil, NewCompose(config, nil))
-	action, args := args[0], args[1:]
-	if action == "list" {
-		if len(args) != 0 {
-			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("skills list accepts no arguments"))
-		}
-		result, err := manager.Catalog()
-		if err != nil {
-			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
-		}
-		return emit(output, result, jsonOutput, fmt.Sprintf("openlia skills: %d external skills available", len(result)))
-	}
-	approved, args := removeFlag(args, "--approve")
-	expectedCommit, remaining, err := stringFlag(args, "--commit")
-	if err != nil {
-		return commandError(output, errorOutput, jsonOutput, ExitUsage, err)
-	}
-	args = remaining
-	source, remaining, err := stringFlag(args, "--source")
-	if err != nil {
-		return commandError(output, errorOutput, jsonOutput, ExitUsage, err)
-	}
-	args = remaining
-	if len(args) != 1 {
-		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("skills %s requires NAME [--source SOURCE]", action))
-	}
-	name := args[0]
-	if strings.Contains(name, "/") {
-		parts := strings.Split(name, "/")
-		if len(parts) != 2 || source != "" && source != parts[0] {
-			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("invalid or conflicting source/skill identifier"))
-		}
-		source, name = parts[0], parts[1]
-	}
-	if source != "" && (action == "update" || action == "uninstall" || action == "reset" || action == "fork-refresh") {
-		metadata, metadataErr := readExternalSkillMetadata(filepath.Join(config.MetaRoot, "external-skills", name+".json"))
-		if metadataErr != nil {
-			return commandError(output, errorOutput, jsonOutput, ExitFailure, fmt.Errorf("external skill is not installed: %s", name))
-		}
-		if metadata.Source != source {
-			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("external skill %s is installed from source %s, not %s", name, metadata.Source, source))
-		}
-	}
-	switch action {
-	case "plan-install", "plan-update":
-		result, err := manager.Plan(ctx, source, name, action == "plan-update")
-		if err != nil {
-			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
-		}
-		return emit(output, result, jsonOutput, "openlia skills: plan ready for "+name)
-	case "show":
-		item, _, metadata, err := manager.catalogSkill(source, name)
-		if err != nil {
-			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
-		}
-		return emit(output, map[string]any{"skill": item, "test": metadata.Test}, jsonOutput, fmt.Sprintf("openlia skills: %s source=%s version=%s commit=%s", item.Name, item.Source, item.Version, item.Commit))
-	case "audit":
-		result, err := manager.Audit(ctx, source, name)
-		if err != nil {
-			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
-		}
-		return emit(output, result, jsonOutput, "openlia skills: audit passed for "+name)
-	case "install", "update":
-		if !approved {
-			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("skills %s requires --approve", action))
-		}
-		if expectedCommit != "" && !isCommit(expectedCommit) {
-			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("invalid approved commit"))
-		}
-		result, err := manager.Install(ctx, source, name, action == "update", expectedCommit)
-		if err != nil {
-			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
-		}
-		return emit(output, result, jsonOutput, fmt.Sprintf("openlia skills: %s activated %s", action, name))
-	case "uninstall":
-		if !approved {
-			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("skills uninstall requires --approve"))
-		}
-		result, err := manager.Uninstall(ctx, name)
-		if err != nil {
-			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
-		}
-		return emit(output, result, jsonOutput, "openlia skills: uninstalled "+name)
-	case "test":
-		result, err := manager.Test(ctx, source, name)
-		if err != nil {
-			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
-		}
-		return emit(output, result, jsonOutput, "openlia skills: test passed for "+name)
-	case "fork-refresh":
-		result, err := manager.RefreshFork(ctx, name)
-		if err != nil {
-			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
-		}
-		return emit(output, result, jsonOutput, "openlia skills: fork refreshed for "+name)
-	case "reset":
-		if !approved {
-			return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("skills reset requires --approve"))
-		}
-		result, err := manager.Reset(ctx, name)
-		if err != nil {
-			return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
-		}
-		return emit(output, result, jsonOutput, "openlia skills: reset "+name)
-	default:
-		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("unknown skills action %s", action))
 	}
 }
 
