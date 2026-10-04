@@ -286,12 +286,12 @@ enough context to do so well.
 
 ### Claim Memory
 
-Reusable personal context belongs in `knowledge/claims/` as a small Markdown
-record with YAML front matter containing a stable ID, claim kind, source,
-provenance, temporal scope, and status. The claim kind distinguishes `reported`,
-`observed`, `inferred`, and `hypothesis`; a confidence score never replaces
-evidence. The read-only claim index uses an explicit `--as-of` date so expiry
-and review checks are deterministic.
+Reusable personal context belongs in `knowledge/claims/` as Markdown records.
+Keep machine-readable metadata in YAML front matter and the human-readable claim
+under `## Claim`. Records use a stable ID, a supported kind and status, structured
+source and provenance references, and explicit dates. A confidence score never
+replaces evidence. The read-only claim index uses an explicit `--as-of` date so
+expiry and review checks are deterministic.
 
 The workspace claim ledger is the canonical long-term record. Hermes runtime
 memory may cache claim IDs and summaries for retrieval, but Hermes-only memory

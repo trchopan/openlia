@@ -49,7 +49,7 @@ def _state(claim: dict[str, Any], as_of: date) -> str:
     status = str(claim.get("status") or "")
     if status in {"candidate", "stale", "contested", "superseded", "retracted", "rejected"}:
         return status
-    review_after = _claim_date(claim.get("review_after") or claim.get("review_due"))
+    review_after = _claim_date(claim.get("review_after"))
     if status == "active" and review_after and as_of >= review_after:
         return "review_due"
     return "active"
@@ -59,18 +59,13 @@ def _public_record(claim: dict[str, Any], path: Path, workspace: Path, as_of: da
     state = _state(claim, as_of)
     fields = (
         "id",
-        "claim_id",
         "claim",
-        "statement",
         "kind",
         "status",
         "source",
         "provenance",
         "asserted_at",
         "observed_at",
-        "first_recorded",
-        "last_reviewed",
-        "review_due",
         "valid_from",
         "valid_until",
         "review_after",
@@ -81,10 +76,6 @@ def _public_record(claim: dict[str, Any], path: Path, workspace: Path, as_of: da
         "supersedes",
     )
     record = {field: claim[field] for field in fields if field in claim}
-    if "id" not in record and "claim_id" in record:
-        record["id"] = record["claim_id"]
-    if "claim" not in record and "statement" in record:
-        record["claim"] = record["statement"]
     record.update(
         {
             "path": str(path.relative_to(workspace)),
@@ -230,7 +221,6 @@ def render_markdown(result: dict[str, Any]) -> str:
 def self_test() -> None:
     valid = """---
 id: claim-active
-claim: User prefers local backups.
 kind: reported
 status: active
 source:
@@ -239,26 +229,61 @@ source:
 provenance:
   evidence_refs:
     - conversation-1
+  derived_from: []
 asserted_at: 2026-08-01
+observed_at: null
+valid_from: null
+valid_until: null
+review_after: null
+confidence: null
+confidence_basis: null
+reviewed_at: null
+reviewed_by: null
+supersedes: null
 ---
-# Notes
+## Claim
+
+User prefers local backups.
+
+Their backups stay on local devices.
+
+## Evidence
+
+Reported in conversation 1.
 """
     candidate = valid.replace("claim-active", "claim-candidate").replace("status: active", "status: candidate")
-    expired = valid.replace("claim-active", "claim-expired").replace("valid_until", "valid_until") + "\n"
-    expired = expired.replace("asserted_at: 2026-08-01", "asserted_at: 2026-08-01\nvalid_until: 2026-08-10")
+    expired = valid.replace("claim-active", "claim-expired").replace(
+        "valid_until: null", "valid_until: 2026-08-10"
+    )
     with tempfile.TemporaryDirectory(prefix="openlia-claims-") as directory:
         workspace = Path(directory)
         claims_directory = workspace / "knowledge" / "claims"
         claims_directory.mkdir(parents=True)
+        (workspace / "knowledge" / "claim-record.md").write_text(valid, encoding="utf-8")
         (claims_directory / "active.md").write_text(valid, encoding="utf-8")
         (claims_directory / "candidate.md").write_text(candidate, encoding="utf-8")
         (claims_directory / "expired.md").write_text(expired, encoding="utf-8")
         (claims_directory / "invalid.md").write_text("# Missing front matter\n", encoding="utf-8")
+        (claims_directory / "legacy.md").write_text(
+            "---\nclaim_id: old-id\nkind: reported\nstatus: candidate\n"
+            "source: {type: user, ref: conversation-old}\n"
+            "provenance: {evidence_refs: [conversation-old], derived_from: []}\n"
+            "first_recorded: 2026-08-01\n---\n\n## Claim\n\nOld claim.\n",
+            encoding="utf-8",
+        )
         result = index_claims(workspace, "2026-08-12")
-        assert result["summary"]["total"] == 4
-        assert result["summary"]["invalid"] == 1
-        assert result["summary"]["needs_review"] == 3
+        assert result["summary"]["total"] == 5
+        assert result["summary"]["invalid"] == 2
+        assert result["summary"]["needs_review"] == 4
         assert result["summary"]["by_state"]["expired"] == 1
+        active_record = next(record for record in result["claims"] if record.get("id") == "claim-active")
+        assert active_record["claim"] == "User prefers local backups.\n\nTheir backups stay on local devices."
+        markdown_index = render_markdown(result)
+        assert "[active] User prefers local backups. Their backups stay on local devices." in markdown_index
+        legacy_record = next(record for record in result["claims"] if record.get("path") == "knowledge/claims/legacy.md")
+        assert any("rename it to `id`" in error for error in legacy_record["errors"])
+        assert any("rename it to `asserted_at` or `observed_at`" in error for error in legacy_record["errors"])
+        assert "claim-record.md" not in {record.get("path") for record in result["claims"]}
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -195,14 +195,14 @@ func TestProfileSyncSeedsMissingWorkspaceTemplatesPreservingExistingFiles(t *tes
 	repo := t.TempDir()
 	runtime := filepath.Join(t.TempDir(), "runtime")
 	for path, contents := range map[string]string{
-		filepath.Join(repo, "profile", "SOUL.md"):                                           "soul\n",
-		filepath.Join(repo, "profile", "AGENTS.md"):                                         "agents\n",
-		filepath.Join(repo, "profile", "USER.md"):                                           "# User Profile\n",
-		filepath.Join(repo, "profile", "config.yaml"):                                       "config\n",
-		filepath.Join(repo, "release", "manifest.json"):                                     `{"openlia":"test"}`,
-		filepath.Join(repo, "workspace-template", "knowledge", "claims", "claim-record.md"): "new claim template\n",
-		filepath.Join(repo, "workspace-template", "existing.md"):                            "template original\n",
-		filepath.Join(repo, "workspace-template", "AGENTS.md"):                              "agents template\n",
+		filepath.Join(repo, "profile", "SOUL.md"):                                 "soul\n",
+		filepath.Join(repo, "profile", "AGENTS.md"):                               "agents\n",
+		filepath.Join(repo, "profile", "USER.md"):                                 "# User Profile\n",
+		filepath.Join(repo, "profile", "config.yaml"):                             "config\n",
+		filepath.Join(repo, "release", "manifest.json"):                           `{"openlia":"test"}`,
+		filepath.Join(repo, "workspace-template", "knowledge", "claim-record.md"): "new claim template\n",
+		filepath.Join(repo, "workspace-template", "existing.md"):                  "template original\n",
+		filepath.Join(repo, "workspace-template", "AGENTS.md"):                    "agents template\n",
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -231,13 +231,17 @@ func TestProfileSyncSeedsMissingWorkspaceTemplatesPreservingExistingFiles(t *tes
 	}
 
 	// 1. Newly introduced template file should be seeded
-	seededFile := filepath.Join(workspace, "knowledge", "claims", "claim-record.md")
+	seededFile := filepath.Join(workspace, "knowledge", "claim-record.md")
 	seededData, err := os.ReadFile(seededFile)
 	if err != nil {
 		t.Fatalf("missing seeded template file: %v", err)
 	}
 	if string(seededData) != "new claim template\n" {
 		t.Fatalf("unexpected seeded template data: %q", string(seededData))
+	}
+	oldTemplate := filepath.Join(workspace, "knowledge", "claims", "claim-record.md")
+	if _, err := os.Stat(oldTemplate); !os.IsNotExist(err) {
+		t.Fatalf("claim template must be outside the indexed claims directory; stat error: %v", err)
 	}
 
 	// 2. Existing user file must be preserved intact without overwrite

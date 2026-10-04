@@ -16,18 +16,32 @@ import yaml
 
 KINDS = {"reported", "observed", "inferred", "hypothesis", "hypothetical"}
 STATUSES = {"candidate", "active", "stale", "contested", "superseded", "retracted", "rejected"}
-DATE_FIELDS = (
-    "asserted_at",
-    "observed_at",
-    "valid_from",
-    "valid_until",
-    "review_after",
-    "reviewed_at",
-    "first_recorded",
-    "last_reviewed",
-    "review_due",
-)
+DATE_FIELDS = ("asserted_at", "observed_at", "valid_from", "valid_until", "review_after", "reviewed_at")
+METADATA_FIELDS = {
+    "id",
+    "kind",
+    "status",
+    "source",
+    "provenance",
+    *DATE_FIELDS,
+    "confidence",
+    "confidence_basis",
+    "reviewed_by",
+    "supersedes",
+}
+CLAIM_FIELDS = METADATA_FIELDS | {"claim"}
+LEGACY_FIELD_MIGRATIONS = {
+    "claim_id": "rename it to `id`",
+    "statement": "move its text into the required `## Claim` Markdown section",
+    "first_recorded": "rename it to `asserted_at` or `observed_at`, as appropriate",
+    "last_reviewed": "rename it to `reviewed_at`",
+    "review_due": "rename it to `review_after`",
+    "temporal_scope": "map its meaning to `valid_from`, `valid_until`, or `review_after`, or explain it under `## Notes`",
+    "related_claims": "review each reference and move derivation links to `provenance.derived_from`",
+}
 FRONT_MATTER = re.compile(r"\A---[ \t]*\r?\n(?P<metadata>.*?)(?:\r?\n)---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
+MARKDOWN_HEADING = re.compile(r"^[ \t]{0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
+CODE_FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 
 
 class UniqueKeySafeLoader(yaml.SafeLoader):
@@ -69,7 +83,64 @@ def parse_claim_markdown(text: str) -> dict[str, Any]:
         raise ValueError(f"invalid YAML front matter: {exc}") from exc
     if not isinstance(metadata, dict):
         raise ValueError("YAML front matter must contain an object")
+    legacy_text_fields = [field for field in ("claim", "statement") if field in metadata]
+    if legacy_text_fields:
+        fields = ", ".join(f"`{field}`" for field in legacy_text_fields)
+        raise ValueError(
+            f"front matter field {fields} is no longer supported; move the claim text into the required `## Claim` section and remove the field"
+        )
+    claim_text = _extract_claim_section(match.string[match.end() :])
+    metadata["claim"] = claim_text
     return _normalize_yaml(metadata)
+
+
+def _extract_claim_section(body: str) -> str:
+    sections: list[list[str]] = []
+    current: list[str] | None = None
+    fence_character: str | None = None
+    fence_length = 0
+
+    for line in body.splitlines():
+        fence_match = CODE_FENCE.match(line)
+        if fence_character is not None:
+            if fence_match and fence_match.group(1)[0] == fence_character and len(fence_match.group(1)) >= fence_length:
+                fence_character = None
+                fence_length = 0
+            if current is not None:
+                current.append(line)
+            continue
+        if fence_match:
+            fence_character = fence_match.group(1)[0]
+            fence_length = len(fence_match.group(1))
+            if current is not None:
+                current.append(line)
+            continue
+
+        heading = MARKDOWN_HEADING.match(line)
+        if heading:
+            level = len(heading.group(1))
+            title = re.sub(r"[ \t]+#+[ \t]*$", "", heading.group(2)).strip()
+            if current is not None and level <= 2:
+                sections.append(current)
+                current = None
+            if level == 2 and title == "Claim":
+                current = []
+            continue
+        if current is not None:
+            current.append(line)
+
+    if current is not None:
+        sections.append(current)
+    if not sections:
+        raise ValueError(
+            "missing required Markdown section `## Claim`; move legacy claim text from front matter or rename `## Statement` to `## Claim`"
+        )
+    if len(sections) > 1:
+        raise ValueError("Markdown record must contain exactly one `## Claim` section")
+    claim_text = "\n".join(sections[0]).strip()
+    if not claim_text:
+        raise ValueError("required Markdown section `## Claim` must contain non-whitespace text")
+    return claim_text
 
 
 def load_claim_file(path: Path) -> dict[str, Any]:
@@ -82,7 +153,7 @@ def _as_nonempty_string(value: Any, field: str, errors: list[str]) -> None:
 
 
 def _parse_date(value: Any, field: str, errors: list[str]) -> datetime | None:
-    if value is None or value == "":
+    if value is None:
         return None
     if isinstance(value, datetime):
         return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
@@ -101,8 +172,7 @@ def _parse_date(value: Any, field: str, errors: list[str]) -> datetime | None:
 
 def _validate_references(value: Any, field: str, errors: list[str], required: bool = True) -> None:
     if value is None:
-        if required:
-            errors.append(f"{field} must be a non-empty list")
+        errors.append(f"{field} must be a {'non-empty ' if required else ''}list of strings")
         return
     valid_list = isinstance(value, list) and (not required or bool(value))
     valid_items = valid_list and all(isinstance(item, str) and item.strip() for item in value)
@@ -115,44 +185,56 @@ def validate_claim(claim: Any) -> list[str]:
         return ["claim must be an object"]
 
     errors: list[str] = []
-    claim_id = claim.get("id") or claim.get("claim_id")
-    _as_nonempty_string(claim_id, "id or claim_id", errors)
-    statement = claim.get("claim") or claim.get("statement")
-    _as_nonempty_string(statement, "claim or statement", errors)
+    for field in sorted(claim, key=str):
+        if field in CLAIM_FIELDS:
+            continue
+        migration = LEGACY_FIELD_MIGRATIONS.get(str(field))
+        if migration:
+            errors.append(f"legacy field {field!r} is not supported; {migration}")
+        else:
+            errors.append(f"unsupported claim field {field!r}")
+
+    _as_nonempty_string(claim.get("id"), "id", errors)
+    _as_nonempty_string(claim.get("claim"), "claim text from `## Claim`", errors)
 
     kind = claim.get("kind")
-    if kind not in KINDS:
+    if not isinstance(kind, str) or kind not in KINDS:
         errors.append(f"kind must be one of: {', '.join(sorted(KINDS))}")
 
     status = claim.get("status")
-    if status not in STATUSES:
+    if not isinstance(status, str) or status not in STATUSES:
         errors.append(f"status must be one of: {', '.join(sorted(STATUSES))}")
 
     source = claim.get("source")
     if isinstance(source, dict):
+        for field in sorted(source, key=str):
+            if field not in {"type", "ref"}:
+                errors.append(f"unsupported source field {field!r}")
         _as_nonempty_string(source.get("type"), "source.type", errors)
         _as_nonempty_string(source.get("ref"), "source.ref", errors)
-    elif isinstance(source, str):
-        _as_nonempty_string(source, "source", errors)
     else:
-        errors.append("source must be a non-empty string or an object with type and ref")
+        errors.append("source must be an object with non-empty `type` and `ref` strings")
 
     provenance = claim.get("provenance")
     if isinstance(provenance, dict):
+        for field in sorted(provenance, key=str):
+            if field not in {"evidence_refs", "derived_from"}:
+                errors.append(f"unsupported provenance field {field!r}")
         _validate_references(provenance.get("evidence_refs"), "provenance.evidence_refs", errors)
-        _validate_references(provenance.get("derived_from"), "provenance.derived_from", errors, required=False)
-    elif isinstance(provenance, str):
-        _as_nonempty_string(provenance, "provenance", errors)
+        if "derived_from" not in provenance:
+            errors.append("provenance.derived_from must be a list of strings (use [] when there are no derived claims)")
+        else:
+            _validate_references(provenance.get("derived_from"), "provenance.derived_from", errors, required=False)
     else:
-        errors.append("provenance must be a non-empty string or an object with evidence_refs")
+        errors.append("provenance must be an object with `evidence_refs` and `derived_from` lists")
 
     parsed_dates: dict[str, datetime] = {}
     for field in DATE_FIELDS:
         parsed = _parse_date(claim.get(field), field, errors)
         if parsed is not None:
             parsed_dates[field] = parsed
-    if not parsed_dates.get("asserted_at") and not parsed_dates.get("observed_at") and not parsed_dates.get("first_recorded"):
-        errors.append("asserted_at, observed_at, or first_recorded is required")
+    if not parsed_dates.get("asserted_at") and not parsed_dates.get("observed_at"):
+        errors.append("asserted_at or observed_at is required")
     if parsed_dates.get("valid_from") and parsed_dates.get("valid_until"):
         if parsed_dates["valid_from"] > parsed_dates["valid_until"]:
             errors.append("valid_from must not be after valid_until")
@@ -163,23 +245,30 @@ def validate_claim(claim: Any) -> list[str]:
             pass
         elif isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
             errors.append("confidence must be a number between 0 and 1 or low/medium/high")
-    if kind in {"inferred", "hypothesis", "hypothetical"} and confidence is None:
-        errors.append("confidence is required for inferred and hypothesis claims")
-    if (confidence is not None or kind in {"inferred", "hypothesis", "hypothetical"}) and not isinstance(confidence, str):
+    requires_confidence = isinstance(kind, str) and kind in {"inferred", "hypothesis", "hypothetical"}
+    if requires_confidence and confidence is None:
+        errors.append("confidence is required for inferred, hypothesis, and hypothetical claims")
+    if confidence is not None or requires_confidence:
         _as_nonempty_string(claim.get("confidence_basis"), "confidence_basis", errors)
-    if kind in {"inferred", "hypothesis", "hypothetical"} and status == "active":
-        if claim.get("reviewed_at") in (None, "") and claim.get("last_reviewed") in (None, ""):
-            errors.append("reviewed_at or last_reviewed is required for an active inferred or hypothesis claim")
-        elif claim.get("reviewed_at"):
-            _parse_date(claim.get("reviewed_at"), "reviewed_at", errors)
-        if claim.get("reviewed_by") is not None:
-            _as_nonempty_string(claim.get("reviewed_by"), "reviewed_by", errors)
+    elif claim.get("confidence_basis") is not None:
+        _as_nonempty_string(claim.get("confidence_basis"), "confidence_basis", errors)
+
+    if claim.get("supersedes") is not None:
+        _as_nonempty_string(claim.get("supersedes"), "supersedes", errors)
+    if claim.get("reviewed_by") is not None:
+        _as_nonempty_string(claim.get("reviewed_by"), "reviewed_by", errors)
+
+    if requires_confidence and status == "active":
+        if claim.get("reviewed_at") is None:
+            errors.append("reviewed_at is required before an inferred, hypothesis, or hypothetical claim can be active")
+        if claim.get("reviewed_by") is None:
+            errors.append("reviewed_by is required before an inferred, hypothesis, or hypothetical claim can be active")
 
     return errors
 
 
 def _claim_result(claim: Any, errors: list[str], index: int = 1, path: str | None = None) -> dict[str, Any]:
-    claim_id = (claim.get("id") or claim.get("claim_id")) if isinstance(claim, dict) else None
+    claim_id = claim.get("id") if isinstance(claim, dict) else None
     result: dict[str, Any] = {
         "index": index,
         "id": str(claim_id or f"claim-{index:03d}"),
@@ -203,7 +292,7 @@ def validate_claims(data: Any) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     for index, claim in enumerate(claims, start=1):
         errors = validate_claim(claim)
-        claim_id = (claim.get("id") or claim.get("claim_id")) if isinstance(claim, dict) else None
+        claim_id = claim.get("id") if isinstance(claim, dict) else None
         if isinstance(claim_id, str) and claim_id:
             if claim_id in seen:
                 errors.append("duplicate claim id")
@@ -226,25 +315,48 @@ def validate_claim_file(path: Path) -> dict[str, Any]:
 
 
 def self_test() -> None:
-    parsed = parse_claim_markdown(
-        "---\n"
-        "id: claim-date\n"
-        "claim: Date parsing\n"
-        "kind: reported\n"
-        "status: active\n"
-        "source:\n  type: user\n  ref: test\n"
-        "provenance:\n  evidence_refs: [test]\n"
-        "asserted_at: 2026-08-12\n"
-        "---\n"
-        "# Notes\n"
+    template_path = Path(__file__).parent.parent / "templates" / "claim-record.md"
+    template = template_path.read_text(encoding="utf-8")
+    completed_template = (
+        template.replace("claim-YYYYMMDD-short-slug", "claim-template-example")
+        .replace('"replace-with-stable-source-reference"', '"conversation:example:1"')
+        .replace('"replace-with-evidence-reference"', '"conversation:example:1"')
+        .replace('"YYYY-MM-DD"', '"2026-08-12"')
+        .replace("[Write one specific, falsifiable claim statement here.]", "The template record validates after required values are filled.")
     )
+    parsed = parse_claim_markdown(completed_template)
     assert parsed["asserted_at"] == "2026-08-12"
+    assert parsed["claim"] == "The template record validates after required values are filled."
+    assert validate_claim(parsed) == []
+
+    for markdown, expected_error in (
+        (completed_template.replace("## Claim", "## Statement"), "missing required Markdown section `## Claim`"),
+        (completed_template.replace("## Claim\n\nThe template record validates after required values are filled.", "## Claim\n\n## Evidence"), "must contain non-whitespace text"),
+    ):
+        try:
+            parse_claim_markdown(markdown)
+        except ValueError as exc:
+            assert expected_error in str(exc)
+        else:
+            raise AssertionError(f"expected parsing to fail with: {expected_error}")
+
     try:
         parse_claim_markdown("---\nid: one\nid: two\n---\n")
     except ValueError as exc:
         assert "duplicate YAML key" in str(exc)
     else:
         raise AssertionError("duplicate YAML keys must be rejected")
+
+    try:
+        parse_claim_markdown(
+            "---\nclaim_id: legacy-id\nstatement: Legacy statement\n---\n\n## Claim\n\nNew statement.\n"
+        )
+    except ValueError as exc:
+        assert "front matter field `statement`" in str(exc)
+        assert "move the claim text into the required `## Claim` section" in str(exc)
+    else:
+        raise AssertionError("legacy frontmatter claim text must produce a migration error")
+
     valid = validate_claims(
         {
             "claims": [
@@ -254,7 +366,7 @@ def self_test() -> None:
                     "kind": "reported",
                     "status": "active",
                     "source": {"type": "user", "ref": "conversation-2026-08-12"},
-                    "provenance": {"evidence_refs": ["conversation-2026-08-12"]},
+                    "provenance": {"evidence_refs": ["conversation-2026-08-12"], "derived_from": []},
                     "asserted_at": "2026-08-12",
                     "valid_until": "2026-12-31",
                 },
@@ -285,7 +397,7 @@ def self_test() -> None:
                     "kind": "inferred",
                     "status": "active",
                     "source": {"type": "assistant", "ref": "chat"},
-                    "provenance": {"evidence_refs": []},
+                    "provenance": {"evidence_refs": [], "derived_from": []},
                     "observed_at": "not-a-date",
                     "confidence": 1.2,
                 }
@@ -294,7 +406,23 @@ def self_test() -> None:
     )
     assert invalid["valid"] is False
     assert len(invalid["claims"][0]["errors"]) >= 3
+    assert any("confidence_basis" in error for error in invalid["claims"][0]["errors"])
     assert any("reviewed_at" in error for error in invalid["claims"][0]["errors"])
+
+    legacy = validate_claim(
+        {
+            "claim_id": "legacy-id",
+            "claim": "Legacy statement",
+            "kind": "reported",
+            "status": "candidate",
+            "source": "legacy source",
+            "provenance": "legacy provenance",
+            "first_recorded": "2026-08-12",
+        }
+    )
+    assert any("rename it to `id`" in error for error in legacy)
+    assert any("source must be an object" in error for error in legacy)
+    assert any("provenance must be an object" in error for error in legacy)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -10,7 +10,9 @@ It is copied into a runtime workspace only when that workspace is empty.
 - `areas/`: ongoing responsibilities without a fixed end date (`area-template.md`).
 - `projects/`: bounded outcomes with milestones, tasks, risks, and decisions (`project-template.md`).
 - `knowledge/`: durable notes, references, and research.
-- `knowledge/claims/`: reusable personal claims with explicit evidence, provenance, temporal scope, and status (`claim-record.md`).
+- `knowledge/claims/`: reusable personal claim records with structured evidence,
+  provenance, temporal metadata, and status. The starter record is
+  `knowledge/claim-record.md`, outside the directory scanned by the claim index.
 - `ideas/`: possible future work and observations (`idea-template.md`).
 - `decisions/`: questions, options, evidence, trade-offs, and outcomes (`decision-template.md`).
 - `monitors/`: things to watch for change over time (`monitor-template.md`).
