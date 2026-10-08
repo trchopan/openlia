@@ -468,7 +468,11 @@ func runWorkspaceGit(ctx context.Context, config Config, args []string, output, 
 	if len(args) != 0 {
 		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("workspace-git accepts only setup, ensure, or status"))
 	}
-	result, err := WorkspaceGit(ctx, NewCompose(config, nil), WorkspaceGitOptions{Action: action})
+	result, err := WorkspaceGit(ctx, NewCompose(config, nil), WorkspaceGitOptions{
+		Action:   action,
+		Schedule: config.WorkspaceGitSchedule,
+		Enabled:  config.WorkspaceGitEnabled,
+	})
 	if err != nil {
 		return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
 	}

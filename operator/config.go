@@ -37,6 +37,8 @@ type Config struct {
 	BackupRecipient             string
 	BackupSchedule              string
 	BackupScheduleEnabled       bool
+	WorkspaceGitSchedule        string
+	WorkspaceGitEnabled         bool
 	BackupRemoteRetention       int
 	BackupDestinations          []BackupDestination
 	BackupNamespaceRoot         string
@@ -186,6 +188,8 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		BackupRecipient:         values["OPENLIA_BACKUP_RECIPIENT"],
 		BackupSchedule:          getOr(values, "OPENLIA_BACKUP_SCHEDULE", "20 4 * * *"),
 		BackupScheduleEnabled:   true,
+		WorkspaceGitSchedule:    getOr(values, "OPENLIA_WORKSPACE_GIT_SCHEDULE", "0 4 * * *"),
+		WorkspaceGitEnabled:     true,
 		BackupRemoteRetention:   30,
 		BackupDestinations:      []BackupDestination{},
 		OperatorConfigFile:      values["OPENLIA_CLI_CONFIG_FILE"],
@@ -219,6 +223,12 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		config.BackupScheduleEnabled, err = strconv.ParseBool(raw)
 		if err != nil {
 			return Config{}, fmt.Errorf("OPENLIA_BACKUP_SCHEDULE_ENABLED must be true or false")
+		}
+	}
+	if raw := values["OPENLIA_WORKSPACE_GIT_ENABLED"]; raw != "" {
+		config.WorkspaceGitEnabled, err = strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("OPENLIA_WORKSPACE_GIT_ENABLED must be true or false")
 		}
 	}
 	if err := validateOutputLanguage(config.OutputLanguage); err != nil {
@@ -469,6 +479,11 @@ func (c Config) ValidatePaths() error {
 	if c.BackupScheduleEnabled {
 		if _, err := cron.ParseStandard(c.BackupSchedule); err != nil {
 			return fmt.Errorf("backup schedule must be a five-field cron expression: %w", err)
+		}
+	}
+	if c.WorkspaceGitEnabled || c.WorkspaceGitSchedule != "" {
+		if _, err := cron.ParseStandard(c.WorkspaceGitSchedule); err != nil {
+			return fmt.Errorf("workspace Git schedule must be a five-field cron expression: %w", err)
 		}
 	}
 	if err := validateBackupDestinations(c.BackupDestinations); err != nil {

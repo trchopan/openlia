@@ -107,6 +107,8 @@ type Config struct {
 	BackupScheduleEnabled   bool
 	BackupRemoteRetention   int
 	BackupDestinations      []BackupDestinationConfig
+	WorkspaceGitSchedule    string
+	WorkspaceGitEnabled     bool
 	Services                []ServiceHostConfig
 	OpenLiaBrowser          OpenLiaBrowserConfig
 }
@@ -177,6 +179,8 @@ func defaultConfig() Config {
 		BackupScheduleEnabled: true,
 		BackupRemoteRetention: 30,
 		BackupDestinations:    []BackupDestinationConfig{},
+		WorkspaceGitSchedule:  "0 4 * * *",
+		WorkspaceGitEnabled:   true,
 		OpenLiaBrowser:        OpenLiaBrowserConfig{Mode: "local", SSHPort: 22},
 		Services:              nil,
 	}
@@ -477,6 +481,10 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.BackupScheduleEnabled, err = parseBool(value)
 			case "backup.remote_retention":
 				config.BackupRemoteRetention, err = parseInt(value)
+			case "workspace_git.schedule":
+				config.WorkspaceGitSchedule, err = parseString(value)
+			case "workspace_git.enabled":
+				config.WorkspaceGitEnabled, err = parseBool(value)
 			default:
 				return Config{}, fmt.Errorf("line %d contains unknown setting %q", lineNumber, section+"."+key)
 			}
@@ -569,6 +577,11 @@ func validateConfig(config Config) error {
 	if config.BackupScheduleEnabled || config.BackupSchedule != "" {
 		if _, err := cron.ParseStandard(config.BackupSchedule); err != nil {
 			return fmt.Errorf("backup.schedule must be a five-field cron expression: %w", err)
+		}
+	}
+	if config.WorkspaceGitEnabled || config.WorkspaceGitSchedule != "" {
+		if _, err := cron.ParseStandard(config.WorkspaceGitSchedule); err != nil {
+			return fmt.Errorf("workspace_git.schedule must be a five-field cron expression: %w", err)
 		}
 	}
 	if err := validateBackupDestinations(config.BackupDestinations); err != nil {
@@ -1098,6 +1111,7 @@ func renderConfig(config Config) string {
 		fmt.Fprintf(&builder, "%q", tool)
 	}
 	builder.WriteString("]\n")
+	fmt.Fprintf(&builder, "\n[workspace_git]\nenabled = %t\nschedule = %q\n", config.WorkspaceGitEnabled, config.WorkspaceGitSchedule)
 	fmt.Fprintf(&builder, "\n[backup]\nschedule = %q\nschedule_enabled = %t\nremote_retention = %d\n", config.BackupSchedule, config.BackupScheduleEnabled, config.BackupRemoteRetention)
 	if config.BackupKnownHosts != "" {
 		fmt.Fprintf(&builder, "known_hosts = %q\n", config.BackupKnownHosts)

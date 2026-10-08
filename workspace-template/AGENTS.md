@@ -111,10 +111,8 @@ of silently overwriting them.
 ## Workspace Git history
 
 OpenLia maintains this workspace as a local Git repository for history tracking.
-After an approved or delegated coherent workspace update, stage only the
-intended files and create a concise `backup:` commit when local Git commits are
-enabled. Do not create empty commits or configure Git remotes; use OpenLia's
-encrypted backup mechanism for recovery. Never store credentials, tokens,
-OAuth files, private keys, or raw service exports here.
-Never use Git network operations, hard resets, `git clean`, or destructive
-conflict handling.
+Workspace Git commits are recorded automatically in the background on schedule.
+Routine interactive actions do not need to commit. Do not configure Git remotes;
+use OpenLia's encrypted backup mechanism for recovery. Never store credentials,
+tokens, OAuth files, private keys, or raw service exports here. Never use Git
+network operations, hard resets, `git clean`, or destructive conflict handling.

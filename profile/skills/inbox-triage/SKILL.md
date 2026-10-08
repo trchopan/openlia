@@ -80,9 +80,6 @@ metadata:
       the authorized and rejected candidate IDs, the authorization source, the
       timestamp including timezone when available, and canonical links to
       created records.
-    - Inspect the diff, stage only the authorized files, and follow the
-      `workspace-git` skill when local Git commits are enabled. Never push or
-      create an empty commit.
 
 ## Batch JSON Triage Procedure (Structured Mode)
 

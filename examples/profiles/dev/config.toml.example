@@ -69,6 +69,10 @@ enabled = [
 [tools]
 enabled = []
 
+[workspace_git]
+enabled = true
+schedule = "0 4 * * *"
+
 [backup]
 schedule = "20 4 * * *"
 schedule_enabled = false

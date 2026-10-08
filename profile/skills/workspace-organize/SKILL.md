@@ -105,8 +105,6 @@ Read relevant sources across the workspace:
       with scoped confirmation or `assistant-policy.yaml` delegates the matching
       `update_records` or `archive_records` action. Never apply an ambiguous
       proposal solely because it was listed in the report.
-    - After applying authorized updates, stage changes and make a concise Git
-      commit (`backup: ...`) when local Git commits are enabled.
 
 ## Verification
 

@@ -52,11 +52,10 @@ rather than editing its generated state files directly.
 ## Workspace Git history
 
 - OpenLia maintains the workspace as a local Git repository for history only.
-- After an approved, coherent workspace update, stage only the intended files
-  and commit them with `backup: <concise description>`. Do not create empty
-  commits. Encrypted OpenLia backups are the recovery mechanism.
-- Do not configure Git remotes or use Git network operations. Use the
-  `workspace-git` skill for local history tracking.
+- Workspace Git commits are recorded automatically in the background on schedule.
+  Routine interactive actions do not need to commit. Encrypted OpenLia backups are
+  the recovery mechanism.
+- Do not configure Git remotes or use Git network operations.
 - Never use hard resets, `git clean`, or destructive conflict resolution.
 
 ## Browser Boundary
