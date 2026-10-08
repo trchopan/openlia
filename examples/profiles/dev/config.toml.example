@@ -63,6 +63,7 @@ enabled = [
   "decision-analysis",
   "deep-research",
   "personal-finance",
+  "calendar",
   "workspace-organize"
 ]
 

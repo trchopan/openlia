@@ -42,6 +42,7 @@ var defaultSkills = []string{
 	"decision-analysis",
 	"deep-research",
 	"personal-finance",
+	"calendar",
 	"workspace-git",
 	"workspace-organize",
 }

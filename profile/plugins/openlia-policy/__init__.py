@@ -68,6 +68,7 @@ _READ_ONLY_COMMANDS = {
     "ls",
     "pwd",
     "readlink",
+    "remind",
     "rg",
     "sed",
     "sort",
