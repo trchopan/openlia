@@ -1,7 +1,7 @@
 ---
 name: deep-research
 description: Build a bounded, source-backed research brief with explicit evidence gaps.
-version: 0.2.0
+version: 0.3.0
 platforms: [macos, linux]
 required_environment_variables: []
 required_credential_files: []
@@ -20,6 +20,26 @@ evidence, and visible uncertainty rather than a quick answer. Use the existing
 `knowledge/research/` path by default; read `workspace.yaml` first when it is
 present and use a registered research extension only when its context matches.
 
+## Daily Workflow Handoffs
+
+- **Inbox triage:** A research route captures a question, source, or evidence
+  gap. Filing the item does not start an investigation automatically.
+- **Daily briefing:** When an active task, project, or decision is blocked by
+  missing external evidence, surface the question, why it matters now, and a
+  bounded research follow-up. Do not scan every saved brief by default.
+- **Project review:** Use this skill for a material factual gap behind a risk or
+  blocker. Use [Decision Analysis](openlia://skills/decision-analysis) after the
+  evidence is sufficient to compare viable options.
+- **Decision analysis:** Use this skill before scoring options when important
+  external evidence is missing. Return source IDs, limitations, and confidence;
+  do not turn a research ranking into a decision.
+- **Weekly review:** Revisit a linked brief only when its evidence is stale, a
+  next-check trigger has arrived, the decision context changed, or the open loop
+  still lacks a supported answer.
+
+The normal loop is **capture -> briefing or review -> bounded research ->
+decision or project action -> later review**.
+
 ## Operating Boundary
 
 - Research helpers are local-only. They read researcher-supplied metadata and
@@ -36,44 +56,61 @@ present and use a registered research extension only when its context matches.
 
 ## Procedure
 
-1. Define the research question, scope, decision relevance, freshness
-   requirement, and what evidence would change the conclusion.
+1. Define a research contract: one question, linked task/project/decision/goal
+   when available, scope and exclusions, relevant constraints, freshness
+   requirement, research budget, stopping condition, and what evidence would
+   change the conclusion. Use one focused pass by default; state when the budget
+   is reached before the evidence is conclusive.
 2. Read `references/source-rubric.md`. Collect a source packet with stable IDs
    and the fields accepted by `scripts/research_matrix.py`:
-   `id`, `title`, `url`, `publisher`, `source_type`, `accessed_at`, `claim`,
-   `counterevidence`, `notes`, and 0-5 scores for `authority`, `quality`,
-   `recency`, and `relevance`.
+   `id`, `title`, `url`, `publisher`, `source_type`, `accessed_at`,
+   `published_at`, `effective_at`, `claim`, `counterevidence`, `notes`, and
+   0-5 scores for `authority`, `quality`, `recency`, and `relevance`.
 3. Run the installed helper with an explicit input path:
 
    ```sh
-   python /opt/data/skills/deep-research/scripts/research_matrix.py INPUT.json \
-     --format markdown
+   python /opt/data/skills/deep-research/scripts/research_matrix.py INPUT.json
    ```
 
-4. Inspect every source row, not only the ranking. Check missing dimensions,
-   duplicate IDs, low scores, conflicts, stale access dates, and claims without
-   direct support. A weighted score is a triage aid, not a truth score.
-5. Write the brief from `templates/research-brief.md`, preserving its headings.
-   Cite each consequential claim with a source ID and a canonical workspace
-   link to the saved research brief when one exists.
-6. Save a brief only when the user requested a workspace report or approved the
-   write. Use a registered research destination; if none is registered, keep the
-   result in the inbox or return it in chat and propose the extension.
-7. Ask before creating durable records in `knowledge/claims/`, `decisions/`,
-   `tasks/`, or other domains. A research conclusion is not approval to act.
+4. Inspect every source row in the JSON output, not only the ranking. Check
+   missing dimensions, duplicate IDs, low scores, conflicts, stale publication
+   or effective dates, missing access dates, source independence, and claims
+   without direct support. Check whether apparently separate sources rely on the
+   same underlying source. A weighted source-usefulness score is a triage aid,
+   not a truth score or recommendation.
+5. Read `templates/research-brief.md` and write the brief from it, preserving its headings.
+   The helper returns source evidence only; it does not render the research brief.
+   Cite each consequential claim with source IDs and link the parent record and
+   saved brief with canonical workspace URIs when they exist.
+6. Read `workspace.yaml` and `assistant-policy.yaml` before saving. Save a brief
+   when the current request or applicable policy authorizes `create_records` or
+   `generate_reports` for the registered research destination. An explicit
+   chat-only or no-write request takes precedence. If no research destination is
+   registered, return the result in chat or keep it in `inbox/` and propose the
+   extension rather than inventing a path.
+7. Treat updates to parent tasks, projects, decisions, or claims as separate
+   writes. Check authority for each one, preserve the source link, and do not
+   turn a conclusion into an action automatically. Research never authorizes
+   messages, purchases, financial actions, calendar changes, or promotion of a
+   claim into `knowledge/claims/`.
 
 ## Output Contract
 
 Every brief must separate:
 
-- **Executive Summary**: provisional answer, confidence, and decision relevance.
+- **Question and Scope**: the linked work, constraints, freshness, budget, and
+  stopping condition.
+- **Executive Summary**: provisional answer, confidence, decision relevance, and
+  whether the investigation stopped because evidence was sufficient, the budget
+  was reached, or the question remains unresolved.
 - **Claims And Evidence**: claim, supporting source IDs, counterevidence or
   limitations, confidence, and whether the claim is reported or synthesized.
 - **Evidence Gaps**: missing sources, unresolved conflicts, stale information,
   and assumptions.
 - **Next Checks**: concrete follow-up research that could change the result.
-- **Sources**: stable ID, title, publisher, URL, source type, access date, and
-  matrix score or missing dimensions.
+- **Sources**: stable ID, title, publisher, source type, URL, publication or
+  effective date when available, access date, and matrix score or missing
+  dimensions.
 
 ## Pitfalls
 
@@ -82,14 +119,20 @@ Every brief must separate:
   claims require provenance and review in `knowledge/claims/`.
 - Do not hide contradictory sources or omit evidence gaps because they weaken a
   recommendation.
+- Do not treat multiple sources as independent when they repeat the same
+  underlying report or dataset.
 - Do not invent dates, prices, availability, medical interpretations, or legal
   conclusions when the sources do not establish them.
+- Do not continue indefinitely: report when the research budget or stopping
+  condition ended the investigation.
 - Do not overwrite an existing research brief. Use a collision-safe filename or
   a new dated version and preserve the earlier record.
 
 ## Verification
 
 Confirm that every important claim has a source trail, each source has an
-explicit access date and type when available, gaps and counterevidence are
-visible, the helper output was inspected, and no source or target record was
-changed without the required approval.
+explicit type and publication/effective or access date when available, source
+independence and contradictions were checked, gaps and counterevidence are
+visible, the budget and stopping result are stated, the helper output was
+inspected, and no source or target record was changed without the required
+authority.

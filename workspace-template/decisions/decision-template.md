@@ -25,16 +25,28 @@ What specific decision needs to be made?
   - Risks:
 
 ## Criteria And Weights
-- Criterion 1 (weight: 1-5):
-- Criterion 2 (weight: 1-5):
+- Criterion 1 (weight: positive value from 0-10):
+  - Score meaning: 0 = ...; 10 = ...
+- Criterion 2 (weight: positive value from 0-10):
+  - Score meaning: 0 = ...; 10 = ...
 
 ## Evidence & Claims
 - Linked claims: [[knowledge/claims/claim-...]]
 - Evidence gaps:
 
+## Recommendation
+- Weighted comparison:
+- Leading option or tie:
+- Sensitivity / what would change the recommendation:
+
 ## Chosen Option & Rationale
-- Chosen option:
+- Chosen option: [leave blank until the person decides]
 - Rationale:
+- Decision authority: person
+
+## Next Actions
+-
 
 ## Review Outcome
+- Review date outcome:
 - Actual outcome / retrospective:

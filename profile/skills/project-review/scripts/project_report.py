@@ -58,34 +58,6 @@ def project_report(project: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def render_markdown(report: dict[str, Any]) -> str:
-    lines = [
-        f"# Project Review: {report['title']}",
-        "",
-        f"Status: {report['status']}",
-        f"Completion: {report['completion_percent']}%",
-        "",
-        "## Objective",
-        "",
-        report["objective"] or "No objective supplied.",
-        "",
-        "## Next Actions",
-        "",
-        *([f"- {item}" for item in report["open_tasks"]] or ["- No open tasks supplied."]),
-        "",
-        "## Risks And Decisions",
-        "",
-        f"- Risks recorded: {report['risk_count']}",
-        f"- Decisions recorded: {report['decision_count']}",
-        "",
-        "## Overdue",
-        "",
-        *([f"- {item}" for item in report["overdue_items"]] or ["- None marked overdue."]),
-        "",
-    ]
-    return "\n".join(lines)
-
-
 def self_test() -> None:
     report = project_report(
         {
@@ -98,14 +70,13 @@ def self_test() -> None:
     )
     assert report["completion_percent"] == 50.0
     assert report["open_tasks"] == ["High priority action"]
-    assert "Example project" in render_markdown(report)
+    assert report["title"] == "Example project"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", nargs="?", type=Path, help="JSON project record")
-    parser.add_argument("--format", choices=("json", "markdown"), default="json")
-    parser.add_argument("--output", type=Path, help="Write the report to a file")
+    parser.add_argument("--output", type=Path, help="Write JSON output to a file")
     parser.add_argument("--self-test", action="store_true", help="Run the built-in deterministic test")
     args = parser.parse_args(argv)
     if args.self_test:
@@ -115,12 +86,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.input is None:
         parser.error("input is required unless --self-test is used")
     try:
-        report = project_report(json.loads(args.input.read_text(encoding="utf-8")))
-        rendered = (
-            json.dumps(report, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
-            if args.format == "json"
-            else render_markdown(report)
-        )
+        rendered = json.dumps(
+            project_report(json.loads(args.input.read_text(encoding="utf-8"))),
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=True,
+        ) + "\n"
         if args.output:
             args.output.write_text(rendered, encoding="utf-8")
         else:

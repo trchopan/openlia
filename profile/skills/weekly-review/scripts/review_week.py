@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a deterministic weekly review from explicit JSON inputs."""
+"""Build deterministic weekly review data from explicit JSON inputs."""
 
 from __future__ import annotations
 
@@ -25,11 +25,7 @@ def _ordered(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(values, key=lambda value: (_title(value).casefold(), str(value.get("id") or "")))
 
 
-def _bullets(values: list[dict[str, Any]], empty: str) -> list[str]:
-    return [f"- {_title(value)}" for value in _ordered(values)] or [f"- {empty}"]
-
-
-def render_review(data: dict[str, Any]) -> str:
+def build_review(data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("input must be a JSON object")
     projects = _list(data, "projects")
@@ -61,46 +57,19 @@ def render_review(data: dict[str, Any]) -> str:
     ]
     claim_review = [claim for claim in claims if claim.get("needs_review") is True or str(claim.get("status", "")).lower() in {"candidate", "stale", "contested"}]
 
-    lines = [
-        "# Weekly Review",
-        "",
-        f"Week: {str(data.get('week') or 'unspecified')}",
-        "",
-        "## Completed",
-        "",
-        *_bullets(completed, "No completed tasks supplied."),
-        "",
-        "## Closed / Cancelled",
-        "",
-        *_bullets(closed_tasks, "No cancelled or archived tasks supplied."),
-        "",
-        "## Active Projects",
-        "",
-        *_bullets(active_projects, "No active projects supplied."),
-        "",
-        "## Open Loops",
-        "",
-        *_bullets(open_tasks, "No open tasks supplied."),
-        "",
-        "## Decisions To Revisit",
-        "",
-        *_bullets(revisit, "No decisions need review."),
-        "",
-        "## Claims To Review",
-        "",
-        *_bullets(claim_review, "No claims need review."),
-        "",
-        "## Next Week",
-        "",
-        "- Choose a small number of outcomes before adding more tasks.",
-        "- Confirm owners and dates for any open loop that matters.",
-        "",
-    ]
-    return "\n".join(lines)
+    return {
+        "week": str(data.get("week") or "unspecified"),
+        "completed": _ordered(completed),
+        "closed_tasks": _ordered(closed_tasks),
+        "active_projects": _ordered(active_projects),
+        "open_tasks": _ordered(open_tasks),
+        "decisions_to_revisit": _ordered(revisit),
+        "claims_to_review": _ordered(claim_review),
+    }
 
 
 def self_test() -> None:
-    output = render_review(
+    review = build_review(
         {
             "week": "2026-W01",
             "projects": [
@@ -120,20 +89,23 @@ def self_test() -> None:
             "claims": [{"claim": "A stale preference", "status": "stale", "needs_review": True}],
         }
     )
-    assert "Finished task" in output
-    assert "Cancelled task" not in output.split("## Open Loops", 1)[1]
-    assert "Open task" in output
-    assert "Unresolved choice" in output
-    assert "A stale preference" in output
-    assert "Unspecified project" in output
-    assert "Paused project" not in output
-    assert "Abandoned decision" not in output
+    assert review["completed"][0]["title"] == "Finished task"
+    assert review["closed_tasks"][0]["title"] == "Cancelled task"
+    assert review["open_tasks"][0]["title"] == "Open task"
+    assert review["decisions_to_revisit"][0]["title"] == "Unresolved choice"
+    assert review["claims_to_review"][0]["claim"] == "A stale preference"
+    assert {project["title"] for project in review["active_projects"]} == {
+        "Active project",
+        "Unspecified project",
+    }
+    assert all(project.get("title") != "Paused project" for project in review["active_projects"])
+    assert all(decision.get("title") != "Abandoned decision" for decision in review["decisions_to_revisit"])
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", nargs="?", type=Path, help="JSON weekly review input")
-    parser.add_argument("--output", type=Path, help="Write Markdown output to a file")
+    parser.add_argument("--output", type=Path, help="Write JSON output to a file")
     parser.add_argument("--self-test", action="store_true", help="Run the built-in deterministic test")
     args = parser.parse_args(argv)
     if args.self_test:
@@ -143,7 +115,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.input is None:
         parser.error("input is required unless --self-test is used")
     try:
-        rendered = render_review(json.loads(args.input.read_text(encoding="utf-8")))
+        rendered = json.dumps(
+            build_review(json.loads(args.input.read_text(encoding="utf-8"))),
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=True,
+        ) + "\n"
         if args.output:
             args.output.write_text(rendered, encoding="utf-8")
         else:

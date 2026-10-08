@@ -91,6 +91,8 @@ Read relevant sources across the workspace:
    - Explicitly list areas or files inspected but intentionally omitted due to insufficient evidence (e.g. empty domains that are intentionally fresh, external web links, or exploratory research).
 
 5. **Delivery**:
+    - Read `templates/organize-report.md` before drafting. Preserve its
+      headings, proposal fields, summary, and explicit not-proposed section.
     - If the current request or policy authorizes `generate_reports`, stage the
       full report into `inbox/workspace-organize-YYYY-MM-DD.md`; otherwise
       return it in chat without writing a workspace file.

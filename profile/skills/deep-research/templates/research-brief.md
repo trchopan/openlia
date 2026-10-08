@@ -3,14 +3,18 @@
 ## Question
 
 - Research question:
+- Linked task, project, decision, or goal:
 - Research status: established | provisional | unresolved
 - What would change the conclusion:
 
 ## Scope And Decision Relevance
 
 - Scope and exclusions:
+- Constraints:
 - Decision or goal this informs:
 - Freshness requirement:
+- Research budget:
+- Stopping condition:
 - Date prepared: YYYY-MM-DD
 
 ## Executive Summary
@@ -19,6 +23,7 @@
 - Confidence: high | medium | low
 - Key reasons:
 - Important limitation:
+- Research outcome: evidence sufficient | budget reached | unresolved
 
 ## Claims And Evidence
 
@@ -36,4 +41,4 @@
 
 ## Sources
 
-- ID: `source-001` | Title: | Publisher / author: | Type: | URL: | Accessed: YYYY-MM-DD | Matrix score: | Missing dimensions:
+- ID: `source-001` | Title: | Publisher / author: | Type: | URL: | Published: YYYY-MM-DD or unknown | Effective: YYYY-MM-DD or unknown | Accessed: YYYY-MM-DD | Matrix score: | Missing dimensions:
