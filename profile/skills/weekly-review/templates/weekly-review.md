@@ -6,11 +6,19 @@ Week: YYYY-Www
 
 -
 
+## Closed / Cancelled
+
+-
+
 ## Active Projects
 
 -
 
 ## Open Loops
+
+-
+
+## Research Follow-ups
 
 -
 

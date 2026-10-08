@@ -79,6 +79,20 @@ heading structure:
    a clear owner for delegated work. Preserve commitments; do not recommend
    dropping them without evidence.
 
+When a proposed decision is important or blocks a project, surface it as a
+choice that needs attention and link the decision record. Do not score options
+or imply a chosen option in the briefing; use [Decision Analysis](openlia://skills/decision-analysis)
+as a separate follow-up when the person is ready to compare the trade-offs. If
+the choice is blocked by missing external evidence, use [Deep Research](openlia://skills/deep-research)
+before scoring options.
+
+Do not include every research brief in the daily source packet. Treat an active
+task, project, or decision as the research anchor. When that record links to a
+brief or identifies an evidence gap, read the relevant brief directly and
+surface only the question, why it matters now, the freshness need, and a bounded
+next research check. A briefing identifies the follow-up; it does not start
+research or create a task merely because an evidence gap is mentioned.
+
 Read the full source records needed to support the report, then fill the
 template directly. Cite factual items with canonical workspace links such as
 `[Task](openlia://workspace/tasks/write-outline.md)`. Do not invent dates,

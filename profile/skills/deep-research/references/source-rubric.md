@@ -11,9 +11,8 @@ is universally trustworthy.
 
 The helper weights these dimensions as authority 0.4, quality 0.3, recency 0.1,
 and relevance 0.2. Missing dimensions are treated as zero and reported as an
-evidence gap. The weighted score is a triage aid, not a truth score or an
-automatic recommendation.
-automatic recommendation.
+evidence gap. The weighted score is a source-usefulness triage aid, not a truth
+score or an automatic recommendation.
 
 Prefer primary sources, official records, transparent methods, and sources that
 state dates and limitations. Use secondary sources to add context or challenge

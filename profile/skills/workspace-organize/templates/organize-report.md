@@ -13,7 +13,7 @@
 ### O-YYYY-MM-DD-001
 
 - **Area/file:** [Relative file path or directory]
-- **Type:** stray-root-file | inbox-lifecycle | broken-link | evidence-provenance | duplicate-overlap | metadata-inconsistency | completed-project
+- **Type:** stray-root-file | unregistered-directory | workspace-registry | inbox-lifecycle | broken-link | evidence-provenance | duplicate-overlap | metadata-inconsistency | template-schema-conformance | completed-project
 - **Observation:** [Specific factual observation referencing file and line numbers]
 - **Inference:** [Analytical reason why this represents an organizational issue]
 - **Suggested action:** [Concrete atomic action proposed for user review; do not execute automatically]

@@ -53,6 +53,7 @@ metadata:
    - **People & Ownership**: distinguish the user, spouse/family, colleagues, and external persons; label uncertain identity or ownership.
    - **Proposed Tasks**: concrete physical next actions with one owner and an optional explicit due date.
    - **Proposed Events**: title, explicit date/time and timezone if present, participants, and location. Missing time remains unresolved.
+   - **Proposed Decisions**: one specific question, the known options, hard constraints, decision deadline, and evidence gaps. Do not choose an option during triage.
    - **Proposed Durable Claims**: one specific candidate statement with an explicit kind (`reported`, `observed`, `inferred`, or `hypothetical`), stable source reference, evidence, and temporal scope when available. Keep it a candidate.
    - **Route and Destination**: record the suggested route, workspace destination, confidence, and rationale for every candidate.
    - **Unclear / Needs Confirmation**: missing times, ambiguous dates, unclear owners, conflicting statements, or unverified facts.
@@ -80,6 +81,18 @@ metadata:
       the authorized and rejected candidate IDs, the authorization source, the
       timestamp including timezone when available, and canonical links to
       created records.
+
+For a decision candidate, hand off to [Decision Analysis](openlia://skills/decision-analysis)
+after the question, options, and constraints are clear. A proposed decision
+record remains unresolved until the person chooses an option; triage does not
+authorize purchases, messages, scheduling, or other external actions.
+
+For a research candidate, preserve the question, source context, intended
+decision or project, freshness need, and known evidence gap. Routing it to
+`knowledge/research/` captures the investigation for review; it does not launch
+research automatically. Start [Deep Research](openlia://skills/deep-research)
+only after the question has a bounded scope, constraints, budget, and stopping
+condition.
 
 ## Batch JSON Triage Procedure (Structured Mode)
 
@@ -115,6 +128,8 @@ not modify the input or create directories.
   the marked section its own readable source panel.
 - Do not guess or infer missing dates, medical interpretations, or deadlines; mark them explicitly in `Unclear / Needs Confirmation`.
 - Do not treat a keyword match as evidence for a durable claim. Claims require a source reference and remain candidates until reviewed.
+- Do not start research merely because an item was routed to `knowledge/research/`;
+  capture and investigation are separate workflow steps.
 - Do not overwrite an existing review file, silently replace a conflicting
   claim, or apply delegation to ambiguous candidates.
 - Do not embed environment-specific HTTP origins; use canonical `openlia://` workspace URIs.

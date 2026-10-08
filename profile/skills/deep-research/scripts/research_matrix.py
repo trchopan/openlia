@@ -68,6 +68,8 @@ def build_matrix(data: dict[str, Any]) -> dict[str, Any]:
                 "url": _text(source, "url"),
                 "publisher": _text(source, "publisher"),
                 "source_type": _text(source, "source_type") or "unspecified",
+                "published_at": _text(source, "published_at"),
+                "effective_at": _text(source, "effective_at"),
                 "accessed_at": _text(source, "accessed_at"),
                 "claim": _text(source, "claim"),
                 "counterevidence": _text(source, "counterevidence"),
@@ -101,38 +103,6 @@ def build_matrix(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def render_markdown(result: dict[str, Any]) -> str:
-    lines = [
-        "# Research Matrix",
-        "",
-        f"Question: {result['question'] or 'Unspecified'}",
-        "",
-        "## Sources",
-        "",
-    ]
-    if result["sources"]:
-        for source in result["sources"]:
-            details = [f"score={source['score']:.3f}", f"type={source['source_type']}"]
-            if source["publisher"]:
-                details.append(f"publisher={source['publisher']}")
-            if source["accessed_at"]:
-                details.append(f"accessed={source['accessed_at']}")
-            if source["missing_dimensions"]:
-                details.append(f"missing={','.join(source['missing_dimensions'])}")
-            reference = f" - {source['url']}" if source["url"] else ""
-            lines.append(f"- `{source['id']}` {source['title']}: {'; '.join(details)}{reference}")
-    else:
-        lines.append("- No sources supplied.")
-    lines.extend(["", "## Evidence Gaps", ""])
-    lines.extend(
-        f"- {gap}"
-        for gap in result["evidence_gaps"]
-        or ["No mechanical gaps detected; assess the claims manually."]
-    )
-    lines.extend(["", "## Method", "", result["method"], ""])
-    return "\n".join(lines)
-
-
 def self_test() -> None:
     result = build_matrix(
         {
@@ -144,6 +114,8 @@ def self_test() -> None:
                     "url": "https://example.invalid/primary",
                     "publisher": "Accountable institution",
                     "source_type": "official",
+                    "published_at": "2026-10-01",
+                    "effective_at": "2026-10-02",
                     "accessed_at": "2026-10-08",
                     "claim": "The stated result.",
                     "authority": 5,
@@ -158,7 +130,10 @@ def self_test() -> None:
     assert result["sources"][0]["title"] == "Primary source"
     assert "recency" in result["sources"][1]["missing_dimensions"]
     assert "access date" in " ".join(result["evidence_gaps"])
-    assert "Research Matrix" in render_markdown(result)
+    assert result["sources"][0]["claim"] == "The stated result."
+    assert result["method"].startswith("Weighted source notes")
+    assert result["sources"][0]["published_at"] == "2026-10-01"
+    assert result["sources"][0]["effective_at"] == "2026-10-02"
 
     try:
         build_matrix({"sources": [{"id": "same"}, {"id": "same"}]})
@@ -178,8 +153,7 @@ def self_test() -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", nargs="?", type=Path, help="JSON source notes")
-    parser.add_argument("--format", choices=("json", "markdown"), default="json")
-    parser.add_argument("--output", type=Path, help="Write the report to a file")
+    parser.add_argument("--output", type=Path, help="Write JSON output to a file")
     parser.add_argument("--self-test", action="store_true", help="Run the built-in deterministic test")
     args = parser.parse_args(argv)
     if args.self_test:
@@ -189,12 +163,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.input is None:
         parser.error("input is required unless --self-test is used")
     try:
-        result = build_matrix(json.loads(args.input.read_text(encoding="utf-8")))
-        rendered = (
-            json.dumps(result, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
-            if args.format == "json"
-            else render_markdown(result)
-        )
+        rendered = json.dumps(
+            build_matrix(json.loads(args.input.read_text(encoding="utf-8"))),
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=True,
+        ) + "\n"
         if args.output:
             args.output.write_text(rendered, encoding="utf-8")
         else:
