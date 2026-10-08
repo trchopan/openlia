@@ -1118,7 +1118,7 @@ function ModeButton({
   return (
     <button
       aria-pressed={active}
-      className={`btn btn-xs ${active ? "btn-primary" : "btn-ghost"} ${className}`}
+      className={`btn btn-sm join-item ${active ? "btn-primary" : "btn-ghost"} ${className}`}
       onClick={onClick}
       type="button"
       value={value}
@@ -1255,167 +1255,216 @@ export function DocumentPane({
                   </ModeButton>
                 </>
               ) : (
-                <span className="btn btn-xs btn-primary pointer-events-none">
+                <span className="btn btn-sm btn-primary pointer-events-none">
                   Code
                 </span>
               )}
             </div>
             <button
-              className="btn btn-primary btn-sm shrink-0"
+              className={`btn btn-sm shrink-0 ${dirty ? "btn-primary" : "btn-ghost text-base-content/60"}`}
               disabled={!canEdit || !dirty || saving}
               onClick={onSave}
               type="button"
             >
-              {saving ? "Saving..." : dirty ? "Save" : "Saved"}
-            </button>
-            {/* Desktop actions */}
-            <div className="hidden sm:flex shrink-0 items-center gap-2">
-              {onRevealInTree && (
-                <button
-                  aria-label="Reveal in tree"
-                  className="btn btn-outline btn-sm gap-1.5"
-                  onClick={onRevealInTree}
-                  title="Reveal in tree"
-                  type="button"
-                >
+              {saving ? (
+                <>
+                  <span
+                    aria-hidden="true"
+                    className="loading loading-spinner loading-xs"
+                  />
+                  <span>Saving...</span>
+                </>
+              ) : dirty ? (
+                "Save"
+              ) : (
+                <>
                   <svg
-                    className="h-3.5 w-3.5 opacity-70"
+                    aria-hidden="true"
+                    className="h-3.5 w-3.5 text-success opacity-80"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth={2}
                     viewBox="0 0 24 24"
                   >
-                    <title>Tree target icon</title>
                     <path
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      d="M5 13l4 4L19 7"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     />
                   </svg>
-                  <span>Reveal in Tree</span>
-                </button>
+                  <span>Saved</span>
+                </>
               )}
-              <CopyLinkButton
-                className="btn btn-outline btn-sm gap-1.5"
-                link={buildWorkspaceLink(file.path)}
-                title={`Copy link (${buildWorkspaceLink(file.path)})`}
-              />
-              <CopyLinkButton
-                className="btn btn-outline btn-sm gap-1.5"
-                label="Copy URI"
-                link={buildCanonicalWorkspaceUri(file.path)}
-                title={`Copy URI (${buildCanonicalWorkspaceUri(file.path)})`}
-              />
+            </button>
+            <button
+              aria-pressed={detailsOpen}
+              className={`btn btn-sm gap-1.5 ${detailsOpen ? "btn-secondary" : "btn-outline"}`}
+              onClick={onOpenDetails}
+              type="button"
+            >
+              <svg
+                aria-hidden="true"
+                className="h-3.5 w-3.5 opacity-70"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+              >
+                <path
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>Details</span>
+            </button>
+            <div className="dropdown dropdown-end shrink-0">
               <button
-                className="btn btn-outline btn-sm"
-                onClick={onDownload}
+                aria-label="Document actions"
+                className="btn btn-ghost btn-sm btn-square"
+                tabIndex={0}
+                title="Document actions"
                 type="button"
               >
-                Download
-              </button>
-              <button
-                aria-pressed={detailsOpen}
-                className={`btn btn-sm ${detailsOpen ? "btn-secondary" : "btn-outline"}`}
-                onClick={onOpenDetails}
-                type="button"
-              >
-                Details
-              </button>
-              <button
-                aria-label="Delete file"
-                className="btn btn-outline btn-error btn-sm"
-                disabled={deleting}
-                onClick={onDelete}
-                type="button"
-              >
-                Delete
-              </button>
-            </div>
-            {/* Mobile actions & dropdown menu */}
-            <div className="flex sm:hidden shrink-0 items-center gap-1">
-              <div className="dropdown dropdown-end">
-                <button
-                  aria-label="Document actions"
-                  className="btn btn-ghost btn-xs btn-square"
-                  tabIndex={0}
-                  type="button"
+                <svg
+                  className="h-4 w-4"
+                  fill="currentColor"
+                  viewBox="0 0 24 24"
                 >
-                  <svg
-                    className="h-4 w-4"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
+                  <title>Document actions</title>
+                  <circle cx="12" cy="5" r="2" />
+                  <circle cx="12" cy="12" r="2" />
+                  <circle cx="12" cy="19" r="2" />
+                </svg>
+              </button>
+              <ul className="dropdown-content menu z-30 rounded-box border border-base-content/10 bg-base-100 p-1.5 shadow-lg text-xs w-48">
+                {onRevealInTree && (
+                  <li>
+                    <button
+                      aria-label="Reveal in tree"
+                      onClick={onRevealInTree}
+                      type="button"
+                    >
+                      <svg
+                        aria-hidden="true"
+                        className="h-3.5 w-3.5 opacity-70"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      <span>Reveal in Tree</span>
+                    </button>
+                  </li>
+                )}
+                <li>
+                  <CopyLinkButton
+                    className="flex w-full items-center gap-2 text-left font-normal"
+                    link={buildWorkspaceLink(file.path)}
+                    title={`Copy link (${buildWorkspaceLink(file.path)})`}
+                  />
+                </li>
+                <li>
+                  <CopyLinkButton
+                    className="flex w-full items-center gap-2 text-left font-normal"
+                    label="Copy URI"
+                    link={buildCanonicalWorkspaceUri(file.path)}
+                    title={`Copy URI (${buildCanonicalWorkspaceUri(file.path)})`}
+                  />
+                </li>
+                {onRename && file.editable && (
+                  <li>
+                    <button onClick={onRename} type="button">
+                      <svg
+                        aria-hidden="true"
+                        className="h-3.5 w-3.5 opacity-70"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      <span>Rename...</span>
+                    </button>
+                  </li>
+                )}
+                {onMove && file.editable && (
+                  <li>
+                    <button onClick={onMove} type="button">
+                      <svg
+                        aria-hidden="true"
+                        className="h-3.5 w-3.5 opacity-70"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      <span>Move...</span>
+                    </button>
+                  </li>
+                )}
+                <li>
+                  <button onClick={onDownload} type="button">
+                    <svg
+                      aria-hidden="true"
+                      className="h-3.5 w-3.5 opacity-70"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    <span>Download</span>
+                  </button>
+                </li>
+                <li className="border-t border-base-content/10 pt-1 mt-1">
+                  <button
+                    aria-label="Delete file"
+                    className="text-error hover:bg-error/10 hover:text-error"
+                    disabled={deleting}
+                    onClick={onDelete}
+                    type="button"
                   >
-                    <title>Document actions</title>
-                    <circle cx="12" cy="5" r="2" />
-                    <circle cx="12" cy="12" r="2" />
-                    <circle cx="12" cy="19" r="2" />
-                  </svg>
-                </button>
-                <ul className="dropdown-content menu z-30 rounded-box border border-base-content/10 bg-base-100 p-1 shadow-lg text-xs w-44">
-                  {onRevealInTree && (
-                    <li>
-                      <button onClick={onRevealInTree} type="button">
-                        Reveal in Tree
-                      </button>
-                    </li>
-                  )}
-                  <li>
-                    <button
-                      onClick={() =>
-                        void copyToClipboard(buildWorkspaceLink(file.path))
-                      }
-                      type="button"
+                    <svg
+                      aria-hidden="true"
+                      className="h-3.5 w-3.5 opacity-70"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      viewBox="0 0 24 24"
                     >
-                      Copy Link
-                    </button>
-                  </li>
-                  <li>
-                    <button
-                      onClick={() =>
-                        void copyToClipboard(
-                          buildCanonicalWorkspaceUri(file.path),
-                        )
-                      }
-                      type="button"
-                    >
-                      Copy URI
-                    </button>
-                  </li>
-                  {onRename && file.editable && (
-                    <li>
-                      <button onClick={onRename} type="button">
-                        Rename...
-                      </button>
-                    </li>
-                  )}
-                  {onMove && file.editable && (
-                    <li>
-                      <button onClick={onMove} type="button">
-                        Move...
-                      </button>
-                    </li>
-                  )}
-                  <li>
-                    <button onClick={onOpenDetails} type="button">
-                      {detailsOpen ? "Hide Details" : "Show Details"}
-                    </button>
-                  </li>
-                  <li>
-                    <button onClick={onDownload} type="button">
-                      Download
-                    </button>
-                  </li>
-                  <li>
-                    <button
-                      disabled={deleting}
-                      onClick={onDelete}
-                      type="button"
-                    >
-                      Delete
-                    </button>
-                  </li>
-                </ul>
-              </div>
+                      <path
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    <span>Delete</span>
+                  </button>
+                </li>
+              </ul>
             </div>
           </div>
           {fileLoading && (
