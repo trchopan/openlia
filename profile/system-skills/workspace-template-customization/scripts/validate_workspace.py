@@ -19,7 +19,14 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from workspace_registry import load_registry, registry_path
+from workspace_registry import (
+    load_policy,
+    load_registry,
+    policy_allows,
+    policy_schema_path,
+    policy_path,
+    registry_path,
+)
 
 
 FRONT_MATTER = re.compile(
@@ -333,6 +340,24 @@ def validate_workspace_registry(workspace_root: Path) -> tuple[list[str], set[Pa
     return [f"{relative}: {error}" for error in validate_frontmatter(registry, schema)], referenced
 
 
+def validate_workspace_policy(workspace_root: Path) -> tuple[list[str], set[Path]]:
+    """Validate the optional user-owned delegation policy and its schema."""
+    root = workspace_root.expanduser().resolve()
+    path = policy_path(root)
+    referenced: set[Path] = set()
+    if not path.exists():
+        return [], referenced
+    schema_file = policy_schema_path(root)
+    if schema_file.exists():
+        referenced.add(schema_file.resolve())
+    relative = _relative(path, root)
+    try:
+        load_policy(root)
+    except (OSError, UnicodeError, ValueError) as exc:
+        return [f"{relative}: {exc}"], referenced
+    return [], referenced
+
+
 def validate_workspace(workspace_root: Path) -> list[str]:
     """Validate workspace templates and Markdown records in their domains."""
     root = workspace_root.expanduser().resolve()
@@ -342,12 +367,15 @@ def validate_workspace(workspace_root: Path) -> list[str]:
     errors: list[str] = []
     registry_errors, referenced_registry_schemas = validate_workspace_registry(root)
     errors.extend(registry_errors)
+    policy_errors, referenced_policy_schemas = validate_workspace_policy(root)
+    errors.extend(policy_errors)
     templates = sorted(root.rglob(f"*{TEMPLATE_SUFFIX}"))
     if not templates:
         return errors + ["no ordinary *-template.md files found; no schemas or records were validated"]
     templates_by_domain: dict[Path, list[Path]] = {}
     schemas_by_template: dict[Path, dict[str, Any]] = {}
     referenced_schemas: set[Path] = set(referenced_registry_schemas)
+    referenced_schemas.update(referenced_policy_schemas)
 
     for template in templates:
         relative = _relative(template, root)

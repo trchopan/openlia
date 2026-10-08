@@ -109,6 +109,11 @@ domains:
     label: Archive
     purpose: Completed or inactive material retained for reference.
     route: archive
+  - path: inbox/daily-briefing
+    kind: extension
+    label: Daily Briefings
+    purpose: Dated briefing reports generated from registered workspace sources.
+    lifecycle: generated report -> archive
 
 # Add approved nested folders or top-level domains below. A routed extension
 # must include tags and a lifecycle so it cannot silently replace a core

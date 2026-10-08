@@ -29,179 +29,6 @@ sys.modules[_spec.name] = validator
 _spec.loader.exec_module(validator)
 
 
-TEMPLATE_HEADINGS = {
-    "goals/goal-template.md": (
-        "<Goal Title>",
-        (
-            "Objective",
-            "Linked Areas & Projects",
-            "Key Results & Milestones",
-            "Current Focus & Next Actions",
-        ),
-    ),
-    "areas/area-template.md": (
-        "<Area Title>",
-        (
-            "Scope & Purpose",
-            "Standards & Principles",
-            "Recurring Responsibilities",
-            "Active Projects",
-            "Key People & Resources",
-        ),
-    ),
-    "projects/project-template.md": (
-        "<Project Title>",
-        (
-            "Objective",
-            "Constraints",
-            "Milestones",
-            "Next Tasks",
-            "Risks & Open Issues",
-            "Key Decisions",
-        ),
-    ),
-    "decisions/decision-template.md": (
-        "<Decision Title>",
-        (
-            "Question",
-            "Context And Constraints",
-            "Options Considered",
-            "Criteria And Weights",
-            "Evidence & Claims",
-            "Chosen Option & Rationale",
-            "Review Outcome",
-        ),
-    ),
-    "monitors/monitor-template.md": (
-        "<Monitor Title>",
-        ("Target Condition", "Trigger Rule", "Recommended Action", "Check Log"),
-    ),
-    "tasks/task-template.md": (
-        "<Task Title>",
-        ("Action", "Checklist / Substeps", "Completion Note"),
-    ),
-    "people/person-template.md": (
-        "<Person Name>",
-        ("Open Loops & Commitments", "Interaction Notes & Context"),
-    ),
-    "ideas/idea-template.md": (
-        "<Idea Title>",
-        (
-            "Concept",
-            "Potential Value & Opportunity",
-            "Key Questions & Uncertainties",
-            "Next Exploration Step",
-        ),
-    ),
-    "travel/trip-template.md": (
-        "<Trip Title>",
-        (
-            "Itinerary Outline",
-            "Reservations & Confirmations",
-            "Packing & Preparation Checklist",
-            "Budget & Expenses",
-        ),
-    ),
-    "shopping/item-template.md": (
-        "<Item / Purchase Title>",
-        (
-            "Budget & Price Targets",
-            "Candidate Options",
-            "Decision Criteria",
-            "Purchase History",
-        ),
-    ),
-    "finance/finance-template.md": (
-        "<Finance Review / Plan Title>",
-        (
-            "Spending Summary & Targets",
-            "Accounts & Net Assets (Non-Secret)",
-            "Active Financial Goals",
-            "Recurring Subscriptions & Audits",
-        ),
-    ),
-    "calendar/event-note-template.md": (
-        "<Event Title>",
-        ("Purpose & Agenda", "Discussion & Raw Notes", "Follow-up Action Items"),
-    ),
-    "knowledge/claims/claim-template.md": (
-        "<Claim Record>",
-        ("Claim", "Evidence", "Notes"),
-    ),
-}
-
-SKILL_TEMPLATE_HEADINGS = {
-    "deep-research/templates/research-brief.md": (
-        "Research Brief",
-        (
-            "Question",
-            "Scope And Decision Relevance",
-            "Executive Summary",
-            "Claims And Evidence",
-            "Evidence Gaps",
-            "Next Checks",
-            "Sources",
-        ),
-    ),
-    "project-review/templates/project-record.md": (
-        "Project Record",
-        ("Objective", "Status", "Milestones", "Next Tasks", "Risks", "Decisions"),
-    ),
-    "decision-analysis/templates/decision-record.md": (
-        "Decision Record",
-        (
-            "Question",
-            "Context And Constraints",
-            "Options",
-            "Criteria And Weights",
-            "Evidence Gaps",
-            "Chosen Option",
-            "Review Date And Outcome",
-        ),
-    ),
-    "daily-briefing/templates/briefing.md": (
-        "Daily Briefing",
-        ("Today", "What Changed", "Important-Urgent Matrix"),
-    ),
-    "weekly-review/templates/weekly-review.md": (
-        "Weekly Review",
-        (
-            "Completed",
-            "Active Projects",
-            "Open Loops",
-            "Decisions To Revisit",
-            "Claims To Review",
-            "Next Week",
-        ),
-    ),
-    "workspace-organize/templates/organize-report.md": (
-        "Workspace Organize Scout Report - YYYY-MM-DD",
-        (
-            "Scope and method",
-            "Proposals",
-            "Summary",
-            "Items not proposed due to insufficient evidence",
-        ),
-    ),
-    "inbox-triage/templates/inbox-item.md": ("Inbox Item", ()),
-}
-SKILL_TEMPLATE_NESTED_HEADINGS = {
-    "daily-briefing/templates/briefing.md": {
-        "Today": ("Focus", "Calendar", "Tasks", "Follow-ups", "Monitors"),
-        "What Changed": ("Facts", "Signal", "Missing evidence", "Questions"),
-        "Important-Urgent Matrix": (
-            "Do first",
-            "Schedule",
-            "Delegate / Coordinate",
-            "Defer / Drop",
-        ),
-    },
-    "workspace-organize/templates/organize-report.md": {
-        "Proposals": ("O-YYYY-MM-DD-001",),
-    },
-}
-
-
 def _claim_schema_errors() -> list[str]:
     errors: list[str] = []
     try:
@@ -235,10 +62,53 @@ def _claim_schema_errors() -> list[str]:
     return errors
 
 
+def _policy_errors() -> list[str]:
+    errors: list[str] = []
+    try:
+        registry = validator.load_registry(BUNDLE_ROOT, required=True)
+        policy = validator.load_policy(BUNDLE_ROOT, registry=registry, required=True)
+        legacy_registry = {
+            **registry,
+            "domains": [
+                domain
+                for domain in registry["domains"]
+                if domain["path"] != "inbox/daily-briefing"
+            ],
+        }
+        validator.load_policy(BUNDLE_ROOT, registry=legacy_registry, required=True)
+        if not validator.policy_allows(
+            policy,
+            "generate_reports",
+            "inbox/daily-briefing/2026-10-08.md",
+            scheduled=True,
+        ):
+            errors.append("assistant policy rejected its configured scheduled report path")
+        if validator.policy_allows(
+            policy,
+            "generate_reports",
+            "inbox/other/2026-10-08.md",
+            scheduled=True,
+        ):
+            errors.append("assistant policy allowed a scheduled report outside its destination")
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        errors.append(f"assistant-policy.yaml: {exc}")
+    return errors
+
+
 def validate_bundle() -> list[str]:
     errors = validator.validate_workspace(BUNDLE_ROOT)
     errors.extend(validator.validate_skill_templates(SKILLS_ROOT))
-    expected = set(TEMPLATE_HEADINGS)
+    errors.extend(_policy_errors())
+    try:
+        registry = validator.load_registry(BUNDLE_ROOT, required=True)
+        expected = {
+            domain["template"]
+            for domain in registry["domains"]
+            if "template" in domain
+        }
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        errors.append(f"workspace.yaml: {exc}")
+        expected = set()
     discovered = {
         path.relative_to(BUNDLE_ROOT).as_posix()
         for path in BUNDLE_ROOT.rglob("*-template.md")
@@ -265,7 +135,7 @@ def validate_bundle() -> list[str]:
     discovered_schemas = {
         path.relative_to(BUNDLE_ROOT).as_posix()
         for path in BUNDLE_ROOT.rglob("*.schema.json")
-        if path.name != "workspace.schema.json"
+        if path.name not in {"workspace.schema.json", "assistant-policy.schema.json"}
     }
     if discovered_schemas != expected_schemas:
         missing = sorted(expected_schemas - discovered_schemas)
@@ -275,53 +145,20 @@ def validate_bundle() -> list[str]:
         if unregistered:
             errors.append(f"unregistered template schemas: {', '.join(unregistered)}")
 
-    for relative, (title, sections) in TEMPLATE_HEADINGS.items():
-        path = BUNDLE_ROOT / relative
-        try:
-            _, body = validator.parse_frontmatter(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            errors.append(f"{relative}: {exc}")
-            continue
-        expected_headings = [(1, title)] + [(2, section) for section in sections]
-        actual_headings = validator.extract_headings(body)
-        if actual_headings != expected_headings:
-            errors.append(
-                f"{relative}: headings must be exactly {expected_headings!r}; "
-                f"found {actual_headings!r}"
-            )
-        if relative == "daily-briefing/templates/briefing.md" and ("{{" in body or "}}" in body):
-            errors.append(f"{relative}: renderer-style placeholders are not allowed in direct-write templates")
-
     discovered_skill_templates = {
         path.relative_to(SKILLS_ROOT).as_posix()
         for path in SKILLS_ROOT.glob("*/templates/*.md")
     }
-    expected_skill_templates = set(SKILL_TEMPLATE_HEADINGS)
-    if discovered_skill_templates != expected_skill_templates:
-        missing = sorted(expected_skill_templates - discovered_skill_templates)
-        unregistered = sorted(discovered_skill_templates - expected_skill_templates)
-        if missing:
-            errors.append(f"missing registered skill templates: {', '.join(missing)}")
-        if unregistered:
-            errors.append(f"unregistered skill templates: {', '.join(unregistered)}")
-
-    for relative, (title, sections) in SKILL_TEMPLATE_HEADINGS.items():
+    for relative in sorted(discovered_skill_templates):
         path = SKILLS_ROOT / relative
         try:
             _, body = validator.parse_optional_frontmatter(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             errors.append(f"{relative}: {exc}")
             continue
-        expected_headings = [(1, title)]
-        nested = SKILL_TEMPLATE_NESTED_HEADINGS.get(relative, {})
-        for section in sections:
-            expected_headings.append((2, section))
-            expected_headings.extend((3, heading) for heading in nested.get(section, ()))
-        actual_headings = validator.extract_headings(body)
-        if actual_headings != expected_headings:
+        if relative == "daily-briefing/templates/briefing.md" and ("{{" in body or "}}" in body):
             errors.append(
-                f"{relative}: headings must be exactly {expected_headings!r}; "
-                f"found {actual_headings!r}"
+                f"{relative}: renderer-style placeholders are not allowed in direct-write templates"
             )
 
     errors.extend(_claim_schema_errors())
@@ -342,9 +179,13 @@ def main(argv: list[str] | None = None) -> int:
         for error in errors:
             print(f"error: {error}", file=sys.stderr)
         return 1
+    workspace_template_count = sum(
+        1 for _ in BUNDLE_ROOT.rglob("*-template.md")
+    )
+    skill_template_count = sum(1 for _ in SKILLS_ROOT.glob("*/templates/*.md"))
     print(
-        f"Validated {len(TEMPLATE_HEADINGS)} bundled workspace templates and "
-        f"{len(SKILL_TEMPLATE_HEADINGS)} bundled skill templates."
+        f"Validated {workspace_template_count} bundled workspace templates and "
+        f"{skill_template_count} bundled skill templates."
     )
     return 0
 

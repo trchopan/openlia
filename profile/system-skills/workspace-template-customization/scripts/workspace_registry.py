@@ -14,6 +14,8 @@ import yaml
 
 REGISTRY_FILENAME = "workspace.yaml"
 REGISTRY_SCHEMA_FILENAME = "workspace.schema.json"
+POLICY_FILENAME = "assistant-policy.yaml"
+POLICY_SCHEMA_FILENAME = "assistant-policy.schema.json"
 REGISTRY_VERSION = 1
 CORE_ROOTS = {
     "inbox",
@@ -112,6 +114,29 @@ def registry_path(workspace: Path) -> Path:
 
 def schema_path(workspace: Path) -> Path:
     return workspace / REGISTRY_SCHEMA_FILENAME
+
+
+def policy_path(workspace: Path) -> Path:
+    return workspace / POLICY_FILENAME
+
+
+def policy_schema_path(workspace: Path) -> Path:
+    return workspace / POLICY_SCHEMA_FILENAME
+
+
+def _path_is_within(path: Any, parent: Any) -> bool:
+    """Return whether two relative workspace paths have a safe containment relationship."""
+    if not isinstance(path, str) or not isinstance(parent, str):
+        return False
+    if path.startswith("/") or parent.startswith("/"):
+        return False
+    path_parts = path.strip("/").split("/")
+    parent_parts = parent.strip("/").split("/")
+    if not path_parts or not parent_parts:
+        return False
+    if any(not part or part in {".", ".."} for part in path_parts + parent_parts):
+        return False
+    return path_parts[: len(parent_parts)] == parent_parts
 
 
 def _load_registry_schema(workspace: Path) -> dict[str, Any]:
@@ -252,6 +277,125 @@ def load_registry(workspace: str | Path, *, required: bool = False) -> dict[str,
                 f"workspace registry briefing paths may not overlap: {path_value}"
             )
     return registry
+
+
+def load_policy(
+    workspace: str | Path,
+    *,
+    registry: dict[str, Any] | None = None,
+    required: bool = False,
+) -> dict[str, Any] | None:
+    """Load the user-owned delegation policy without modifying the workspace."""
+    root = Path(workspace).expanduser().resolve()
+    path = policy_path(root)
+    if not path.exists():
+        if required:
+            raise ValueError(f"assistant policy is missing: {POLICY_FILENAME}")
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"assistant policy is not a regular file: {POLICY_FILENAME}")
+    try:
+        data = yaml.load(path.read_text(encoding="utf-8"), Loader=UniqueKeySafeLoader)
+        policy = _normalize(data)
+    except (OSError, UnicodeError, yaml.YAMLError, ValueError, RecursionError) as exc:
+        raise ValueError(f"invalid assistant policy: {exc}") from exc
+    if not isinstance(policy, dict):
+        raise ValueError("assistant policy must contain a mapping")
+    if policy.get("$schema") != f"./{POLICY_SCHEMA_FILENAME}":
+        raise ValueError(f"assistant policy $schema must be ./{POLICY_SCHEMA_FILENAME}")
+
+    schema_file = policy_schema_path(root)
+    if schema_file.is_symlink() or not schema_file.is_file():
+        raise ValueError(
+            f"assistant policy schema is missing or not a regular file: {POLICY_SCHEMA_FILENAME}"
+        )
+    try:
+        schema = json.loads(schema_file.read_text(encoding="utf-8"))
+        if not isinstance(schema, dict):
+            raise ValueError("assistant policy schema must contain an object")
+        Draft202012Validator.check_schema(schema)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"invalid assistant policy schema: {exc}") from exc
+    schema_errors = sorted(
+        Draft202012Validator(schema).iter_errors(policy),
+        key=lambda error: tuple(str(part) for part in error.absolute_path),
+    )
+    if schema_errors:
+        raise ValueError(
+            f"assistant policy does not match its schema: {schema_errors[0].message}"
+        )
+
+    active_registry = registry if registry is not None else load_registry(root)
+    registered = (
+        {domain["path"] for domain in domains(active_registry)}
+        if active_registry is not None
+        else set(CORE_ROOTS)
+    )
+    for configured in policy["delegation"]["workspace"]["allowed_domains"]:
+        if configured not in registered:
+            raise ValueError(
+                f"assistant policy allowed domain is not registered: {configured}"
+            )
+    workspace_policy = policy["delegation"]["workspace"]
+    scheduled_policy = policy["scheduled_work"]
+    if not set(scheduled_policy["allowed_actions"]).issubset(
+        set(workspace_policy["allowed_actions"])
+    ):
+        raise ValueError(
+            "assistant policy scheduled actions must be allowed by workspace delegation"
+        )
+    report_destination = scheduled_policy["report_destination"]
+    if not any(_path_is_within(report_destination, allowed) for allowed in registered):
+        raise ValueError(
+            "assistant policy scheduled report destination is outside registered workspace domains: "
+            f"{report_destination}"
+        )
+    if not any(
+        _path_is_within(report_destination, allowed)
+        for allowed in workspace_policy["allowed_domains"]
+    ):
+        raise ValueError(
+            "assistant policy scheduled report destination is outside allowed workspace domains"
+        )
+    return policy
+
+
+def policy_allows(
+    policy: dict[str, Any] | None,
+    action: str,
+    destination: str | None = None,
+    *,
+    scheduled: bool = False,
+) -> bool:
+    """Return whether a policy grants a local action in the requested scope."""
+    if not policy:
+        return False
+    if scheduled:
+        section = policy.get("scheduled_work", {})
+        if not section.get("enabled") or action not in section.get("allowed_actions", []):
+            return False
+        workspace_section = policy.get("delegation", {}).get("workspace", {})
+        if (
+            not workspace_section.get("enabled")
+            or action not in workspace_section.get("allowed_actions", [])
+        ):
+            return False
+    else:
+        section = policy.get("delegation", {}).get("workspace", {})
+        if not section.get("enabled") or action not in section.get("allowed_actions", []):
+            return False
+    if destination is None:
+        return True
+    allowed_paths = section.get(
+        "allowed_domains",
+        policy.get("delegation", {}).get("workspace", {}).get("allowed_domains", []),
+    )
+    if scheduled and action == "generate_reports":
+        allowed_paths = [section.get("report_destination")]
+    return any(
+        _path_is_within(destination, allowed)
+        for allowed in allowed_paths
+    )
 
 
 def domains(registry: dict[str, Any] | None) -> list[dict[str, Any]]:
