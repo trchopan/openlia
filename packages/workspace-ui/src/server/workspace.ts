@@ -20,13 +20,17 @@ import type {
   WorkspaceCommit,
   WorkspaceCommitChange,
   WorkspaceDeleteResponse,
+  WorkspaceDiagnosticsResponse,
   WorkspaceFile,
   WorkspaceFileMetadata,
   WorkspaceGitStatus,
+  WorkspaceMoveResponse,
+  WorkspaceRenameResponse,
   WorkspaceTreeResponse,
   WorkspaceUncommittedChange,
   WorkspaceWriteResponse,
 } from "../shared/api";
+import { validateEntireWorkspace, validateRecordContent } from "./validator";
 
 export const DEFAULT_MAX_EDITABLE_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
@@ -130,21 +134,23 @@ export function protectedPath(path: string): boolean {
   );
 }
 
+export function isTemplateOrSchemaPath(path: string): boolean {
+  const normalized = path.replaceAll("\\", "/").toLowerCase();
+  const basename = normalized.split("/").at(-1) ?? "";
+  return (
+    basename.endsWith("-template.md") ||
+    basename.endsWith(".schema.json") ||
+    templatePaths.has(normalized)
+  );
+}
+
 export function hiddenFromNavigator(path: string): boolean {
   const normalized = path.replaceAll("\\", "/").toLowerCase();
   const basename = normalized.split("/").at(-1) ?? "";
   return (
     navigationHiddenBasenames.has(basename) ||
     basename.startsWith("._") ||
-    templatePaths.has(normalized)
-  );
-}
-
-export function isChatgptExportPath(path: string): boolean {
-  const normalized = path.replaceAll("\\", "/").toLowerCase();
-  return (
-    normalized.startsWith("knowledge/chatgpt/") &&
-    (normalized.endsWith(".yaml") || normalized.endsWith(".yml"))
+    isTemplateOrSchemaPath(path)
   );
 }
 
@@ -303,10 +309,12 @@ export class WorkspaceService {
     } catch {
       throw new WorkspaceError("file is not valid UTF-8", 415, "invalid_utf8");
     }
+    const validation = validateRecordContent(this.workspaceRoot, path, text);
     return {
       schema: 1,
       content: text,
       revision: revision(contents),
+      validation,
       ...this.fileMetadata(absolute, path),
     };
   }
@@ -345,14 +353,6 @@ export class WorkspaceService {
         "file type is not editable",
         415,
         "not_editable",
-      );
-    }
-
-    if (isChatgptExportPath(path)) {
-      throw new WorkspaceError(
-        "ChatGPT exports are read-only",
-        403,
-        "read_only",
       );
     }
 
@@ -424,16 +424,29 @@ export class WorkspaceService {
       if (existsSync(temporary)) unlinkSync(temporary);
       throw error;
     }
+    const validation = validateRecordContent(
+      this.workspaceRoot,
+      path,
+      contentValue,
+    );
     return {
       schema: 1,
       ok: true,
       revision: revision(contents),
+      validation,
       ...this.fileMetadata(absolute, path),
     };
   }
 
   delete(pathValue: unknown, expectedValue: unknown): WorkspaceDeleteResponse {
     const path = validateRelativePath(pathValue);
+    if (isTemplateOrSchemaPath(path)) {
+      throw new WorkspaceError(
+        "template and schema files are protected",
+        403,
+        "protected_path",
+      );
+    }
     const absolute = this.assertNoSymlink(path);
     let info: Stats;
     try {
@@ -485,6 +498,186 @@ export class WorkspaceService {
     }
 
     return { schema: 1, ok: true, path };
+  }
+
+  rename(
+    pathValue: unknown,
+    newNameValue: unknown,
+    expectedValue: unknown,
+  ): WorkspaceRenameResponse {
+    const sourcePath = validateRelativePath(pathValue);
+    if (typeof newNameValue !== "string" || !newNameValue.trim()) {
+      throw new WorkspaceError("invalid new file name", 400, "invalid_path");
+    }
+    const cleanName = newNameValue.trim();
+    if (
+      cleanName.includes("/") ||
+      cleanName.includes("\\") ||
+      cleanName.includes("\0")
+    ) {
+      throw new WorkspaceError(
+        "new file name must not contain path separators",
+        400,
+        "invalid_path",
+      );
+    }
+    if (isTemplateOrSchemaPath(sourcePath)) {
+      throw new WorkspaceError(
+        "template and schema files are protected",
+        403,
+        "protected_path",
+      );
+    }
+    const parts = sourcePath.split("/");
+    parts[parts.length - 1] = cleanName;
+    const destinationPath = parts.join("/");
+    if (isTemplateOrSchemaPath(destinationPath)) {
+      throw new WorkspaceError(
+        "cannot rename to a template or schema name",
+        403,
+        "protected_path",
+      );
+    }
+    validateRelativePath(destinationPath);
+    if (!editableExtensions.has(fileExtension(destinationPath))) {
+      throw new WorkspaceError(
+        "file type is not editable",
+        415,
+        "not_editable",
+      );
+    }
+    return this.executeMoveOrRename(sourcePath, destinationPath, expectedValue);
+  }
+
+  move(
+    sourcePathValue: unknown,
+    destPathValue: unknown,
+    expectedValue: unknown,
+  ): WorkspaceMoveResponse {
+    const sourcePath = validateRelativePath(sourcePathValue);
+    const destinationPath = validateRelativePath(destPathValue);
+    if (sourcePath === destinationPath) {
+      throw new WorkspaceError(
+        "source and destination paths are identical",
+        400,
+        "invalid_path",
+      );
+    }
+    if (isTemplateOrSchemaPath(sourcePath)) {
+      throw new WorkspaceError(
+        "template and schema files are protected",
+        403,
+        "protected_path",
+      );
+    }
+    if (isTemplateOrSchemaPath(destinationPath)) {
+      throw new WorkspaceError(
+        "cannot move to a template or schema path",
+        403,
+        "protected_path",
+      );
+    }
+    if (!editableExtensions.has(fileExtension(destinationPath))) {
+      throw new WorkspaceError(
+        "file type is not editable",
+        415,
+        "not_editable",
+      );
+    }
+    return this.executeMoveOrRename(sourcePath, destinationPath, expectedValue);
+  }
+
+  diagnostics(): WorkspaceDiagnosticsResponse {
+    return validateEntireWorkspace(this.workspaceRoot);
+  }
+
+  private executeMoveOrRename(
+    sourcePath: string,
+    destinationPath: string,
+    expectedValue: unknown,
+  ): WorkspaceMoveResponse {
+    const sourceAbsolute = this.assertNoSymlink(sourcePath);
+    const destAbsolute = this.assertNoSymlink(destinationPath);
+
+    let info: Stats;
+    try {
+      info = lstatSync(sourceAbsolute);
+    } catch (error) {
+      throw this.mapFilesystemError(error, "source file was not found");
+    }
+    if (!info.isFile()) {
+      throw new WorkspaceError(
+        "workspace path is not a regular file",
+        400,
+        "not_a_file",
+      );
+    }
+
+    if (existsSync(destAbsolute)) {
+      throw new WorkspaceError(
+        "destination file already exists",
+        409,
+        "destination_exists",
+      );
+    }
+
+    let contents: Uint8Array;
+    try {
+      contents = readFileSync(sourceAbsolute);
+    } catch (error) {
+      throw this.mapFilesystemError(error, "source file was not found");
+    }
+    const currentRevision = revision(contents);
+    if (
+      typeof expectedValue !== "string" ||
+      expectedValue !== currentRevision
+    ) {
+      throw new WorkspaceError(
+        "revision conflict",
+        409,
+        "revision_conflict",
+        currentRevision,
+      );
+    }
+
+    const destParent = dirname(destAbsolute);
+    mkdirSync(destParent, { recursive: true, mode: 0o700 });
+
+    try {
+      const beforeMove = readFileSync(sourceAbsolute);
+      if (revision(beforeMove) !== currentRevision) {
+        throw new WorkspaceError(
+          "revision conflict",
+          409,
+          "revision_conflict",
+          revision(beforeMove),
+        );
+      }
+      renameSync(sourceAbsolute, destAbsolute);
+    } catch (error) {
+      if (error instanceof WorkspaceError) throw error;
+      throw this.mapFilesystemError(error, "operation failed");
+    }
+
+    let textContent = "";
+    try {
+      textContent = new TextDecoder("utf-8").decode(contents);
+    } catch {}
+
+    const validation = validateRecordContent(
+      this.workspaceRoot,
+      destinationPath,
+      textContent,
+    );
+
+    return {
+      schema: 1,
+      ok: true,
+      previous_path: sourcePath,
+      revision: currentRevision,
+      validation,
+      ...this.fileMetadata(destAbsolute, destinationPath),
+    };
   }
 
   download(pathValue: unknown): {
@@ -684,7 +877,6 @@ export class WorkspaceService {
       size: info.size,
       modified_at: info.mtime.toISOString(),
       editable:
-        !isChatgptExportPath(relativePath) &&
         editableExtensions.has(fileExtension(relativePath)) &&
         info.size <= this.maxEditableBytes,
     };

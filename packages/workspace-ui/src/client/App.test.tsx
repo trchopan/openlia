@@ -19,16 +19,21 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function setEditorText(editor: HTMLElement, value: string): void {
+  editor.textContent = value;
+  fireEvent.input(editor, { bubbles: true, inputType: "insertText" });
+}
+
 describe("workspace application", () => {
   test("opens a document, tracks edits, and saves it", async () => {
     render(<App api={createMockWorkspaceApi()} />);
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("textbox", {
-      name: "Document editor",
+      name: "Code editor",
     });
-    expect(editor).toHaveValue("Hello");
-    fireEvent.change(editor, { target: { value: "Hello\nworld" } });
+    expect(editor).toHaveTextContent("Hello");
+    setEditorText(editor, "Hello\nworld");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -43,15 +48,15 @@ describe("workspace application", () => {
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("textbox", {
-      name: "Document editor",
+      name: "Code editor",
     });
-    fireEvent.change(editor, { target: { value: "draft" } });
+    setEditorText(editor, "draft");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This file changed after you opened it.",
     );
-    expect(editor).toHaveValue("draft");
+    expect(editor).toHaveTextContent("draft");
   });
 
   test("confirms and deletes the selected document", async () => {
@@ -83,9 +88,9 @@ describe("workspace application", () => {
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("textbox", {
-      name: "Document editor",
+      name: "Code editor",
     });
-    fireEvent.change(editor, { target: { value: "unsaved" } });
+    setEditorText(editor, "unsaved");
 
     fireEvent.click(screen.getByRole("button", { name: "Delete file" }));
     expect(await screen.findByRole("dialog")).toHaveTextContent(
@@ -106,9 +111,9 @@ describe("workspace application", () => {
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("textbox", {
-      name: "Document editor",
+      name: "Code editor",
     });
-    fireEvent.change(editor, { target: { value: "draft" } });
+    setEditorText(editor, "draft");
     fireEvent.click(screen.getByRole("button", { name: "calendar" }));
     fireEvent.click(screen.getByRole("button", { name: "event.md" }));
 
@@ -116,7 +121,7 @@ describe("workspace application", () => {
       "Keep your draft?",
     );
     fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
-    expect(editor).toHaveValue("draft");
+    expect(editor).toHaveTextContent("draft");
   });
 
   test("shows the login gate and loads the workspace after authentication", async () => {
@@ -170,7 +175,7 @@ describe("workspace application", () => {
     render(<App api={createMockWorkspaceApi()} />);
 
     expect(
-      await screen.findByRole("textbox", { name: "Document editor" }),
+      await screen.findByRole("textbox", { name: "Code editor" }),
     ).toBeInTheDocument();
     const filterInput = screen.getByLabelText("Find files");
     expect(filterInput).toHaveValue("calendar");
@@ -190,6 +195,24 @@ describe("workspace application", () => {
     const filterInput = screen.getByLabelText("Find files");
     fireEvent.change(filterInput, { target: { value: "task" } });
     expect(window.location.search).toContain("filter=task");
+  });
+
+  test("uses the Markdown default when navigating from YAML", async () => {
+    render(<App api={createMockWorkspaceApi()} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "workspace.yaml" }),
+    );
+    expect(
+      await screen.findByRole("textbox", { name: "Code editor" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "calendar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "event.md" }));
+    expect(
+      await screen.findByRole("article", { name: "Markdown preview" }),
+    ).toBeInTheDocument();
+    expect(window.location.search).toBe("?view=preview");
   });
 
   test("navigates on popstate event (browser history back)", async () => {
@@ -218,26 +241,26 @@ describe("workspace application", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
-  test("opens ChatGPT exports in a read-only conversation preview", async () => {
+  test("opens YAML files in the code editor without Markdown view toggles", async () => {
     const path = "knowledge/chatgpt/export.yaml";
     const content = `schema: 1
 session:
-  platform: chatgpt
+    platform: chatgpt
   topic: A saved conversation
 messages:
   - role: user
     content: What is this?
   - role: assistant
     content: It is a saved conversation.
-`;
+    `;
     const baseApi = createMockWorkspaceApi();
-    const chatApi: WorkspaceApi = {
+    const yamlApi: WorkspaceApi = {
       ...baseApi,
       async loadFile(requestedPath) {
         if (requestedPath === path)
           return {
             content,
-            editable: false,
+            editable: true,
             modified_at: "2026-09-24T00:00:00.000Z",
             path,
             revision: "sha256:chat",
@@ -255,7 +278,7 @@ messages:
             { kind: "directory", path: "knowledge" },
             { kind: "directory", path: "knowledge/chatgpt" },
             {
-              editable: false,
+              editable: true,
               kind: "file",
               modified_at: "2026-09-24T00:00:00.000Z",
               path,
@@ -266,20 +289,16 @@ messages:
       },
     };
 
-    window.history.replaceState(null, "", `/files/${path}`);
-    render(<App api={chatApi} />);
+    window.history.replaceState(null, "", `/files/${path}?view=preview`);
+    render(<App api={yamlApi} />);
 
     expect(
-      await screen.findByRole("article", { name: "ChatGPT conversation" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "A saved conversation" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Read-only chat export")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("textbox", { name: "Document editor" }),
-    ).toBeNull();
-    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+      await screen.findByRole("textbox", { name: "Code editor" }),
+    ).toHaveTextContent("schema: 1");
+    expect(screen.getByText("Code")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
   });
 
   test("opens Go To modal via header button and navigates to document", async () => {
@@ -333,9 +352,9 @@ messages:
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("textbox", {
-      name: "Document editor",
+      name: "Code editor",
     });
-    fireEvent.change(editor, { target: { value: "unsaved changes" } });
+    setEditorText(editor, "unsaved changes");
 
     // Open Go To modal and paste link
     fireEvent.keyDown(window, { key: "p", metaKey: true });
@@ -505,9 +524,9 @@ messages:
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
 
     const editor = await screen.findByRole("textbox", {
-      name: "Document editor",
+      name: "Code editor",
     });
-    fireEvent.change(editor, { target: { value: "My unsaved user edits" } });
+    setEditorText(editor, "My unsaved user edits");
 
     // External agent updates the file on disk
     currentContent = "Agent edits from background";
@@ -522,7 +541,7 @@ messages:
         "The file changed on disk. Your unsaved draft is preserved; review before saving.",
       );
     });
-    expect(editor).toHaveValue("My unsaved user edits");
+    expect(editor).toHaveTextContent("My unsaved user edits");
   });
 
   test("renders the Activity section on initial page and allows opening files", async () => {
@@ -533,7 +552,7 @@ messages:
     ).toBeInTheDocument();
     expect(screen.getByText("Git Commit History (3)")).toBeInTheDocument();
     expect(
-      screen.getByText("Recently Modified Documents (4)"),
+      screen.getByText("Recently Modified Documents (5)"),
     ).toBeInTheDocument();
     expect(
       screen.getByText("chore: update daily notes and task plan"),
@@ -599,5 +618,113 @@ messages:
         "Network error during export",
       );
     });
+  });
+
+  test("renames a file via DocumentPane action menu and navigates to new path", async () => {
+    const api = createMockWorkspaceApi();
+    render(<App api={api} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+    expect(
+      await screen.findByRole("article", { name: "Markdown preview" }),
+    ).toBeInTheDocument();
+
+    // Click Document action menu
+    fireEvent.click(screen.getByRole("button", { name: "Document actions" }));
+    const renameButtons = screen.getAllByRole("button", { name: "Rename..." });
+    const renameBtn = renameButtons.at(-1);
+    expect(renameBtn).toBeDefined();
+    if (renameBtn) fireEvent.click(renameBtn);
+
+    // Rename dialog appears
+    const input = screen.getByRole("textbox", { name: /new file name/i });
+    fireEvent.change(input, { target: { value: "renamed-notes.md" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    // Document is updated to renamed file
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: "renamed-notes.md" }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  test("moves a file into a folder via DocumentPane action menu", async () => {
+    const api = createMockWorkspaceApi();
+    render(<App api={api} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+    expect(
+      await screen.findByRole("article", { name: "Markdown preview" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Document actions" }));
+    const moveButtons = screen.getAllByRole("button", { name: "Move..." });
+    const moveBtn = moveButtons.at(-1);
+    expect(moveBtn).toBeDefined();
+    if (moveBtn) fireEvent.click(moveBtn);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter new folder path" }),
+    );
+    const folderInput = screen.getByPlaceholderText(
+      "e.g. archive or tasks/done",
+    );
+    fireEvent.change(folderInput, { target: { value: "archive" } });
+    fireEvent.click(screen.getByRole("button", { name: "Move" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("archive/notes.md", { selector: ".workspace-path" }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  test("displays template & schema diagnostics on the dashboard and warning banner on file", async () => {
+    const api = createMockWorkspaceApi();
+    api.loadDiagnostics = async () => ({
+      issues: [
+        {
+          errors: ["frontmatter: missing required property 'title'"],
+          path: "notes.md",
+          schema_path: "notes.schema.json",
+        },
+      ],
+      schema: 1,
+      valid: false,
+    });
+    const origLoadFile = api.loadFile.bind(api);
+    api.loadFile = async (p: string) => {
+      const f = await origLoadFile(p);
+      return {
+        ...f,
+        validation: {
+          errors: ["frontmatter: missing required property 'title'"],
+          schema_path: "notes.schema.json",
+          valid: false,
+        },
+      };
+    };
+
+    render(<App api={api} />);
+
+    // On dashboard (/), Template & Schema Health should be visible
+    expect(
+      await screen.findByText("Template & Schema Health"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 issue")).toBeInTheDocument();
+    expect(
+      screen.getByText("frontmatter: missing required property 'title'"),
+    ).toBeInTheDocument();
+
+    // Click "Open & Fix"
+    fireEvent.click(screen.getByRole("button", { name: "Open & Fix" }));
+
+    // File opens and warning banner is shown
+    expect(
+      await screen.findByText("Template & Schema Warning"),
+    ).toBeInTheDocument();
+    // Permissive editing: Edit button is still available
+    expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled();
   });
 });

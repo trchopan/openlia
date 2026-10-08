@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { captureScreenshot } from "./screenshot";
 
 const realWorkspace = process.env.WORKSPACE_UI_E2E_MODE === "real";
@@ -80,7 +80,7 @@ test.describe("mock visual catalog", () => {
     await page.goto("/");
     await openNotes(page);
     await page.getByRole("button", { name: "Edit" }).click();
-    const editor = page.getByRole("textbox", { name: "Document editor" });
+    const editor = page.getByRole("textbox", { name: "Code editor" });
     await editor.fill("Hello\nThis is a screenshot verification draft.");
     await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
     await captureScreenshot(page, testInfo, "edited-draft");
@@ -132,7 +132,7 @@ test.describe("mock visual catalog", () => {
     await openNotes(page);
     await page.getByRole("button", { name: "Edit" }).click();
     await page
-      .getByRole("textbox", { name: "Document editor" })
+      .getByRole("textbox", { name: "Code editor" })
       .fill("A conflicting draft");
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByRole("alert")).toContainText(
@@ -205,9 +205,9 @@ test.describe("mock visual catalog", () => {
   });
 
   test("skills auxiliary files subtab", async ({ page }, testInfo) => {
-    await page.goto("/skills/claim-review");
+    await page.goto("/skills/deep-research");
     await page.getByRole("button", { name: /Files \(/ }).click();
-    await expect(page.getByText("scripts/review.py")).toBeVisible();
+    await expect(page.getByText("templates/report.md")).toBeVisible();
     await captureScreenshot(page, testInfo, "skills-auxiliary-files");
   });
 

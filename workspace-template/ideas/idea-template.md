@@ -1,10 +1,12 @@
-# [Idea Title]
+---
+$schema: ./idea-template.schema.json
+status: null # seed | exploring | incubating | converted | archived
+---
+
+# <Idea Title>
 
 ## Concept
 What is the core idea or hypothesis?
-
-## Status
-seed | exploring | incubating | converted | archived
 
 ## Potential Value & Opportunity
 - Opportunity:

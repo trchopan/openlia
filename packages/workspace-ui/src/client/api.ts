@@ -8,11 +8,14 @@ import type {
   SkillSuccessResponse,
   SkillWriteResponse,
   WorkspaceActivityResponse,
-  WorkspaceErrorResponse,
   WorkspaceDeleteResponse,
+  WorkspaceDiagnosticsResponse,
+  WorkspaceErrorResponse,
   WorkspaceFile,
   WorkspaceFileMetadata,
   WorkspaceGitStatus,
+  WorkspaceMoveResponse,
+  WorkspaceRenameResponse,
   WorkspaceTreeEntry,
   WorkspaceTreeResponse,
   WorkspaceWriteResponse,
@@ -45,6 +48,17 @@ export interface WorkspaceApi {
     path: string,
     expectedRevision: string,
   ): Promise<WorkspaceDeleteResponse>;
+  renameFile(
+    path: string,
+    newName: string,
+    expectedRevision: string,
+  ): Promise<WorkspaceRenameResponse>;
+  moveFile(
+    sourcePath: string,
+    destinationPath: string,
+    expectedRevision: string,
+  ): Promise<WorkspaceMoveResponse>;
+  loadDiagnostics(): Promise<WorkspaceDiagnosticsResponse>;
   loadGitStatus(): Promise<WorkspaceGitStatus>;
   loadActivity(): Promise<WorkspaceActivityResponse>;
   downloadUrl(path: string): string;
@@ -188,6 +202,49 @@ function isWorkspaceDeleteResponse(
   );
 }
 
+function isWorkspaceRenameResponse(
+  value: unknown,
+): value is WorkspaceRenameResponse {
+  return (
+    isWorkspaceFileMetadata(value) &&
+    "schema" in value &&
+    value.schema === 1 &&
+    "ok" in value &&
+    value.ok === true &&
+    "previous_path" in value &&
+    typeof value.previous_path === "string" &&
+    "revision" in value &&
+    typeof value.revision === "string"
+  );
+}
+
+function isWorkspaceMoveResponse(
+  value: unknown,
+): value is WorkspaceMoveResponse {
+  return (
+    isWorkspaceFileMetadata(value) &&
+    "schema" in value &&
+    value.schema === 1 &&
+    "ok" in value &&
+    value.ok === true &&
+    "previous_path" in value &&
+    typeof value.previous_path === "string" &&
+    "revision" in value &&
+    typeof value.revision === "string"
+  );
+}
+
+function isWorkspaceDiagnosticsResponse(
+  value: unknown,
+): value is WorkspaceDiagnosticsResponse {
+  return (
+    isObject(value) &&
+    value.schema === 1 &&
+    typeof value.valid === "boolean" &&
+    Array.isArray(value.issues)
+  );
+}
+
 function isWorkspaceGitStatus(value: unknown): value is WorkspaceGitStatus {
   return (
     isObject(value) &&
@@ -311,6 +368,39 @@ export const httpWorkspaceApi: WorkspaceApi = {
         headers: { "Content-Type": "application/json" },
         method: "DELETE",
       },
+    ),
+  renameFile: (path, newName, expectedRevision) =>
+    requestJson<WorkspaceRenameResponse>(
+      "/api/workspace/rename",
+      isWorkspaceRenameResponse,
+      {
+        body: JSON.stringify({
+          expected_revision: expectedRevision,
+          new_name: newName,
+          path,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    ),
+  moveFile: (sourcePath, destinationPath, expectedRevision) =>
+    requestJson<WorkspaceMoveResponse>(
+      "/api/workspace/move",
+      isWorkspaceMoveResponse,
+      {
+        body: JSON.stringify({
+          destination_path: destinationPath,
+          expected_revision: expectedRevision,
+          source_path: sourcePath,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    ),
+  loadDiagnostics: () =>
+    requestJson<WorkspaceDiagnosticsResponse>(
+      "/api/workspace/diagnostics",
+      isWorkspaceDiagnosticsResponse,
     ),
   loadGitStatus: () =>
     requestJson<WorkspaceGitStatus>(

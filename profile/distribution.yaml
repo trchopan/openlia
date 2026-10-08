@@ -10,7 +10,9 @@ distribution_owned:
   - SOUL.md
   - AGENTS.md
   - config.yaml
+  - plugins/
   - skills/
   - cron/
 system_owned:
   - system-skills/openlia-skill-migration/
+  - system-skills/workspace-template-customization/

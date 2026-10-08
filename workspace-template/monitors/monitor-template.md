@@ -1,18 +1,20 @@
-# [Monitor Title]
+---
+$schema: ./monitor-template.schema.json
+status: null # active | paused | triggered | retired
+source: null # source URL or other stable reference
+check_frequency: null # hourly | daily | weekly
+alert_channel: null # e.g. Telegram or Daily Briefing
+---
+
+# <Monitor Title>
 
 ## Target Condition
 What specific condition, threshold, or event are we watching for?
 
-## Status
-active | paused | triggered | retired
+## Trigger Rule
+- [e.g. price <= threshold, new version released, keyword match]
 
-## Watch Details
-- Target source / URL:
-- Check frequency: hourly | daily | weekly
-- Trigger rule: [e.g. price <= threshold, new version released, keyword match]
-
-## Notification & Action on Trigger
-- Alert channel: [e.g. Telegram, Daily Briefing]
+## Recommended Action
 - Recommended action:
 
 ## Check Log

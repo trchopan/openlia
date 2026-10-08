@@ -1,27 +1,64 @@
+---
+$schema: ./briefing.schema.json
+date: YYYY-MM-DD
+---
+
 # Daily Briefing
 
-Date: YYYY-MM-DD
+## Today
 
-## Focus
+### Focus
 
--
+- Primary focus:
 
-## Calendar
+### Calendar
 
--
+- Event / time / source:
 
-## Tasks
+### Tasks
 
--
+- Task / due date / source:
 
-## Follow-ups
+### Follow-ups
 
--
+- Follow-up / owner / due date / source:
 
-## Monitors
+### Monitors
 
--
+- Monitor / current status / source:
 
-## Questions
+## What Changed
 
-- What needs explicit approval?
+### Facts
+
+- Verified change / source:
+
+### Signal
+
+- Emerging pattern or operational loop / supporting source:
+
+### Missing evidence
+
+- Missing field or follow-up / evidence needed:
+
+### Questions
+
+- What needs clarification, explicit approval, or an external-action decision?
+
+## Important-Urgent Matrix
+
+### Do first
+
+- Item / reason / source:
+
+### Schedule
+
+- Item / proposed timing / source:
+
+### Delegate / Coordinate
+
+- Item / clear owner / source:
+
+### Defer / Drop
+
+- Item / reason to defer without dropping a commitment / source:

@@ -22,6 +22,7 @@ Run the relevant checks from the repository root:
 ```sh
 make venv            # Sets up .venv/ and installs all dependencies (uses uv if present)
 make test            # Runs Go, Python, and skill self-tests
+make workspace-templates-test # Validates bundled workspace and skill templates
 make skills-test     # Offline bundled skill self-test suite across bundled skills
 make skills-verify   # Bundled skill tests and openlia-browser MCP relay tests
 make lint

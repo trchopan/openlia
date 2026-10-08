@@ -46,10 +46,12 @@ and the canonical starter templates. Empty workspace folders remain visible so
 the workspace structure is still discoverable. Search expands matching folders;
 use `Cmd+S` on macOS or `Ctrl+S` elsewhere to save an edited document.
 
-ChatGPT exports under `knowledge/chatgpt/` are rendered as read-only
-conversations with session metadata and deduplicated sources. Invalid or
-unsupported exports fall back to the original YAML text. Generic YAML files and
-other workspace documents keep their existing behavior.
+Markdown files use the Preview/Edit document views. Other editable text files,
+including YAML, JSON, TOML, CSV, and plain text, open directly in the syntax-
+highlighted code editor. The editor detects the language from the file
+extension; unsupported extensions use plain text. Files under
+`knowledge/chatgpt/` follow the same ordinary YAML behavior as every other
+workspace file.
 
 ## Real Backend Development
 

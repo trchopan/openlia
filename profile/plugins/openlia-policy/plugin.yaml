@@ -1,0 +1,3 @@
+name: openlia-policy
+version: "1.0"
+description: Enforce the active OpenLia workspace assistant policy before tool execution.

@@ -26,30 +26,30 @@ describe("SkillService", () => {
     mkdirSync(workspaceRoot, { recursive: true });
 
     // Seed a standalone skill
-    const standaloneDir = join(skillsRoot, "claim-review");
+    const standaloneDir = join(skillsRoot, "sample-skill");
     mkdirSync(join(standaloneDir, "scripts"), { recursive: true });
     writeFileSync(
       join(standaloneDir, "SKILL.md"),
       `---
-name: claim-review
-description: Review durable personal claims with explicit evidence.
+name: sample-skill
+description: A sample standalone skill for service tests.
 version: 0.1.0
 platforms: [macos, linux]
 prerequisites:
-  env_vars: [CLAIM_API_KEY]
+  env_vars: [SAMPLE_API_KEY]
 metadata:
   hermes:
-    tags: [claims, memory]
+    tags: [sample, testing]
     category: productivity
 ---
 
-# Claim Review
-Instructions for reviewing claims.
+# Sample Skill
+Instructions for testing the skill service.
 `,
       "utf-8",
     );
     writeFileSync(
-      join(standaloneDir, "scripts", "review.py"),
+      join(standaloneDir, "scripts", "run.py"),
       "print('reviewing')",
       "utf-8",
     );
@@ -82,7 +82,7 @@ Notion instructions.
     writeFileSync(
       join(skillsRoot, ".usage.json"),
       JSON.stringify({
-        "claim-review": {
+        "sample-skill": {
           last_used_at: "2026-09-24T00:00:00.000Z",
           pinned: true,
           state: "active",
@@ -95,7 +95,7 @@ Notion instructions.
     // Seed .bundled_manifest
     writeFileSync(
       join(skillsRoot, ".bundled_manifest"),
-      "claim-review:abcdef123456\n",
+      "sample-skill:abcdef123456\n",
       "utf-8",
     );
 
@@ -125,14 +125,14 @@ version: 1.2.3
     expect(response.schema).toBe(1);
     expect(response.skills.length).toBe(2);
 
-    const claim = response.skills.find((s) => s.id === "claim-review");
-    expect(claim).toBeDefined();
-    expect(claim?.name).toBe("claim-review");
-    expect(claim?.pinned).toBe(true);
-    expect(claim?.bundled).toBe(true);
-    expect(claim?.useCount).toBe(5);
-    expect(claim?.enabled).toBe(true);
-    expect(claim?.tags).toEqual(["claims", "memory"]);
+    const sample = response.skills.find((s) => s.id === "sample-skill");
+    expect(sample).toBeDefined();
+    expect(sample?.name).toBe("sample-skill");
+    expect(sample?.pinned).toBe(true);
+    expect(sample?.bundled).toBe(true);
+    expect(sample?.useCount).toBe(5);
+    expect(sample?.enabled).toBe(true);
+    expect(sample?.tags).toEqual(["sample", "testing"]);
 
     const notion = response.skills.find((s) => s.id === "productivity/notion");
     expect(notion).toBeDefined();
@@ -144,21 +144,21 @@ version: 1.2.3
   });
 
   it("returns full skill detail including files and prerequisites", () => {
-    const detail = service.detail("claim-review");
+    const detail = service.detail("sample-skill");
     expect(detail.schema).toBe(1);
-    expect(detail.skill.name).toBe("claim-review");
-    expect(detail.skill.prerequisites?.env_vars).toEqual(["CLAIM_API_KEY"]);
+    expect(detail.skill.name).toBe("sample-skill");
+    expect(detail.skill.prerequisites?.env_vars).toEqual(["SAMPLE_API_KEY"]);
     expect(detail.skill.platforms).toEqual(["macos", "linux"]);
     expect(detail.skill.files.some((f) => f.path === "SKILL.md")).toBe(true);
-    expect(detail.skill.files.some((f) => f.path === "scripts/review.py")).toBe(
+    expect(detail.skill.files.some((f) => f.path === "scripts/run.py")).toBe(
       true,
     );
   });
 
   it("reads and writes skill files atomically with revision checks", () => {
-    const file = service.readFile("claim-review", "SKILL.md");
+    const file = service.readFile("sample-skill", "SKILL.md");
     expect(file.schema).toBe(1);
-    expect(file.content).toContain("# Claim Review");
+    expect(file.content).toContain("# Sample Skill");
     expect(file.editable).toBe(true);
     expect(file.revision).toBeTruthy();
 
@@ -166,12 +166,12 @@ version: 1.2.3
 
     // Conflict on stale revision
     expect(() =>
-      service.writeFile("claim-review", "SKILL.md", newContent, "sha256:stale"),
+      service.writeFile("sample-skill", "SKILL.md", newContent, "sha256:stale"),
     ).toThrow();
 
     // Success with matching revision
     const writeResult = service.writeFile(
-      "claim-review",
+      "sample-skill",
       "SKILL.md",
       newContent,
       file.revision,
@@ -179,40 +179,40 @@ version: 1.2.3
     expect(writeResult.ok).toBe(true);
     expect(writeResult.revision).not.toBe(file.revision);
 
-    const updated = service.readFile("claim-review", "SKILL.md");
+    const updated = service.readFile("sample-skill", "SKILL.md");
     expect(updated.content).toBe(newContent);
     expect(updated.revision).toBe(writeResult.revision);
   });
 
   it("rejects path traversal and unsafe identifiers", () => {
     expect(() => service.detail("../outside")).toThrow();
-    expect(() => service.readFile("claim-review", "../secret.txt")).toThrow();
-    expect(() => service.readFile("claim-review", "/etc/passwd")).toThrow();
+    expect(() => service.readFile("sample-skill", "../secret.txt")).toThrow();
+    expect(() => service.readFile("sample-skill", "/etc/passwd")).toThrow();
   });
 
   it("toggles enabled / disabled state", () => {
-    service.toggleEnable("claim-review", false);
+    service.toggleEnable("sample-skill", false);
 
-    // Should now be inside .openlia-disabled/claim-review
+    // Should now be inside .openlia-disabled/sample-skill
     expect(
-      existsSync(join(skillsRoot, ".openlia-disabled", "claim-review")),
+      existsSync(join(skillsRoot, ".openlia-disabled", "sample-skill")),
     ).toBe(true);
-    expect(existsSync(join(skillsRoot, "claim-review"))).toBe(false);
+    expect(existsSync(join(skillsRoot, "sample-skill"))).toBe(false);
 
     let list = service.list();
-    let claim = list.skills.find((s) => s.id === "claim-review");
-    expect(claim?.enabled).toBe(false);
+    let sample = list.skills.find((s) => s.id === "sample-skill");
+    expect(sample?.enabled).toBe(false);
 
     // Toggle back to enabled
-    service.toggleEnable("claim-review", true);
-    expect(existsSync(join(skillsRoot, "claim-review"))).toBe(true);
+    service.toggleEnable("sample-skill", true);
+    expect(existsSync(join(skillsRoot, "sample-skill"))).toBe(true);
     expect(
-      existsSync(join(skillsRoot, ".openlia-disabled", "claim-review")),
+      existsSync(join(skillsRoot, ".openlia-disabled", "sample-skill")),
     ).toBe(false);
 
     list = service.list();
-    claim = list.skills.find((s) => s.id === "claim-review");
-    expect(claim?.enabled).toBe(true);
+    sample = list.skills.find((s) => s.id === "sample-skill");
+    expect(sample?.enabled).toBe(true);
   });
 
   it("toggles pin status in .usage.json", () => {
@@ -269,11 +269,11 @@ version: 1.2.3
 
     // GET /api/skills/detail
     const detailRes = await handler(
-      new Request("http://127.0.0.1:8089/api/skills/detail?id=claim-review"),
+      new Request("http://127.0.0.1:8089/api/skills/detail?id=sample-skill"),
     );
     expect(detailRes.status).toBe(200);
     const detailData = (await detailRes.json()) as { skill: { name: string } };
-    expect(detailData.skill.name).toBe("claim-review");
+    expect(detailData.skill.name).toBe("sample-skill");
 
     // POST /api/skills/create
     const createRes = await handler(

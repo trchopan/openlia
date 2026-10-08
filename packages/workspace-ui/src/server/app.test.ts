@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -9,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { WorkspaceDiagnosticsResponse } from "../shared/api";
 import { createWorkspaceHandler } from "./app";
 import { revision } from "./workspace";
 
@@ -41,6 +43,9 @@ describe("workspace HTTP handler", () => {
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("content-security-policy")).toContain(
       "script-src 'self'",
+    );
+    expect(response.headers.get("content-security-policy")).toContain(
+      "img-src 'self' data: blob:",
     );
   });
 
@@ -95,7 +100,7 @@ describe("workspace HTTP handler", () => {
     }
   });
 
-  test("exposes ChatGPT exports as read-only documents", async () => {
+  test("exposes YAML files as editable documents", async () => {
     const chatPath = join(root, "knowledge", "chatgpt");
     const content = "schema: 1\nsession:\n  platform: chatgpt\n";
     mkdirSync(chatPath, { recursive: true });
@@ -108,7 +113,7 @@ describe("workspace HTTP handler", () => {
     expect(tree.entries).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          editable: false,
+          editable: true,
           kind: "file",
           path: "knowledge/chatgpt/export.yaml",
         }),
@@ -122,7 +127,7 @@ describe("workspace HTTP handler", () => {
       editable: boolean;
       content: string;
     };
-    expect(document).toMatchObject({ content, editable: false });
+    expect(document).toMatchObject({ content, editable: true });
 
     const writeBody = JSON.stringify({
       content,
@@ -134,8 +139,11 @@ describe("workspace HTTP handler", () => {
       headers: { "Content-Type": "application/json" },
       method: "PUT",
     });
-    expect(writeResponse.status).toBe(403);
-    expect(await writeResponse.json()).toMatchObject({ error: "read_only" });
+    expect(writeResponse.status).toBe(200);
+    expect(await writeResponse.json()).toMatchObject({
+      editable: true,
+      ok: true,
+    });
   });
 
   test("reads, writes, and rejects stale revisions", async () => {
@@ -226,6 +234,89 @@ describe("workspace HTTP handler", () => {
     expect(await staleResponse.json()).toMatchObject({
       error: "revision_conflict",
     });
+  });
+
+  test("renames a file and rejects collisions and protected names", async () => {
+    const originalPath = join(root, "note.md");
+    writeFileSync(originalPath, "content");
+    const readResponse = await request("/api/workspace/file?path=note.md");
+    const doc = (await readResponse.json()) as { revision: string };
+
+    const renameBody = JSON.stringify({
+      expected_revision: doc.revision,
+      new_name: "renamed.md",
+      path: "note.md",
+    });
+    const renameRes = await request("/api/workspace/rename", {
+      body: renameBody,
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    expect(renameRes.status).toBe(200);
+    const renamePayload = (await renameRes.json()) as {
+      ok: boolean;
+      path: string;
+      previous_path: string;
+    };
+    expect(renamePayload.ok).toBe(true);
+    expect(renamePayload.path).toBe("renamed.md");
+    expect(renamePayload.previous_path).toBe("note.md");
+    expect(existsSync(join(root, "renamed.md"))).toBe(true);
+    expect(existsSync(originalPath)).toBe(false);
+
+    // Collision check
+    writeFileSync(join(root, "exists.md"), "already here");
+    const conflictBody = JSON.stringify({
+      expected_revision: doc.revision,
+      new_name: "exists.md",
+      path: "renamed.md",
+    });
+    const conflictRes = await request("/api/workspace/rename", {
+      body: conflictBody,
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    expect(conflictRes.status).toBe(409);
+
+    // Protected template check
+    const templateBody = JSON.stringify({
+      expected_revision: doc.revision,
+      new_name: "task-template.md",
+      path: "renamed.md",
+    });
+    const templateRes = await request("/api/workspace/rename", {
+      body: templateBody,
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    expect(templateRes.status).toBe(403);
+  });
+
+  test("moves a file into a new folder and validates diagnostics", async () => {
+    writeFileSync(join(root, "source.md"), "hello world");
+    const readResponse = await request("/api/workspace/file?path=source.md");
+    const doc = (await readResponse.json()) as { revision: string };
+
+    const moveBody = JSON.stringify({
+      destination_path: "subfolder/moved.md",
+      expected_revision: doc.revision,
+      source_path: "source.md",
+    });
+    const moveRes = await request("/api/workspace/move", {
+      body: moveBody,
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    expect(moveRes.status).toBe(200);
+    expect(existsSync(join(root, "subfolder", "moved.md"))).toBe(true);
+    expect(existsSync(join(root, "source.md"))).toBe(false);
+
+    // Diagnostics endpoint check
+    const diagRes = await request("/api/workspace/diagnostics");
+    expect(diagRes.status).toBe(200);
+    const diagPayload = (await diagRes.json()) as WorkspaceDiagnosticsResponse;
+    expect(diagPayload.schema).toBe(1);
+    expect(Array.isArray(diagPayload.issues)).toBe(true);
   });
 
   test("protects delete requests with authentication and same-origin checks", async () => {
@@ -349,7 +440,10 @@ describe("workspace HTTP handler", () => {
   test("serves the Vite index and assets without exposing other files", async () => {
     const staticRoot = join(root, "static");
     mkdirSync(join(staticRoot, "assets"), { recursive: true });
-    writeFileSync(join(staticRoot, "index.html"), "<!doctype html>");
+    writeFileSync(
+      join(staticRoot, "index.html"),
+      '<!doctype html><meta name="csp-nonce" content="__OPENLIA_CSP_NONCE__">',
+    );
     writeFileSync(join(staticRoot, "assets", "app.js"), "console.log('ok')");
     const staticHandler = createWorkspaceHandler({
       staticRoot,
@@ -365,6 +459,12 @@ describe("workspace HTTP handler", () => {
     );
 
     expect(index.status).toBe(200);
+    const indexBody = await index.text();
+    const indexCsp = index.headers.get("content-security-policy") ?? "";
+    const nonce = indexCsp.match(/style-src 'self' 'nonce-([^']+)'/)?.[1];
+    expect(nonce).toBeTruthy();
+    expect(indexBody).toContain(`content="${nonce}">`);
+    expect(indexBody).not.toContain("__OPENLIA_CSP_NONCE__");
     expect(asset.headers.get("content-type")).toBe(
       "text/javascript; charset=utf-8",
     );

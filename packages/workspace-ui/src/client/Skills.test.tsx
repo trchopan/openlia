@@ -27,11 +27,11 @@ describe("SkillsNavigator", () => {
       author: "Security Team",
       bundled: true,
       category: "standalone",
-      description: "Review claims and statements",
+      description: "Conduct an exhaustive research investigation",
       enabled: false,
-      fileCount: 2,
-      id: "claim-review",
-      name: "claim-review",
+      fileCount: 1,
+      id: "deep-research",
+      name: "deep-research",
       pinned: false,
       tags: ["security"],
       useCount: 5,
@@ -54,7 +54,7 @@ describe("SkillsNavigator", () => {
     );
 
     expect(screen.getAllByText("notion").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("claim-review")).toBeDefined();
+    expect(screen.getByText("deep-research")).toBeDefined();
   });
 
   it("triggers onSelectSkill when clicked", () => {
@@ -73,9 +73,9 @@ describe("SkillsNavigator", () => {
       />,
     );
 
-    const claimSkillBtn = screen.getByText("claim-review");
-    fireEvent.click(claimSkillBtn);
-    expect(handleSelect).toHaveBeenCalledWith("claim-review");
+    const researchSkillBtn = screen.getByText("deep-research");
+    fireEvent.click(researchSkillBtn);
+    expect(handleSelect).toHaveBeenCalledWith("deep-research");
   });
 
   it("triggers onTogglePin when pin button clicked", () => {
@@ -194,8 +194,9 @@ describe("SkillDetailPane", () => {
       />,
     );
 
-    const textarea = screen.getByRole("textbox");
-    fireEvent.change(textarea, { target: { value: "# Changed Instructions" } });
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "# Changed Instructions";
+    fireEvent.input(editor, { bubbles: true, inputType: "insertText" });
     expect(handleDraftChange).toHaveBeenCalledWith("# Changed Instructions");
 
     const saveBtn = screen.getByText("Save");

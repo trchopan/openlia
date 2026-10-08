@@ -1,6 +1,6 @@
 ---
 name: workspace-git
-description: Track approved workspace changes in local Git history.
+description: Track approved or delegated workspace changes in local Git history.
 version: 0.2.0
 platforms: [linux]
 required_environment_variables: []
@@ -15,8 +15,7 @@ metadata:
 
 The OpenLia workspace is `/opt/data/workspace`. It is maintained as a local
 Git repository for history tracking. OpenLia does not configure Git remotes or
-synchronize workspace history over the network. Encrypted OpenLia backups are
-the recovery mechanism.
+synchronize workspace history over the network.
 
 ## Safety Rules
 
@@ -38,13 +37,14 @@ git log -10 --oneline
 
 ## Record an Approved Change
 
-After an approved, coherent workspace update, stage only the intended files and
-commit a concise history entry:
+After an approved or delegated coherent workspace update, and only when
+`assistant-policy.yaml` permits `local_git_commits`, stage only the intended
+files and commit a concise history entry:
 
 ```bash
 cd /opt/data/workspace
 git status --short --branch
-git add -- path/to/approved-file.md
+git add -- path/to/authorized-file.md
 git diff --cached
 git commit -m "backup: describe the workspace update"
 ```

@@ -1,15 +1,18 @@
-# [Project Title]
+---
+$schema: ./project-template.schema.json
+status: null # active | paused | completed | archived
+target_completion: null # YYYY-MM-DD
+linked_goal: null # goal title or relative path
+linked_area: null # area title or relative path
+---
+
+# <Project Title>
 
 ## Objective
 What concrete outcome will make this project complete?
 
-## Status
-active | paused | completed | archived
-
-## Context & Constraints
-- Linked Goal: [[Goal Name]]
-- Linked Area: [[Area Name]]
-- Target Completion: YYYY-MM-DD
+## Constraints
+- Budget, time, non-negotiables:
 
 ## Milestones
 - [ ] Milestone 1:

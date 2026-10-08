@@ -24,7 +24,9 @@ tasks, risks, and decisions.
 2. Run `scripts/project_report.py PROJECT.json --format markdown`.
 3. Check whether the objective, status, overdue flags, and next actions are
    still accurate.
-4. Recommend one next action or an explicit pause; ask before editing records.
+4. Recommend one next action or an explicit pause. Edit only when the current
+   request or `assistant-policy.yaml` delegates `update_records` for the target
+   domain; otherwise ask before editing records.
 
 The helper calculates milestone completion only from explicit statuses and
 sorts open tasks by priority, due value, and title. It does not infer dates.
@@ -33,7 +35,9 @@ sorts open tasks by priority, due value, and title. It does not infer dates.
 
 - Percentage complete is a signal, not proof of outcome.
 - Do not hide risks or convert an unresolved decision into a task silently.
-- Never close, delete, or re-scope a project without approval.
+- Never close, delete, or re-scope a project unless the current request or
+  policy explicitly authorizes that operation; deletion still follows the
+  destructive-action policy.
 
 ## Verification
 

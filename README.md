@@ -287,17 +287,27 @@ enough context to do so well.
 ### Claim Memory
 
 Reusable personal context belongs in `knowledge/claims/` as Markdown records.
-Keep machine-readable metadata in YAML front matter and the human-readable claim
-under `## Claim`. Records use a stable ID, a supported kind and status, structured
-source and provenance references, and explicit dates. A confidence score never
-replaces evidence. The read-only claim index uses an explicit `--as-of` date so
-expiry and review checks are deterministic.
+Start from `knowledge/claims/claim-template.md`; its `$schema` frontmatter
+property points to the JSON Schema that validates record metadata. Keep the
+human-readable claim under `## Claim`, with source and provenance references,
+status, and temporal scope. A confidence score never replaces evidence. Review
+`valid_until` and `review_after` dates directly when reviewing records.
 
 The workspace claim ledger is the canonical long-term record. Hermes runtime
 memory may cache claim IDs and summaries for retrieval, but Hermes-only memory
 must not override an active workspace claim or become durable truth without a
 source reference and review. Conflicting claims remain visible as contested or
 superseded records rather than being silently overwritten.
+
+### Workspace Growth
+
+The starter workspace keeps a stable core of 15 top-level domains. Each copied
+workspace also contains a user-owned `workspace.yaml` registry for approved
+nested folders and new top-level domains. Hermes and bundled skills read this
+registry before routing records; they do not create a new category because one
+item appears to fit it. Unknown destinations remain in the inbox while the
+agent proposes a purpose, lifecycle, and template/schema plan. The protected
+`workspace-template-customization` skill validates approved registry changes.
 
 ## Cross-Domain Capabilities
 

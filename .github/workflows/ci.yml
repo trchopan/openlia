@@ -27,6 +27,14 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python validation dependencies
+        run: python -m pip install -r requirements-dev.txt
+
       - name: Install locked JavaScript dependencies
         run: bun install --frozen-lockfile --ignore-scripts
 
@@ -46,6 +54,9 @@ jobs:
         run: |
           go test ./...
           go vet ./...
+
+      - name: Validate workspace templates
+        run: make workspace-templates-test
 
       - name: Build release binaries
         run: make build
@@ -67,6 +78,11 @@ jobs:
           docker run --rm --entrypoint sh
           --volume "$PWD/docker/verify-tools.sh:/tmp/verify-tools.sh:ro"
           openlia-hermes:ci /tmp/verify-tools.sh
+
+      - name: Verify Hermes workspace validator dependency
+        run: >-
+          docker run --rm --entrypoint /opt/hermes/.venv/bin/python
+          openlia-hermes:ci -c "import jsonschema; print(jsonschema.__name__)"
 
       - name: Verify optional-tools input rejection
         run: |

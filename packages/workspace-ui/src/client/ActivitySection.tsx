@@ -1,9 +1,14 @@
 import { useMemo, useState } from "react";
-import type { WorkspaceActivityResponse } from "../shared/api";
+import type {
+  WorkspaceActivityResponse,
+  WorkspaceDiagnosticsResponse,
+} from "../shared/api";
 
 export interface ActivitySectionProps {
   activity: WorkspaceActivityResponse | null;
   loading: boolean;
+  diagnostics?: WorkspaceDiagnosticsResponse | null;
+  diagnosticsLoading?: boolean;
   onOpenFile: (path: string) => void;
   onRefresh?: (() => void) | undefined;
 }
@@ -70,6 +75,8 @@ function statusBadge(status: string) {
 
 export function ActivitySection({
   activity,
+  diagnostics,
+  diagnosticsLoading: _diagnosticsLoading,
   loading,
   onOpenFile,
   onRefresh,
@@ -200,6 +207,101 @@ export function ActivitySection({
           )}
         </div>
       </div>
+
+      {/* Template & Schema Diagnostics Panel */}
+      {diagnostics && (
+        <section
+          aria-label="Template and schema diagnostics"
+          className="mb-6 rounded-xl border border-base-content/15 bg-base-100 p-4 shadow-sm"
+        >
+          <div className="flex items-center justify-between gap-2 border-b border-base-content/10 pb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold">
+                Template & Schema Health
+              </span>
+              <span
+                className={`badge badge-sm font-mono ${
+                  diagnostics.valid ? "badge-success" : "badge-warning"
+                }`}
+              >
+                {diagnostics.valid
+                  ? "All Conforming"
+                  : `${diagnostics.issues.length} ${
+                      diagnostics.issues.length === 1 ? "issue" : "issues"
+                    }`}
+              </span>
+            </div>
+          </div>
+
+          {diagnostics.issues.length > 0 ? (
+            <div className="mt-3 space-y-2.5">
+              <p className="text-xs text-base-content/70">
+                The following files have frontmatter that does not conform to
+                their domain template schemas. Click any file to inspect or
+                edit:
+              </p>
+              <ul className="divide-y divide-base-content/5 rounded-lg border border-base-content/10 bg-base-200/40">
+                {diagnostics.issues.map((issue) => (
+                  <li
+                    key={issue.path}
+                    className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 p-3 hover:bg-base-200/80 transition-colors"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <button
+                        className="font-mono text-xs font-semibold text-primary hover:underline text-left block truncate"
+                        onClick={() => onOpenFile(issue.path)}
+                        type="button"
+                      >
+                        {issue.path}
+                      </button>
+                      {issue.schema_path && (
+                        <span className="text-[10px] text-base-content/50 font-mono block">
+                          Schema: {issue.schema_path}
+                        </span>
+                      )}
+                      <ul className="mt-1.5 list-disc list-inside text-xs text-warning space-y-0.5">
+                        {issue.errors.map((err) => (
+                          <li key={err} className="break-words">
+                            {err}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <button
+                      className="btn btn-xs btn-outline shrink-0 self-start mt-1 sm:mt-0"
+                      onClick={() => onOpenFile(issue.path)}
+                      type="button"
+                    >
+                      Open & Fix
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div className="mt-2.5 flex items-center gap-2 text-xs text-success">
+              <svg
+                className="h-4 w-4 shrink-0"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+              >
+                <title>All schemas and templates valid</title>
+                <path
+                  d="M5 13l4 4L19 7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>
+                All documents in this workspace conform to their template
+                schemas.
+              </span>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Overview Stat Cards */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">

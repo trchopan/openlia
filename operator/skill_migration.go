@@ -99,7 +99,7 @@ func ForkSkill(config Config, name string, now time.Time) (SkillForkResult, erro
 	if err := ValidateSafeComponent(name, "skill"); err != nil {
 		return SkillForkResult{}, err
 	}
-	if name == protectedSkillName {
+	if isProtectedSystemSkill(name) {
 		return SkillForkResult{}, fmt.Errorf("protected system skill cannot be forked")
 	}
 	metadataPath := filepath.Join(config.MetaRoot, "managed", "skills", name+".json")

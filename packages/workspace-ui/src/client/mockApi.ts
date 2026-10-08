@@ -3,11 +3,14 @@ import type {
   AuthSessionResponse,
   SkillDetail,
   WorkspaceActivityResponse,
-  WorkspaceErrorResponse,
   WorkspaceDeleteResponse,
+  WorkspaceDiagnosticsResponse,
+  WorkspaceErrorResponse,
   WorkspaceFile,
   WorkspaceFileMetadata,
   WorkspaceGitStatus,
+  WorkspaceMoveResponse,
+  WorkspaceRenameResponse,
   WorkspaceTreeEntry,
   WorkspaceTreeResponse,
   WorkspaceWriteResponse,
@@ -69,6 +72,10 @@ export function createMockWorkspaceApi({
       ),
       kind: "file",
     },
+    {
+      ...metadata("workspace.yaml", "domains:\n  - inbox\n"),
+      kind: "file",
+    },
     { kind: "directory", path: "projects" },
     {
       ...metadata("projects/project.md", "# Project\n\nA sample project.\n"),
@@ -85,49 +92,20 @@ export function createMockWorkspaceApi({
   const fileContents: Record<string, string> = {
     "calendar/event.md":
       "# Calendar event\n\nA sample event for UI development.\n",
+    "workspace.yaml": "domains:\n  - inbox\n",
     "projects/project.md": "# Project\n\nA sample project.\n",
     "tasks/task.md": "# Task\n\nA sample task.\n",
     [path]: content,
   };
   const fileRevisions: Record<string, string> = {
     "calendar/event.md": "sha256:mock-calendar",
+    "workspace.yaml": "sha256:mock-workspace",
     "projects/project.md": "sha256:mock-project",
     "tasks/task.md": "sha256:mock-task",
     [path]: revision,
   };
 
   const mockSkills: SkillDetail[] = [
-    {
-      author: undefined,
-      bundled: true,
-      category: "productivity",
-      description: "Review durable personal claims with explicit evidence.",
-      enabled: true,
-      fileCount: 2,
-      files: [
-        {
-          editable: true,
-          modified_at: modifiedAt,
-          path: "SKILL.md",
-          size: 450,
-        },
-        {
-          editable: true,
-          modified_at: modifiedAt,
-          path: "scripts/review.py",
-          size: 120,
-        },
-      ],
-      id: "claim-review",
-      lastUsedAt: "2026-09-24T00:00:00.000Z",
-      name: "claim-review",
-      pinned: true,
-      platforms: ["macos", "linux"],
-      prerequisites: { env_vars: ["CLAIM_API_KEY"] },
-      tags: ["claims", "memory"],
-      useCount: 14,
-      version: "0.1.0",
-    },
     {
       author: undefined,
       bundled: true,
@@ -233,8 +211,6 @@ export function createMockWorkspaceApi({
   ];
 
   const mockSkillFiles: Record<string, string> = {
-    "claim-review:SKILL.md": `---\nname: claim-review\ndescription: Review durable personal claims with explicit evidence.\nversion: 0.1.0\nplatforms: [macos, linux]\nprerequisites:\n  env_vars: [CLAIM_API_KEY]\nmetadata:\n  hermes:\n    tags: [claims, memory]\n    category: productivity\n---\n\n# Claim Review\n\nReview durable personal claims with explicit evidence.\n`,
-    "claim-review:scripts/review.py": "print('Reviewing personal claims...')\n",
     "deep-research:SKILL.md": `---\nname: deep-research\ndescription: Exhaustive multi-source research investigation.\nversion: 1.0.0\nplatforms: [macos, linux]\nmetadata:\n  hermes:\n    tags: [research, web]\n    category: research\n---\n\n# Deep Research\n\nPerform in-depth multi-phase web research.\n`,
     "deep-research:templates/report.md":
       "# Research Report Template\n\n## Overview\n",
@@ -244,8 +220,6 @@ export function createMockWorkspaceApi({
   };
 
   const mockSkillRevisions: Record<string, string> = {
-    "claim-review:SKILL.md": "sha256:mock-claim-md",
-    "claim-review:scripts/review.py": "sha256:mock-claim-py",
     "deep-research:SKILL.md": "sha256:mock-deep-md",
     "deep-research:templates/report.md": "sha256:mock-deep-tpl",
     "productivity/notion:SKILL.md": "sha256:mock-notion-md",
@@ -345,6 +319,90 @@ export function createMockWorkspaceApi({
         (entry) => !(entry.kind === "file" && entry.path === requestedPath),
       );
       return { ok: true, path: requestedPath, schema: 1 };
+    },
+    async renameFile(
+      requestedPath,
+      newName,
+      expectedRevision,
+    ): Promise<WorkspaceRenameResponse> {
+      requireAuthentication();
+      const currentContent = fileContents[requestedPath];
+      if (currentContent === undefined) throw error(404, "not_found");
+      const currentRev = fileRevisions[requestedPath] ?? revision;
+      if (expectedRevision !== currentRev) {
+        throw error(409, "revision_conflict", currentRev);
+      }
+      const parts = requestedPath.split("/");
+      parts[parts.length - 1] = newName;
+      const newPath = parts.join("/");
+      if (fileContents[newPath] !== undefined) {
+        throw error(409, "destination_exists");
+      }
+      delete fileContents[requestedPath];
+      delete fileRevisions[requestedPath];
+      fileContents[newPath] = currentContent;
+      fileRevisions[newPath] = currentRev;
+      entries = entries.map((entry) => {
+        if (entry.kind === "file" && entry.path === requestedPath) {
+          return { ...entry, path: newPath };
+        }
+        return entry;
+      });
+      return {
+        ...metadata(newPath, currentContent),
+        ok: true,
+        previous_path: requestedPath,
+        revision: currentRev,
+        schema: 1,
+      };
+    },
+    async moveFile(
+      sourcePath,
+      destinationPath,
+      expectedRevision,
+    ): Promise<WorkspaceMoveResponse> {
+      requireAuthentication();
+      const currentContent = fileContents[sourcePath];
+      if (currentContent === undefined) throw error(404, "not_found");
+      const currentRev = fileRevisions[sourcePath] ?? revision;
+      if (expectedRevision !== currentRev) {
+        throw error(409, "revision_conflict", currentRev);
+      }
+      if (fileContents[destinationPath] !== undefined) {
+        throw error(409, "destination_exists");
+      }
+      delete fileContents[sourcePath];
+      delete fileRevisions[sourcePath];
+      fileContents[destinationPath] = currentContent;
+      fileRevisions[destinationPath] = currentRev;
+
+      // Add parent directory to entries if not already present
+      const destDir = destinationPath.split("/").slice(0, -1).join("/");
+      if (destDir && !entries.some((e) => e.path === destDir)) {
+        entries.push({ kind: "directory", path: destDir });
+      }
+
+      entries = entries.map((entry) => {
+        if (entry.kind === "file" && entry.path === sourcePath) {
+          return { ...entry, path: destinationPath };
+        }
+        return entry;
+      });
+      return {
+        ...metadata(destinationPath, currentContent),
+        ok: true,
+        previous_path: sourcePath,
+        revision: currentRev,
+        schema: 1,
+      };
+    },
+    async loadDiagnostics(): Promise<WorkspaceDiagnosticsResponse> {
+      requireAuthentication();
+      return {
+        issues: [],
+        schema: 1,
+        valid: true,
+      };
     },
     async loadGitStatus(): Promise<WorkspaceGitStatus> {
       requireAuthentication();

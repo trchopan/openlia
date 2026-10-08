@@ -63,15 +63,17 @@ RUN sed -i \
     install -m 0755 "/tmp/uv/uv-${uv_target}/uvx" /usr/local/bin/uvx; \
     rm -rf /tmp/bun /tmp/uv "${bun_archive}" "${uv_archive}"
 
-COPY profile/skills/claim-review/requirements.txt /tmp/claim-req.txt
+COPY profile/system-skills/workspace-template-customization/requirements.txt /tmp/workspace-template-req.txt
 RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache \
-	--requirement /tmp/claim-req.txt \
+	--requirement /tmp/workspace-template-req.txt \
 	&& uv pip install --python /opt/hermes/.venv/bin/python --no-cache pip-audit==2.9.0 \
-	&& rm -f /tmp/claim-req.txt
+	&& rm -f /tmp/workspace-template-req.txt
 
 COPY --chmod=0755 docker/secret-source.sh /usr/local/bin/openlia-secret-source
 COPY docker/openlia_link_rewriter.py /opt/hermes/.venv/lib/python3.13/site-packages/openlia_link_rewriter.py
 COPY docker/openlia_link_rewriter.pth /opt/hermes/.venv/lib/python3.13/site-packages/openlia_link_rewriter.pth
+# OpenLia's policy plugin is bundled with the image and enabled by profile/config.yaml.
+COPY profile/plugins/openlia-policy /opt/hermes/plugins/openlia-policy
 
 ARG OPENLIA_PROJECT_NAME="openlia"
 ARG OPENLIA_ENABLED_TOOLS=""

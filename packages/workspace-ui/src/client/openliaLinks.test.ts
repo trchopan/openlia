@@ -28,11 +28,11 @@ const mockSkills: SkillSummary[] = [
   {
     bundled: true,
     category: "",
-    description: "Review personal claims ledger",
+    description: "Exhaustive multi-source research investigation",
     enabled: true,
     fileCount: 1,
-    id: "claim-review",
-    name: "claim-review",
+    id: "deep-research",
+    name: "deep-research",
     pinned: false,
     tags: [],
     useCount: 0,
@@ -436,12 +436,12 @@ describe("filterGoToSuggestions", () => {
     expect(docMatches[0]?.title).toBe("projects/website.md");
     expect(docMatches[0]?.kind).toBe("workspace");
 
-    const skillMatches = filterGoToSuggestions("claim", {
+    const skillMatches = filterGoToSuggestions("research", {
       skills: mockSkills,
       tree: mockTree,
     });
     expect(skillMatches).toHaveLength(1);
-    expect(skillMatches[0]?.title).toBe("claim-review");
+    expect(skillMatches[0]?.title).toBe("deep-research");
     expect(skillMatches[0]?.kind).toBe("skill");
   });
 });

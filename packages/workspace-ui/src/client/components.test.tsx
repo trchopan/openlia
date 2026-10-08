@@ -8,7 +8,6 @@ import {
 import { describe, expect, test } from "vitest";
 import type { WorkspaceTreeEntry } from "../shared/api";
 import {
-  ChatgptPreview,
   CopyLinkButton,
   DeleteFileDialog,
   DocumentInspector,
@@ -60,55 +59,84 @@ This is the document body.
     expect(screen.getByText("This is the document body.")).toBeInTheDocument();
   });
 
-  test("renders a ChatGPT export as a conversation with sources", () => {
-    render(
-      <ChatgptPreview
-        content={`schema: 1
-session:
-  platform: chatgpt
-  topic: Preview topic
-  model: ChatGPT
-messages:
-  - role: user
-    content: What happened?
-  - role: assistant
-    content: |
-      # The answer
+  test("renders a marked original message in a separate source panel", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={`# Review
 
-      It is documented.
-references:
-  - id: ref-1
-    title: Documentation
-    url: https://openlia.example/docs
-`}
+## Proposed extraction
+
+Keep this above the source panel.
+
+<!-- ORIGINAL MESSAGE START -->
+
+# Original title
+
+The **original** message.
+
+<!-- ORIGINAL MESSAGE END -->`}
       />,
     );
 
     expect(
-      screen.getByRole("article", { name: "ChatGPT conversation" }),
+      screen.getByRole("heading", { name: "Proposed extraction" }),
+    ).toBeInTheDocument();
+    const sourcePanel = screen.getByRole("region", {
+      name: "Original message",
+    });
+    expect(sourcePanel).toHaveClass("workspace-original-message");
+    expect(
+      within(sourcePanel).getByRole("heading", { name: "Original message" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Preview topic" }),
+      within(sourcePanel).getByRole("heading", { name: "Original title" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "The answer" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Sources (1)" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Documentation/ })).toHaveAttribute(
-      "href",
-      "https://openlia.example/docs",
-    );
+    expect(within(sourcePanel).getByText("original")).toBeInTheDocument();
+    expect(container.querySelector("script")).toBeNull();
   });
 
-  test("falls back to raw YAML when a ChatGPT export is invalid", () => {
-    render(<ChatgptPreview content="schema: [invalid" />);
+  test("renders non-Markdown documents in the code editor", () => {
+    let changed = "";
+    render(
+      <DocumentPane
+        conflict=""
+        deleting={false}
+        diff={[]}
+        documentError=""
+        draft="enabled: true"
+        file={{
+          content: "enabled: true",
+          editable: true,
+          modified_at: "2026-09-22T00:00:00.000Z",
+          path: "workspace.yaml",
+          revision: "rev1",
+          schema: 1,
+          size: 13,
+        }}
+        fileLoading={false}
+        onCloseFiles={() => undefined}
+        onDelete={() => undefined}
+        onDownload={() => undefined}
+        onDraftChange={(value) => {
+          changed = value;
+        }}
+        onOpenDetails={() => undefined}
+        onRetry={() => undefined}
+        onSave={() => undefined}
+        onViewChange={() => undefined}
+        saving={false}
+        view="preview"
+      />,
+    );
 
-    expect(
-      screen.getByRole("article", { name: "Raw chat export" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/could not be parsed/)).toBeInTheDocument();
+    expect(screen.getByText("Code")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    const editor = screen.getByRole("textbox", { name: "Code editor" });
+    expect(editor).toHaveTextContent("enabled: true");
+    editor.textContent = "enabled: false";
+    fireEvent.input(editor, { bubbles: true, inputType: "insertText" });
+    expect(changed).toBe("enabled: false");
   });
 
   test("sorts folders and files naturally while keeping empty folders visible", () => {

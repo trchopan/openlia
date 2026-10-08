@@ -23,19 +23,24 @@ of outcomes for the next period.
 1. Gather current project, task, decision, and claim records as read-only inputs.
 2. Run `scripts/review_week.py INPUT.json`.
 3. Check completed work, active projects, open tasks, unresolved decisions, and
-   claims requiring review. Prepare claim input with
-   `claim-review/scripts/index_claims.py` using an explicit `--as-of` date.
-4. Draft a short next-week list and ask before changing workspace records.
+   claims requiring review. Read claim records directly from
+   `knowledge/claims/`; check their status, `valid_until`, and `review_after`
+   against the current date when assembling the claim input.
+4. Draft a short next-week list. Apply routine updates only when the current
+   request or `assistant-policy.yaml` delegates them; otherwise ask before
+   changing workspace records.
 
 The input object accepts `week`, `projects`, `tasks`, `decisions`, and `claims`
-lists. Claim records should come from the read-only claim index. Statuses are
+lists. Claim records are supplied directly as read-only summaries; statuses are
 compared literally and the output is deterministic.
 
 ## Pitfalls
 
 - Do not equate activity with progress or add tasks to fill space.
 - Do not close a task or decision merely because it is old.
-- Do not activate, retract, or supersede a claim during a review without approval.
+- Do not activate, retract, or supersede a claim during a review unless the
+  current request or policy explicitly authorizes that memory action. Inferred
+  claims remain candidates by default.
 - A review does not authorize messages, purchases, or scheduling.
 
 ## Verification

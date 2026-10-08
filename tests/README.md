@@ -216,6 +216,20 @@ runtime marker.
 
 ## Other Verification
 
+Validate the bundled workspace starters against their frontmatter `$schema`
+references, validate skill-template structure and optional frontmatter schemas,
+and check the shipped Markdown title/section headings:
+
+```sh
+make workspace-templates-test
+```
+
+This uses the development Python dependencies installed by `make venv`. The
+same validator is bundled with Hermes and can check a deployed workspace and
+installed skill templates in one invocation. Workspace schemas apply to every
+non-template Markdown file in a domain, while skill templates without
+frontmatter receive Markdown structure checks only.
+
 From a clean checkout, run `make build` first to generate the ignored package
 distributions embedded by the Go CLI. The broader local checks then remain:
 

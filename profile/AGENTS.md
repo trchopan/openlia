@@ -10,7 +10,16 @@ installation may contain only starter data.
 - Read and analyze before proposing a change.
 - Keep all workspace writes under the configured workspace root.
 - Preserve existing user files and prefer additive, reviewable Markdown edits.
+- Read the workspace-owned `workspace.yaml` registry when present. It is the
+  source of truth for approved nested folders and top-level extensions; do not
+  invent a new destination from a single item.
 - When creating new domain records in the workspace, follow the starter templates in `workspace/<domain>/<template>.md` (e.g. `goals/goal-template.md`, `monitors/monitor-template.md`, `projects/project-template.md`, `decisions/decision-template.md`, `people/person-template.md`).
+- When the domain template's frontmatter declares `$schema`, new or updated
+  records must conform to the referenced schema. Use the
+  `workspace-template-customization` system skill to validate the active
+  workspace or propose template changes.
+- If an item does not fit a registered path, keep it in `inbox/` and propose a
+  registry extension with a purpose, lifecycle, and template/schema plan.
 - Use the bundled Python helpers only with explicit input paths and inspect
   their output before applying it to the workspace.
 - Do not fetch network data from helper scripts; research tools may be used by
@@ -32,6 +41,9 @@ Skill writes are staged for review. Customize bundled skills through
 protected `openlia-skill-migration` system skill may propose a migration but
 must never edit an active skill or its provenance directly. Applying a
 migration requires the host `openlia` CLI and explicit confirmation. The
+protected `workspace-template-customization` system skill may propose changes to
+user-owned workspace templates and schemas, but must not modify existing
+records without separate explicit approval. The
 bundled workspace Git pull is a no-agent cron job with no model or approval
 prompt; other cron jobs remain opt-in and must fail closed when a human
 approval is unavailable. Manage cron jobs through Hermes' cron interface

@@ -10,9 +10,55 @@ import sys
 from pathlib import Path
 from typing import Any
 
+SCRIPT_PATH = Path(__file__).resolve()
+SYSTEM_SCRIPTS_CANDIDATES = (
+    SCRIPT_PATH.parents[3] / "system-skills" / "workspace-template-customization" / "scripts",
+    SCRIPT_PATH.parents[3] / "skills" / "workspace-template-customization" / "scripts",
+    SCRIPT_PATH.parents[2] / "workspace-template-customization" / "scripts",
+)
+for SYSTEM_SCRIPTS in SYSTEM_SCRIPTS_CANDIDATES:
+    if SYSTEM_SCRIPTS.is_dir() and str(SYSTEM_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SYSTEM_SCRIPTS))
+        break
 
-ROUTES = ("task", "decision", "idea", "research", "archive")
-ROUTE_ORDER = {name: index for index, name in enumerate(ROUTES)}
+from workspace_registry import load_policy, load_registry, policy_allows, resolve_route_destination
+
+
+ROUTES = ("task", "event", "decision", "idea", "research", "claim", "archive", "review")
+ROUTE_DETAILS = {
+    "task": {
+        "destination": "tasks/",
+        "next_step": "Define one concrete physical next action and its owner.",
+    },
+    "event": {
+        "destination": "calendar/",
+        "next_step": "Confirm the explicit date, time, timezone, participants, and location.",
+    },
+    "decision": {
+        "destination": "decisions/",
+        "next_step": "Record the question, options, constraints, and evidence gaps.",
+    },
+    "idea": {
+        "destination": "ideas/",
+        "next_step": "Capture why it matters and one small exploration experiment.",
+    },
+    "research": {
+        "destination": "knowledge/research/",
+        "next_step": "Record the question and the sources to inspect.",
+    },
+    "claim": {
+        "destination": "knowledge/claims/",
+        "next_step": "Write one specific candidate claim with a stable source and evidence.",
+    },
+    "archive": {
+        "destination": "archive/",
+        "next_step": "Retain the record only if it is inactive or useful for reference.",
+    },
+    "review": {
+        "destination": "inbox/",
+        "next_step": "Ask one focused question before choosing a destination.",
+    },
+}
 
 
 def _text(item: dict[str, Any]) -> str:
@@ -23,51 +69,107 @@ def _text(item: dict[str, Any]) -> str:
     return " ".join(str(part) for part in parts if part).lower()
 
 
-def _explicit_route(item: dict[str, Any]) -> str | None:
+def _tags(item: dict[str, Any]) -> list[str]:
+    tags = item.get("tags", [])
+    return [str(tag) for tag in tags] if isinstance(tags, list) else []
+
+
+def _explicit_route(item: dict[str, Any]) -> tuple[str | None, str | None]:
     for key in ("route", "type", "category"):
         value = item.get(key)
-        if isinstance(value, str) and value.lower() in ROUTES:
-            return value.lower()
-    return None
+        if not isinstance(value, str) or not value.strip():
+            continue
+        normalized = value.strip().lower()
+        if normalized in ROUTES:
+            return normalized, None
+        return (
+            "review",
+            f"unsupported explicit {key} '{value}'; manual review is required",
+        )
+    return None, None
 
 
 def classify(item: dict[str, Any]) -> tuple[str, str]:
     """Return a route and a short reason without using the current date."""
-    explicit = _explicit_route(item)
+    explicit, explicit_reason = _explicit_route(item)
     if explicit:
-        return explicit, "preserved explicit route"
+        return explicit, explicit_reason or "preserved explicit route"
 
     text = _text(item)
-    if re.search(r"\b(should|decide|choose|trade[- ]off|option|compare)\b", text):
+    if re.search(r"\b(should\s+(?:we|i|you|they)|decide|choose|trade[- ]off|option|compare)\b", text):
         return "decision", "contains a choice or trade-off"
     if re.search(r"\b(todo|to-do|action|follow[- ]?up|need to|remember to|deadline)\b", text):
         return "task", "contains an action or commitment"
+    if re.search(r"\b(calendar|meeting|appointment|event|invite|invitation|rsvp|scheduled)\b", text):
+        return "event", "contains an event or scheduling signal"
     if re.search(r"\b(idea|maybe|what if|learn|interesting)\b", text):
         return "idea", "looks like a possibility or observation"
     if re.search(r"\b(research|read|source|article|paper|reference)\b", text):
         return "research", "points to knowledge work"
-    return "archive", "no action signal was detected"
+    if re.search(r"\b(archive|archived|completed|for reference|inactive)\b", text):
+        return "archive", "explicitly appears inactive or reference-only"
+    return "review", "no reliable route signal was detected; manual review is required"
 
 
-def triage(items: list[dict[str, Any]]) -> dict[str, Any]:
+def _identifier(item: dict[str, Any], index: int) -> str:
+    raw_id = item.get("id")
+    if raw_id is None or not str(raw_id).strip():
+        return f"item-{index:03d}"
+    return str(raw_id)
+
+
+def triage(
+    items: list[dict[str, Any]],
+    registry: dict[str, Any] | None = None,
+    policy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     result: list[dict[str, Any]] = []
     counts = {route: 0 for route in ROUTES}
+    seen_ids: set[str] = set()
     for index, item in enumerate(items, start=1):
         if not isinstance(item, dict):
             raise ValueError(f"item {index} must be an object")
+        identifier = _identifier(item, index)
+        if identifier in seen_ids:
+            raise ValueError(f"duplicate item id: {identifier}")
+        seen_ids.add(identifier)
         route, reason = classify(item)
+        destination = ROUTE_DETAILS[route]["destination"]
+        if registry is not None:
+            destination = resolve_route_destination(registry, route, _tags(item))
+            if destination is None and route != "review":
+                reason = f"route '{route}' has no registered destination; manual review is required"
+                route = "review"
+                destination = resolve_route_destination(registry, route, _tags(item))
+            if destination is None:
+                destination = "inbox/"
+        details = ROUTE_DETAILS[route]
+        authorization_action = "archive_records" if route == "archive" else "create_records"
+        delegated = (
+            route != "review"
+            and policy_allows(policy, authorization_action, destination)
+        )
+        confidence = (
+            "low"
+            if route == "review"
+            else "high"
+            if reason == "preserved explicit route"
+            else "medium"
+        )
         record = {
-            "id": str(item.get("id") or f"item-{index:03d}"),
+            "id": identifier,
             "title": str(item.get("title") or item.get("subject") or "Untitled item"),
             "route": route,
+            "destination": destination,
             "reason": reason,
-            "next_step": {
-                "task": "Define one concrete next action.",
-                "decision": "Record options, constraints, and evidence.",
-                "idea": "Capture why it matters and one small experiment.",
-                "research": "Record the question and the sources to inspect.",
-                "archive": "Keep the record only if it may be useful later.",
-            }[route],
+            "confidence": confidence,
+            "needs_review": route == "review" or "manual review is required" in reason,
+            "delegation_available": delegated,
+            "authorization_action": authorization_action,
+            "approval_required": not delegated,
+            "approval_state": "delegated" if delegated else "pending",
+            "authorization": "standing-delegation" if delegated else "pending",
+            "next_step": details["next_step"],
         }
         result.append(record)
         counts[route] += 1
@@ -88,18 +190,90 @@ def self_test() -> None:
         [
             {"id": "a", "title": "Decide which option fits", "content": "Compare two paths."},
             {"id": "b", "title": "Follow up on the draft"},
+            {"id": "b2", "title": "I should follow up on the draft"},
             {"id": "c", "title": "Interesting reading", "type": "research"},
             {"id": "d", "title": "A quiet note"},
+            {"id": "e", "title": "Dentist appointment", "type": "event"},
+            {"id": "f", "title": "Timezone preference", "type": "claim"},
+            {"id": "g", "title": "Old reference", "route": "archive"},
+            {"id": "h", "title": "Unclear note", "type": "message"},
         ]
     )
-    assert [item["route"] for item in output["items"]] == ["decision", "task", "research", "archive"]
-    assert output["counts"]["task"] == 1
+    assert [item["route"] for item in output["items"]] == [
+        "decision",
+        "task",
+        "task",
+        "research",
+        "review",
+        "event",
+        "claim",
+        "archive",
+        "review",
+    ]
+    assert output["counts"]["task"] == 2
+    assert output["items"][3]["confidence"] == "high"
+    assert output["items"][3]["approval_state"] == "pending"
+    assert output["items"][5]["destination"] == "calendar/"
+    assert output["items"][6]["destination"] == "knowledge/claims/"
+    assert output["items"][4]["needs_review"] is True
+    assert output["items"][8]["needs_review"] is True
+
+    delegated = triage(
+        [{"id": "task", "title": "Follow up on the draft"}],
+        policy={
+            "delegation": {
+                "workspace": {
+                    "enabled": True,
+                    "allowed_actions": ["create_records"],
+                    "allowed_domains": ["tasks"],
+                }
+            }
+        },
+    )
+    assert delegated["items"][0]["delegation_available"] is True
+    assert delegated["items"][0]["approval_required"] is False
+    assert delegated["items"][0]["authorization"] == "standing-delegation"
+
+    registry = {
+        "domains": [
+            {"path": "inbox", "kind": "core", "route": "review", "tags": []},
+            {"path": "ideas", "kind": "core", "route": "idea", "tags": []},
+            {
+                "path": "travel/ideas",
+                "kind": "extension",
+                "route": "idea",
+                "tags": ["travel"],
+                "lifecycle": "idea -> trip or archive",
+            },
+        ]
+    }
+    registered = triage(
+        [
+            {"id": "travel", "title": "Summer trip idea", "type": "idea", "tags": ["travel"]},
+            {"id": "generic", "title": "Product idea", "type": "idea"},
+        ],
+        registry,
+    )
+    assert registered["items"][0]["destination"] == "travel/ideas"
+    assert registered["items"][1]["destination"] == "ideas"
+
+    try:
+        triage([{"id": "same"}, {"id": "same"}])
+    except ValueError as exc:
+        assert str(exc) == "duplicate item id: same"
+    else:
+        raise AssertionError("duplicate IDs must be rejected")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", nargs="?", type=Path, help="JSON file containing inbox items")
-    parser.add_argument("--output", type=Path, help="Write JSON output to this existing directory")
+    parser.add_argument(
+        "--workspace-root",
+        type=Path,
+        help="Workspace root containing workspace.yaml and assistant-policy.yaml; legacy routes and no standing delegation are used when omitted",
+    )
+    parser.add_argument("--output", type=Path, help="Write JSON output to this file")
     parser.add_argument("--self-test", action="store_true", help="Run the built-in deterministic test")
     args = parser.parse_args(argv)
     if args.self_test:
@@ -109,7 +283,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.input is None:
         parser.error("input is required unless --self-test is used")
     try:
-        payload = triage(load_items(args.input))
+        registry = load_registry(args.workspace_root) if args.workspace_root else None
+        policy = load_policy(args.workspace_root, registry=registry) if args.workspace_root else None
+        payload = triage(load_items(args.input), registry, policy)
         rendered = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
         if args.output:
             args.output.write_text(rendered, encoding="utf-8")

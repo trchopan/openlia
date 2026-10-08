@@ -1,27 +1,27 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode, RefObject } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { FrontmatterBlock } from "./FrontmatterBlock";
-import { parseMarkdownFrontmatter } from "./frontmatter";
-import {
-  isChatgptExportPath,
-  parseChatgptExport,
-  presentationContent,
-  type ChatExport,
-} from "./chatgpt";
-import { ActivitySection } from "./ActivitySection";
 import type {
   WorkspaceActivityResponse,
+  WorkspaceDiagnosticsResponse,
   WorkspaceFile,
   WorkspaceGitStatus,
   WorkspaceTreeEntry,
 } from "../shared/api";
+import { ActivitySection } from "./ActivitySection";
+import { CodeEditor, isMarkdownPath } from "./CodeEditor";
+import { FrontmatterBlock } from "./FrontmatterBlock";
+import { parseMarkdownFrontmatter } from "./frontmatter";
+import { extractOriginalMessage } from "./markdown";
 import {
   buildCanonicalWorkspaceUri,
   buildWorkspaceLink,
   copyToClipboard,
 } from "./openliaLinks";
+
+export { MoveFileDialog } from "./MoveFileDialog";
+export { RenameFileDialog } from "./RenameFileDialog";
 
 export type WorkspaceView = "edit" | "preview" | "info";
 
@@ -395,6 +395,9 @@ export function FileNavigator({
   onFilterChange,
   onOpenFile,
   onOpenActivity,
+  onRenameFile,
+  onMoveFile,
+  onDeleteFile,
   onRetry,
   revealToken = 0,
   selectedPath,
@@ -409,6 +412,9 @@ export function FileNavigator({
   onFilterChange: (value: string) => void;
   onOpenFile: (path: string) => void;
   onOpenActivity?: (() => void) | undefined;
+  onRenameFile?: ((path: string) => void) | undefined;
+  onMoveFile?: ((path: string) => void) | undefined;
+  onDeleteFile?: ((path: string) => void) | undefined;
   onRetry: () => void;
   revealToken?: number | undefined;
   selectedPath: string | undefined;
@@ -564,26 +570,112 @@ export function FileNavigator({
                   )}
                 </>
               ) : (
-                <button
-                  ref={(el) => {
-                    if (el) {
-                      fileButtonRefs.current.set(node.path, el);
-                    } else {
-                      fileButtonRefs.current.delete(node.path);
+                <div className="group relative flex items-center">
+                  <button
+                    ref={(el) => {
+                      if (el) {
+                        fileButtonRefs.current.set(node.path, el);
+                      } else {
+                        fileButtonRefs.current.delete(node.path);
+                      }
+                    }}
+                    aria-current={
+                      selectedPath === node.path ? "page" : undefined
                     }
-                  }}
-                  aria-current={selectedPath === node.path ? "page" : undefined}
-                  className={`workspace-tree-row workspace-tree-file ${selectedPath === node.path ? "workspace-tree-file-selected" : ""} ${highlightedPath === node.path ? "workspace-tree-file-highlight" : ""}`}
-                  onClick={() => onOpenFile(node.path)}
-                  style={{ paddingInlineStart: `${depth * 12 + 28}px` }}
-                  title={node.path}
-                  type="button"
-                >
-                  <span className="min-w-0 truncate">{node.name}</span>
-                  {!node.editable && (
-                    <span className="text-[10px]">Read only</span>
+                    className={`workspace-tree-row workspace-tree-file flex-1 pr-7 ${selectedPath === node.path ? "workspace-tree-file-selected" : ""} ${highlightedPath === node.path ? "workspace-tree-file-highlight" : ""}`}
+                    onClick={() => onOpenFile(node.path)}
+                    style={{ paddingInlineStart: `${depth * 12 + 28}px` }}
+                    title={node.path}
+                    type="button"
+                  >
+                    <span className="min-w-0 truncate">{node.name}</span>
+                    {!node.editable && (
+                      <span className="text-[10px]">Read only</span>
+                    )}
+                  </button>
+                  {(onRenameFile || onMoveFile || onDeleteFile) && (
+                    <div className="dropdown dropdown-end absolute right-1 z-10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <button
+                        aria-label={`Actions for ${node.name}`}
+                        className="btn btn-ghost btn-xs btn-square h-5 w-5 text-base-content/60 hover:text-base-content"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                        }}
+                        type="button"
+                      >
+                        <svg
+                          className="h-3 w-3"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <title>More file actions</title>
+                          <circle cx="12" cy="5" r="2" />
+                          <circle cx="12" cy="12" r="2" />
+                          <circle cx="12" cy="19" r="2" />
+                        </svg>
+                      </button>
+                      <ul className="dropdown-content menu z-30 rounded-box border border-base-content/10 bg-base-100 p-1 shadow-lg text-xs w-36">
+                        {onRenameFile && node.editable && (
+                          <li>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                (document.activeElement as HTMLElement)?.blur();
+                                onRenameFile(node.path);
+                              }}
+                              type="button"
+                            >
+                              Rename...
+                            </button>
+                          </li>
+                        )}
+                        {onMoveFile && node.editable && (
+                          <li>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                (document.activeElement as HTMLElement)?.blur();
+                                onMoveFile(node.path);
+                              }}
+                              type="button"
+                            >
+                              Move...
+                            </button>
+                          </li>
+                        )}
+                        <li>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              (document.activeElement as HTMLElement)?.blur();
+                              void copyToClipboard(
+                                buildWorkspaceLink(node.path),
+                              );
+                            }}
+                            type="button"
+                          >
+                            Copy Link
+                          </button>
+                        </li>
+                        {onDeleteFile && node.editable && (
+                          <li>
+                            <button
+                              className="text-error"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                (document.activeElement as HTMLElement)?.blur();
+                                onDeleteFile(node.path);
+                              }}
+                              type="button"
+                            >
+                              Delete...
+                            </button>
+                          </li>
+                        )}
+                      </ul>
+                    </div>
                   )}
-                </button>
+                </div>
               )}
             </li>
           );
@@ -759,9 +851,14 @@ export function MarkdownPreview({
   currentFilePath?: string | undefined;
   onNavigateLink?: ((href: string) => void) | undefined;
 }) {
-  const { frontmatter, rawYaml, body } = useMemo(
-    () => parseMarkdownFrontmatter(content),
-    [content],
+  const {
+    frontmatter,
+    rawYaml,
+    body: markdownBody,
+  } = useMemo(() => parseMarkdownFrontmatter(content), [content]);
+  const { body, originalMessage } = useMemo(
+    () => extractOriginalMessage(markdownBody),
+    [markdownBody],
   );
 
   const customComponents = useMemo(() => {
@@ -833,133 +930,34 @@ export function MarkdownPreview({
       {frontmatter && rawYaml && (
         <FrontmatterBlock data={frontmatter} rawYaml={rawYaml} />
       )}
-      <ReactMarkdown
-        components={customComponents}
-        remarkPlugins={[remarkGfm]}
-        urlTransform={transformMarkdownUrl}
-      >
-        {body}
-      </ReactMarkdown>
-    </article>
-  );
-}
-
-function chatRole(role: string): "assistant" | "other" | "user" {
-  if (role === "assistant") return "assistant";
-  if (role === "user") return "user";
-  return "other";
-}
-
-function ChatMetadata({ chat }: { chat: ChatExport }) {
-  const { session } = chat;
-  const startedAt = session.startedAt ? new Date(session.startedAt) : null;
-  const validStartedAt = startedAt && !Number.isNaN(startedAt.valueOf());
-  return (
-    <header className="workspace-chat-header">
-      <p className="workspace-eyebrow">CHATGPT / TEMPORARY CHAT</p>
-      <h2 className="mt-2 text-2xl font-bold tracking-tight">
-        {session.topic ?? "ChatGPT conversation"}
-      </h2>
-      <dl className="workspace-chat-meta mt-4">
-        {session.model && (
-          <div>
-            <dt>Model</dt>
-            <dd>{session.model}</dd>
+      {body && (
+        <ReactMarkdown
+          components={customComponents}
+          remarkPlugins={[remarkGfm]}
+          urlTransform={transformMarkdownUrl}
+        >
+          {body}
+        </ReactMarkdown>
+      )}
+      {originalMessage !== null && (
+        <section
+          aria-label="Original message"
+          className="workspace-original-message"
+        >
+          <h2 className="workspace-original-message-heading">
+            Original message
+          </h2>
+          <div className="workspace-original-message-content">
+            <ReactMarkdown
+              components={customComponents}
+              remarkPlugins={[remarkGfm]}
+              urlTransform={transformMarkdownUrl}
+            >
+              {originalMessage}
+            </ReactMarkdown>
           </div>
-        )}
-        <div>
-          <dt>Messages</dt>
-          <dd>{chat.messages.length}</dd>
-        </div>
-        {validStartedAt && session.startedAt && (
-          <div>
-            <dt>Started</dt>
-            <dd>
-              <time dateTime={session.startedAt}>
-                {startedAt.toLocaleString()}
-              </time>
-            </dd>
-          </div>
-        )}
-      </dl>
-      <p className="workspace-chat-privacy" role="status">
-        This conversation is saved locally in the workspace.
-      </p>
-    </header>
-  );
-}
-
-function ChatReferences({ chat }: { chat: ChatExport }) {
-  if (chat.references.length === 0) return null;
-  return (
-    <section
-      aria-labelledby="workspace-chat-sources"
-      className="workspace-chat-sources"
-    >
-      <div className="mb-3">
-        <p className="workspace-eyebrow">REFERENCES</p>
-        <h3 className="mt-1 text-xl font-bold" id="workspace-chat-sources">
-          Sources ({chat.references.length})
-        </h3>
-      </div>
-      <ol className="workspace-chat-source-list">
-        {chat.references.map((reference) => (
-          <li key={reference.url}>
-            <a href={reference.url} rel="noreferrer noopener" target="_blank">
-              <span className="font-semibold">{reference.title}</span>
-              <span className="workspace-chat-source-domain">
-                {reference.domain}
-              </span>
-            </a>
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
-
-function RawChatPreview({ content }: { content: string }) {
-  return (
-    <article aria-label="Raw chat export" className="workspace-raw-document">
-      <div className="alert alert-warning mb-4 rounded-lg">
-        This ChatGPT export could not be parsed. The original YAML is shown
-        unchanged.
-      </div>
-      <pre>{content}</pre>
-    </article>
-  );
-}
-
-export function ChatgptPreview({
-  content,
-  onNavigateLink,
-}: {
-  content: string;
-  onNavigateLink?: ((href: string) => void) | undefined;
-}) {
-  const chat = parseChatgptExport(content);
-  if (!chat) return <RawChatPreview content={content} />;
-  return (
-    <article
-      aria-label="ChatGPT conversation"
-      className="workspace-chat-preview"
-    >
-      <ChatMetadata chat={chat} />
-      <div className="workspace-chat-messages">
-        {chat.messages.map((message) => (
-          <section
-            className={`workspace-chat-message workspace-chat-message-${chatRole(message.role)}`}
-            key={`${message.turn ?? "message"}-${message.role}-${message.content.slice(0, 80)}`}
-          >
-            <div className="workspace-chat-message-label">{message.role}</div>
-            <MarkdownPreview
-              content={presentationContent(message.content)}
-              onNavigateLink={onNavigateLink}
-            />
-          </section>
-        ))}
-      </div>
-      <ChatReferences chat={chat} />
+        </section>
+      )}
     </article>
   );
 }
@@ -1053,6 +1051,36 @@ export function DocumentInspector({
               </dd>
             </div>
           </dl>
+          {file.validation && (
+            <div className="mt-4 rounded-lg border border-base-content/10 bg-base-200/40 p-3 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wide text-base-content/60">
+                  Template & Schema
+                </span>
+                <span
+                  className={`badge badge-xs font-mono ${
+                    file.validation.valid ? "badge-success" : "badge-warning"
+                  }`}
+                >
+                  {file.validation.valid ? "Conforming" : "Issues Found"}
+                </span>
+              </div>
+              {file.validation.schema_path && (
+                <p className="text-[11px] font-mono text-base-content/60 truncate">
+                  Schema: {file.validation.schema_path}
+                </p>
+              )}
+              {!file.validation.valid && file.validation.errors.length > 0 && (
+                <ul className="list-disc list-inside text-xs text-warning space-y-1 pt-1">
+                  {file.validation.errors.map((err) => (
+                    <li key={err} className="break-words">
+                      {err}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           <div className="mt-8">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-base-content/50">
@@ -1114,12 +1142,11 @@ function EditorPane({
   return (
     <section aria-label="Editor" className="workspace-editor-pane">
       <div className="workspace-pane-label">Editor</div>
-      <textarea
-        aria-label="Document editor"
-        className="workspace-editor"
-        disabled={!file.editable || fileLoading}
-        onChange={(event) => onDraftChange(event.target.value)}
-        spellCheck={false}
+      <CodeEditor
+        className="min-h-0 flex-1"
+        filePath={file.path}
+        onChange={onDraftChange}
+        readOnly={!file.editable || fileLoading}
         value={draft}
       />
     </section>
@@ -1138,7 +1165,9 @@ export function DocumentPane({
   onDelete,
   onDownload,
   onDraftChange,
+  onMove,
   onOpenDetails,
+  onRename,
   onRevealInTree,
   onRetry,
   onSave,
@@ -1149,6 +1178,8 @@ export function DocumentPane({
   onNavigateLink,
   activity,
   activityLoading,
+  diagnostics,
+  diagnosticsLoading,
   onOpenFile,
   onRefreshActivity,
 }: {
@@ -1163,7 +1194,9 @@ export function DocumentPane({
   onDelete: () => void;
   onDownload: () => void;
   onDraftChange: (value: string) => void;
+  onMove?: (() => void) | undefined;
   onOpenDetails: () => void;
+  onRename?: (() => void) | undefined;
   onRevealInTree?: (() => void) | undefined;
   onRetry: () => void;
   onSave: () => void;
@@ -1174,12 +1207,14 @@ export function DocumentPane({
   onNavigateLink?: ((href: string) => void) | undefined;
   activity?: WorkspaceActivityResponse | null | undefined;
   activityLoading?: boolean | undefined;
+  diagnostics?: WorkspaceDiagnosticsResponse | null | undefined;
+  diagnosticsLoading?: boolean | undefined;
   onOpenFile?: ((path: string) => void) | undefined;
   onRefreshActivity?: (() => void) | undefined;
 }) {
   const dirty = file !== null && file.content !== draft;
   const canEdit = Boolean(file?.editable);
-  const isChatExport = file !== null && isChatgptExportPath(file.path);
+  const isMarkdown = file !== null && isMarkdownPath(file.path);
 
   return (
     <section aria-label="Document workspace" className="workspace-document">
@@ -1199,18 +1234,10 @@ export function DocumentPane({
                   title={`Copy link: ${buildWorkspaceLink(file.path)}`}
                 />
               </div>
-              {!canEdit && (
-                <p className="text-xs text-warning">
-                  {isChatExport ? "Read-only chat export" : "Read only"}
-                </p>
-              )}
+              {!canEdit && <p className="text-xs text-warning">Read only</p>}
             </div>
             <div aria-label="Document view" className="join" role="toolbar">
-              {isChatExport ? (
-                <span className="btn btn-xs btn-primary pointer-events-none">
-                  Conversation
-                </span>
-              ) : (
+              {isMarkdown ? (
                 <>
                   <ModeButton
                     active={view === "preview"}
@@ -1227,18 +1254,20 @@ export function DocumentPane({
                     Edit
                   </ModeButton>
                 </>
+              ) : (
+                <span className="btn btn-xs btn-primary pointer-events-none">
+                  Code
+                </span>
               )}
             </div>
-            {!isChatExport && (
-              <button
-                className="btn btn-primary btn-sm shrink-0"
-                disabled={!canEdit || !dirty || saving}
-                onClick={onSave}
-                type="button"
-              >
-                {saving ? "Saving..." : dirty ? "Save" : "Saved"}
-              </button>
-            )}
+            <button
+              className="btn btn-primary btn-sm shrink-0"
+              disabled={!canEdit || !dirty || saving}
+              onClick={onSave}
+              type="button"
+            >
+              {saving ? "Saving..." : dirty ? "Save" : "Saved"}
+            </button>
             {/* Desktop actions */}
             <div className="hidden sm:flex shrink-0 items-center gap-2">
               {onRevealInTree && (
@@ -1352,6 +1381,20 @@ export function DocumentPane({
                       Copy URI
                     </button>
                   </li>
+                  {onRename && file.editable && (
+                    <li>
+                      <button onClick={onRename} type="button">
+                        Rename...
+                      </button>
+                    </li>
+                  )}
+                  {onMove && file.editable && (
+                    <li>
+                      <button onClick={onMove} type="button">
+                        Move...
+                      </button>
+                    </li>
+                  )}
                   <li>
                     <button onClick={onOpenDetails} type="button">
                       {detailsOpen ? "Hide Details" : "Show Details"}
@@ -1390,6 +1433,42 @@ export function DocumentPane({
               </div>
             </div>
           )}
+          {file.validation && !file.validation.valid && (
+            <div
+              className="alert alert-warning rounded-none py-2 px-4 text-xs flex items-start gap-2"
+              role="status"
+            >
+              <svg
+                className="h-4 w-4 shrink-0 text-warning mt-0.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+              >
+                <title>Validation warning</title>
+                <path
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">
+                  Template & Schema Warning
+                  {file.validation.schema_path && (
+                    <span className="font-normal font-mono opacity-80 ml-1">
+                      ({file.validation.schema_path})
+                    </span>
+                  )}
+                </p>
+                <ul className="list-disc list-inside mt-1 space-y-0.5 opacity-90">
+                  {file.validation.errors.map((err) => (
+                    <li key={err}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
           {documentError && (
             <div className="alert alert-error rounded-none" role="alert">
               <span>{documentError}</span>
@@ -1404,14 +1483,13 @@ export function DocumentPane({
           )}
           {view === "info" ? (
             <DocumentInspector diff={diff} draft={draft} file={file} />
-          ) : isChatExport ? (
-            <section
-              aria-label="Conversation"
-              className="workspace-preview-pane"
-            >
-              <div className="workspace-pane-label">Conversation</div>
-              <ChatgptPreview content={draft} onNavigateLink={onNavigateLink} />
-            </section>
+          ) : !isMarkdown ? (
+            <EditorPane
+              draft={draft}
+              file={file}
+              fileLoading={fileLoading}
+              onDraftChange={onDraftChange}
+            />
           ) : view === "edit" ? (
             <EditorPane
               draft={draft}
@@ -1448,6 +1526,8 @@ export function DocumentPane({
       ) : (
         <ActivitySection
           activity={activity ?? null}
+          diagnostics={diagnostics ?? null}
+          diagnosticsLoading={diagnosticsLoading ?? false}
           loading={activityLoading ?? false}
           onOpenFile={onOpenFile ?? (() => {})}
           onRefresh={onRefreshActivity}
