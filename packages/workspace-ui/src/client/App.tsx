@@ -17,17 +17,9 @@ import type {
   WorkspaceGitStatus,
   WorkspaceTreeEntry,
 } from "../shared/api";
-import { CreateSkillModal } from "./CreateSkillModal";
-import { GoToModal } from "./GoToModal";
-import { SkillDetailPane, type SkillSubTab } from "./SkillDetailPane";
-import { SkillsNavigator } from "./SkillsNavigator";
 import { ApiError, httpWorkspaceApi, type WorkspaceApi } from "./api";
-import { isChatgptExportPath } from "./chatgpt";
-import {
-  buildSkillLink,
-  buildWorkspaceLink,
-  resolveLinkTarget,
-} from "./openliaLinks";
+import { isMarkdownPath } from "./CodeEditor";
+import { CreateSkillModal } from "./CreateSkillModal";
 import {
   DeleteFileDialog,
   DirtyDraftDialog,
@@ -39,19 +31,36 @@ import {
   WorkspaceHeader,
   type WorkspaceView,
 } from "./components";
+import { GoToModal } from "./GoToModal";
 import { diffLines } from "./markdown";
+import {
+  buildSkillLink,
+  buildWorkspaceLink,
+  resolveLinkTarget,
+} from "./openliaLinks";
 import { type MainTab, navigateRoute, parseRoute } from "./route";
+import { SkillDetailPane, type SkillSubTab } from "./SkillDetailPane";
+import { SkillsNavigator } from "./SkillsNavigator";
 import "./styles.css";
 
 type PendingAction =
-  | { kind: "open"; path: string }
+  | { kind: "open"; path: string; view?: WorkspaceView | undefined }
   | { kind: "openSkill"; id: string; skillFile?: string | undefined }
   | { kind: "switchTab"; tab: MainTab }
   | { kind: "signout" }
   | null;
 
-function defaultView(): WorkspaceView {
-  return "preview";
+function defaultView(path?: string): WorkspaceView {
+  return path && !isMarkdownPath(path) ? "edit" : "preview";
+}
+
+function viewForPath(
+  path: string | undefined,
+  requested: WorkspaceView | undefined,
+): WorkspaceView {
+  if (requested === "info") return "info";
+  if (path && !isMarkdownPath(path)) return "edit";
+  return requested ?? defaultView(path);
 }
 
 function areTreesEqual(
@@ -275,8 +284,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   const [detailsOpen, setDetailsOpen] = useState(
     () => initialRoute.current.view === "info",
   );
-  const [view, setView] = useState<WorkspaceView>(
-    () => initialRoute.current.view ?? defaultView(),
+  const [view, setView] = useState<WorkspaceView>(() =>
+    viewForPath(initialRoute.current.path, initialRoute.current.view),
   );
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [pendingDelete, setPendingDelete] = useState<{
@@ -410,7 +419,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             }
           } else if (route.path) {
             void appStateRef.current.openFile(route.path, {
-              keepView: Boolean(route.view),
+              requestedView: route.view,
               replaceHistory: true,
             });
           }
@@ -607,7 +616,11 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             skillFile: route.skillFile,
           });
         } else {
-          setPendingAction({ kind: "open", path: route.path ?? "" });
+          setPendingAction({
+            kind: "open",
+            path: route.path ?? "",
+            view: route.view,
+          });
         }
         return;
       }
@@ -619,8 +632,9 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       }
 
       if (route.view) {
-        setView(route.view);
-        if (route.view === "info") setDetailsOpen(true);
+        const nextView = viewForPath(route.path ?? file?.path, route.view);
+        setView(nextView);
+        if (nextView === "info") setDetailsOpen(true);
       }
 
       if (route.tab === "skills" || route.skill) {
@@ -631,7 +645,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       } else if (route.path) {
         if (route.path !== file?.path) {
           void openFile(route.path, {
-            keepView: Boolean(route.view),
+            requestedView: route.view,
             replaceHistory: true,
           });
         }
@@ -719,7 +733,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           }
         } else if (route.path) {
           void openFile(route.path, {
-            keepView: Boolean(route.view),
+            requestedView: route.view,
             replaceHistory: true,
           });
         }
@@ -813,7 +827,10 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
   async function openFile(
     path: string,
-    options?: { keepView?: boolean; replaceHistory?: boolean },
+    options?: {
+      replaceHistory?: boolean;
+      requestedView?: WorkspaceView | undefined;
+    },
   ) {
     const requestSequence = ++fileRequestSequence.current;
     setFileLoading(true);
@@ -825,17 +842,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       setFile(response);
       setDraft(response.content);
       setFilesOpen(false);
-      let nextView = view;
-      if (
-        isChatgptExportPath(path) &&
-        !(options?.keepView && view === "info")
-      ) {
-        nextView = "preview";
-        setView(nextView);
-      } else if (!options?.keepView) {
-        nextView = defaultView();
-        setView(nextView);
-      }
+      const nextView = viewForPath(path, options?.requestedView);
+      setView(nextView);
       const currentRoute =
         typeof window !== "undefined" ? parseRoute(window.location) : {};
       navigateRoute(
@@ -890,7 +898,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       return;
     }
     if (dirty) setPendingAction({ kind: "open", path });
-    else void openFile(path, { keepView: true });
+    else void openFile(path);
   }
 
   async function openSkill(id: string, skillFilePath = "SKILL.md") {
@@ -1121,7 +1129,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       const oldPath = pendingRename.path;
       setPendingRename(null);
       if (file?.path === oldPath) {
-        await openFile(res.path, { keepView: true, replaceHistory: true });
+        await openFile(res.path, { replaceHistory: true });
       }
       const [treeRes, nextGit, nextActivity, nextDiag] = await Promise.all([
         api.loadTree().catch(() => null),
@@ -1186,7 +1194,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       const oldPath = pendingMove.path;
       setPendingMove(null);
       if (file?.path === oldPath) {
-        await openFile(res.path, { keepView: true, replaceHistory: true });
+        await openFile(res.path, { replaceHistory: true });
       }
       const [treeRes, nextGit, nextActivity, nextDiag] = await Promise.all([
         api.loadTree().catch(() => null),
@@ -1319,7 +1327,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
     if (action.kind === "open") {
       if (action.path) {
-        void openFile(action.path, { keepView: true });
+        void openFile(action.path, { requestedView: action.view });
       } else {
         setFile(null);
         setDraft("");
@@ -1348,7 +1356,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
     if (action.kind === "open") {
       if (action.path) {
-        void openFile(action.path, { keepView: true });
+        void openFile(action.path, { requestedView: action.view });
       } else {
         setFile(null);
         setDraft("");
@@ -1382,8 +1390,9 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   }
 
   function handleViewChange(nextView: WorkspaceView) {
-    setView(nextView);
-    if (nextView === "info") setDetailsOpen(true);
+    const normalizedView = viewForPath(file?.path, nextView);
+    setView(normalizedView);
+    if (normalizedView === "info") setDetailsOpen(true);
     const currentRoute =
       typeof window !== "undefined" ? parseRoute(window.location) : {};
     navigateRoute(
@@ -1392,7 +1401,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         path: file?.path,
         scenario: currentRoute.scenario,
         tab: activeTab,
-        view: nextView,
+        view: normalizedView,
       },
       { replace: true },
     );
@@ -1406,10 +1415,10 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       typeof window !== "undefined" &&
       !window.matchMedia("(min-width: 1280px)").matches
     ) {
-      nextView = nextOpen ? "info" : defaultView();
+      nextView = nextOpen ? "info" : defaultView(file?.path);
       setView(nextView);
     } else if (!nextOpen && view === "info") {
-      nextView = defaultView();
+      nextView = defaultView(file?.path);
       setView(nextView);
     }
     const currentRoute =
@@ -1577,7 +1586,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
                 (typeof window !== "undefined"
                   ? parseRoute(window.location).path
                   : undefined);
-              if (pathToRetry) void openFile(pathToRetry, { keepView: true });
+              if (pathToRetry)
+                void openFile(pathToRetry, { requestedView: view });
             }}
             onSave={() => void save()}
             onViewChange={handleViewChange}

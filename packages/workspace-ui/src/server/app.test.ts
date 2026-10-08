@@ -44,6 +44,9 @@ describe("workspace HTTP handler", () => {
     expect(response.headers.get("content-security-policy")).toContain(
       "script-src 'self'",
     );
+    expect(response.headers.get("content-security-policy")).toContain(
+      "img-src 'self' data: blob:",
+    );
   });
 
   test("lists files while excluding protected paths and symlinks", async () => {
@@ -97,7 +100,7 @@ describe("workspace HTTP handler", () => {
     }
   });
 
-  test("exposes ChatGPT exports as read-only documents", async () => {
+  test("exposes YAML files as editable documents", async () => {
     const chatPath = join(root, "knowledge", "chatgpt");
     const content = "schema: 1\nsession:\n  platform: chatgpt\n";
     mkdirSync(chatPath, { recursive: true });
@@ -110,7 +113,7 @@ describe("workspace HTTP handler", () => {
     expect(tree.entries).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          editable: false,
+          editable: true,
           kind: "file",
           path: "knowledge/chatgpt/export.yaml",
         }),
@@ -124,7 +127,7 @@ describe("workspace HTTP handler", () => {
       editable: boolean;
       content: string;
     };
-    expect(document).toMatchObject({ content, editable: false });
+    expect(document).toMatchObject({ content, editable: true });
 
     const writeBody = JSON.stringify({
       content,
@@ -136,8 +139,11 @@ describe("workspace HTTP handler", () => {
       headers: { "Content-Type": "application/json" },
       method: "PUT",
     });
-    expect(writeResponse.status).toBe(403);
-    expect(await writeResponse.json()).toMatchObject({ error: "read_only" });
+    expect(writeResponse.status).toBe(200);
+    expect(await writeResponse.json()).toMatchObject({
+      editable: true,
+      ok: true,
+    });
   });
 
   test("reads, writes, and rejects stale revisions", async () => {
@@ -434,7 +440,10 @@ describe("workspace HTTP handler", () => {
   test("serves the Vite index and assets without exposing other files", async () => {
     const staticRoot = join(root, "static");
     mkdirSync(join(staticRoot, "assets"), { recursive: true });
-    writeFileSync(join(staticRoot, "index.html"), "<!doctype html>");
+    writeFileSync(
+      join(staticRoot, "index.html"),
+      '<!doctype html><meta name="csp-nonce" content="__OPENLIA_CSP_NONCE__">',
+    );
     writeFileSync(join(staticRoot, "assets", "app.js"), "console.log('ok')");
     const staticHandler = createWorkspaceHandler({
       staticRoot,
@@ -450,6 +459,12 @@ describe("workspace HTTP handler", () => {
     );
 
     expect(index.status).toBe(200);
+    const indexBody = await index.text();
+    const indexCsp = index.headers.get("content-security-policy") ?? "";
+    const nonce = indexCsp.match(/style-src 'self' 'nonce-([^']+)'/)?.[1];
+    expect(nonce).toBeTruthy();
+    expect(indexBody).toContain(`content="${nonce}">`);
+    expect(indexBody).not.toContain("__OPENLIA_CSP_NONCE__");
     expect(asset.headers.get("content-type")).toBe(
       "text/javascript; charset=utf-8",
     );

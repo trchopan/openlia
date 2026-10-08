@@ -8,7 +8,6 @@ import {
 import { describe, expect, test } from "vitest";
 import type { WorkspaceTreeEntry } from "../shared/api";
 import {
-  ChatgptPreview,
   CopyLinkButton,
   DeleteFileDialog,
   DocumentInspector,
@@ -96,55 +95,48 @@ The **original** message.
     expect(container.querySelector("script")).toBeNull();
   });
 
-  test("renders a ChatGPT export as a conversation with sources", () => {
+  test("renders non-Markdown documents in the code editor", () => {
+    let changed = "";
     render(
-      <ChatgptPreview
-        content={`schema: 1
-session:
-  platform: chatgpt
-  topic: Preview topic
-  model: ChatGPT
-messages:
-  - role: user
-    content: What happened?
-  - role: assistant
-    content: |
-      # The answer
-
-      It is documented.
-references:
-  - id: ref-1
-    title: Documentation
-    url: https://openlia.example/docs
-`}
+      <DocumentPane
+        conflict=""
+        deleting={false}
+        diff={[]}
+        documentError=""
+        draft="enabled: true"
+        file={{
+          content: "enabled: true",
+          editable: true,
+          modified_at: "2026-09-22T00:00:00.000Z",
+          path: "workspace.yaml",
+          revision: "rev1",
+          schema: 1,
+          size: 13,
+        }}
+        fileLoading={false}
+        onCloseFiles={() => undefined}
+        onDelete={() => undefined}
+        onDownload={() => undefined}
+        onDraftChange={(value) => {
+          changed = value;
+        }}
+        onOpenDetails={() => undefined}
+        onRetry={() => undefined}
+        onSave={() => undefined}
+        onViewChange={() => undefined}
+        saving={false}
+        view="preview"
       />,
     );
 
-    expect(
-      screen.getByRole("article", { name: "ChatGPT conversation" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Preview topic" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "The answer" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Sources (1)" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Documentation/ })).toHaveAttribute(
-      "href",
-      "https://openlia.example/docs",
-    );
-  });
-
-  test("falls back to raw YAML when a ChatGPT export is invalid", () => {
-    render(<ChatgptPreview content="schema: [invalid" />);
-
-    expect(
-      screen.getByRole("article", { name: "Raw chat export" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/could not be parsed/)).toBeInTheDocument();
+    expect(screen.getByText("Code")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    const editor = screen.getByRole("textbox", { name: "Code editor" });
+    expect(editor).toHaveTextContent("enabled: true");
+    editor.textContent = "enabled: false";
+    fireEvent.input(editor, { bubbles: true, inputType: "insertText" });
+    expect(changed).toBe("enabled: false");
   });
 
   test("sorts folders and files naturally while keeping empty folders visible", () => {

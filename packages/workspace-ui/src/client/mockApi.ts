@@ -72,6 +72,10 @@ export function createMockWorkspaceApi({
       ),
       kind: "file",
     },
+    {
+      ...metadata("workspace.yaml", "domains:\n  - inbox\n"),
+      kind: "file",
+    },
     { kind: "directory", path: "projects" },
     {
       ...metadata("projects/project.md", "# Project\n\nA sample project.\n"),
@@ -88,12 +92,14 @@ export function createMockWorkspaceApi({
   const fileContents: Record<string, string> = {
     "calendar/event.md":
       "# Calendar event\n\nA sample event for UI development.\n",
+    "workspace.yaml": "domains:\n  - inbox\n",
     "projects/project.md": "# Project\n\nA sample project.\n",
     "tasks/task.md": "# Task\n\nA sample task.\n",
     [path]: content,
   };
   const fileRevisions: Record<string, string> = {
     "calendar/event.md": "sha256:mock-calendar",
+    "workspace.yaml": "sha256:mock-workspace",
     "projects/project.md": "sha256:mock-project",
     "tasks/task.md": "sha256:mock-task",
     [path]: revision,

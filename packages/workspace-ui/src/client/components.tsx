@@ -10,12 +10,7 @@ import type {
   WorkspaceTreeEntry,
 } from "../shared/api";
 import { ActivitySection } from "./ActivitySection";
-import {
-  type ChatExport,
-  isChatgptExportPath,
-  parseChatgptExport,
-  presentationContent,
-} from "./chatgpt";
+import { CodeEditor, isMarkdownPath } from "./CodeEditor";
 import { FrontmatterBlock } from "./FrontmatterBlock";
 import { parseMarkdownFrontmatter } from "./frontmatter";
 import { extractOriginalMessage } from "./markdown";
@@ -967,126 +962,6 @@ export function MarkdownPreview({
   );
 }
 
-function chatRole(role: string): "assistant" | "other" | "user" {
-  if (role === "assistant") return "assistant";
-  if (role === "user") return "user";
-  return "other";
-}
-
-function ChatMetadata({ chat }: { chat: ChatExport }) {
-  const { session } = chat;
-  const startedAt = session.startedAt ? new Date(session.startedAt) : null;
-  const validStartedAt = startedAt && !Number.isNaN(startedAt.valueOf());
-  return (
-    <header className="workspace-chat-header">
-      <p className="workspace-eyebrow">CHATGPT / TEMPORARY CHAT</p>
-      <h2 className="mt-2 text-2xl font-bold tracking-tight">
-        {session.topic ?? "ChatGPT conversation"}
-      </h2>
-      <dl className="workspace-chat-meta mt-4">
-        {session.model && (
-          <div>
-            <dt>Model</dt>
-            <dd>{session.model}</dd>
-          </div>
-        )}
-        <div>
-          <dt>Messages</dt>
-          <dd>{chat.messages.length}</dd>
-        </div>
-        {validStartedAt && session.startedAt && (
-          <div>
-            <dt>Started</dt>
-            <dd>
-              <time dateTime={session.startedAt}>
-                {startedAt.toLocaleString()}
-              </time>
-            </dd>
-          </div>
-        )}
-      </dl>
-      <p className="workspace-chat-privacy" role="status">
-        This conversation is saved locally in the workspace.
-      </p>
-    </header>
-  );
-}
-
-function ChatReferences({ chat }: { chat: ChatExport }) {
-  if (chat.references.length === 0) return null;
-  return (
-    <section
-      aria-labelledby="workspace-chat-sources"
-      className="workspace-chat-sources"
-    >
-      <div className="mb-3">
-        <p className="workspace-eyebrow">REFERENCES</p>
-        <h3 className="mt-1 text-xl font-bold" id="workspace-chat-sources">
-          Sources ({chat.references.length})
-        </h3>
-      </div>
-      <ol className="workspace-chat-source-list">
-        {chat.references.map((reference) => (
-          <li key={reference.url}>
-            <a href={reference.url} rel="noreferrer noopener" target="_blank">
-              <span className="font-semibold">{reference.title}</span>
-              <span className="workspace-chat-source-domain">
-                {reference.domain}
-              </span>
-            </a>
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
-
-function RawChatPreview({ content }: { content: string }) {
-  return (
-    <article aria-label="Raw chat export" className="workspace-raw-document">
-      <div className="alert alert-warning mb-4 rounded-lg">
-        This ChatGPT export could not be parsed. The original YAML is shown
-        unchanged.
-      </div>
-      <pre>{content}</pre>
-    </article>
-  );
-}
-
-export function ChatgptPreview({
-  content,
-  onNavigateLink,
-}: {
-  content: string;
-  onNavigateLink?: ((href: string) => void) | undefined;
-}) {
-  const chat = parseChatgptExport(content);
-  if (!chat) return <RawChatPreview content={content} />;
-  return (
-    <article
-      aria-label="ChatGPT conversation"
-      className="workspace-chat-preview"
-    >
-      <ChatMetadata chat={chat} />
-      <div className="workspace-chat-messages">
-        {chat.messages.map((message) => (
-          <section
-            className={`workspace-chat-message workspace-chat-message-${chatRole(message.role)}`}
-            key={`${message.turn ?? "message"}-${message.role}-${message.content.slice(0, 80)}`}
-          >
-            <div className="workspace-chat-message-label">{message.role}</div>
-            <MarkdownPreview
-              content={presentationContent(message.content)}
-              onNavigateLink={onNavigateLink}
-            />
-          </section>
-        ))}
-      </div>
-      <ChatReferences chat={chat} />
-    </article>
-  );
-}
-
 export function DocumentInspector({
   diff,
   draft,
@@ -1267,12 +1142,11 @@ function EditorPane({
   return (
     <section aria-label="Editor" className="workspace-editor-pane">
       <div className="workspace-pane-label">Editor</div>
-      <textarea
-        aria-label="Document editor"
-        className="workspace-editor"
-        disabled={!file.editable || fileLoading}
-        onChange={(event) => onDraftChange(event.target.value)}
-        spellCheck={false}
+      <CodeEditor
+        className="min-h-0 flex-1"
+        filePath={file.path}
+        onChange={onDraftChange}
+        readOnly={!file.editable || fileLoading}
         value={draft}
       />
     </section>
@@ -1340,7 +1214,7 @@ export function DocumentPane({
 }) {
   const dirty = file !== null && file.content !== draft;
   const canEdit = Boolean(file?.editable);
-  const isChatExport = file !== null && isChatgptExportPath(file.path);
+  const isMarkdown = file !== null && isMarkdownPath(file.path);
 
   return (
     <section aria-label="Document workspace" className="workspace-document">
@@ -1360,18 +1234,10 @@ export function DocumentPane({
                   title={`Copy link: ${buildWorkspaceLink(file.path)}`}
                 />
               </div>
-              {!canEdit && (
-                <p className="text-xs text-warning">
-                  {isChatExport ? "Read-only chat export" : "Read only"}
-                </p>
-              )}
+              {!canEdit && <p className="text-xs text-warning">Read only</p>}
             </div>
             <div aria-label="Document view" className="join" role="toolbar">
-              {isChatExport ? (
-                <span className="btn btn-xs btn-primary pointer-events-none">
-                  Conversation
-                </span>
-              ) : (
+              {isMarkdown ? (
                 <>
                   <ModeButton
                     active={view === "preview"}
@@ -1388,18 +1254,20 @@ export function DocumentPane({
                     Edit
                   </ModeButton>
                 </>
+              ) : (
+                <span className="btn btn-xs btn-primary pointer-events-none">
+                  Code
+                </span>
               )}
             </div>
-            {!isChatExport && (
-              <button
-                className="btn btn-primary btn-sm shrink-0"
-                disabled={!canEdit || !dirty || saving}
-                onClick={onSave}
-                type="button"
-              >
-                {saving ? "Saving..." : dirty ? "Save" : "Saved"}
-              </button>
-            )}
+            <button
+              className="btn btn-primary btn-sm shrink-0"
+              disabled={!canEdit || !dirty || saving}
+              onClick={onSave}
+              type="button"
+            >
+              {saving ? "Saving..." : dirty ? "Save" : "Saved"}
+            </button>
             {/* Desktop actions */}
             <div className="hidden sm:flex shrink-0 items-center gap-2">
               {onRevealInTree && (
@@ -1615,14 +1483,13 @@ export function DocumentPane({
           )}
           {view === "info" ? (
             <DocumentInspector diff={diff} draft={draft} file={file} />
-          ) : isChatExport ? (
-            <section
-              aria-label="Conversation"
-              className="workspace-preview-pane"
-            >
-              <div className="workspace-pane-label">Conversation</div>
-              <ChatgptPreview content={draft} onNavigateLink={onNavigateLink} />
-            </section>
+          ) : !isMarkdown ? (
+            <EditorPane
+              draft={draft}
+              file={file}
+              fileLoading={fileLoading}
+              onDraftChange={onDraftChange}
+            />
           ) : view === "edit" ? (
             <EditorPane
               draft={draft}

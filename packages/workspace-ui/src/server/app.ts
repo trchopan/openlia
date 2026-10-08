@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync, lstatSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import type {
@@ -45,11 +46,11 @@ const contentTypes: Record<string, string> = {
 const maxLoginRequestBytes = 16 * 1024;
 const maxDeleteRequestBytes = 8 * 1024;
 
-function securityHeaders(): Record<string, string> {
+function securityHeaders(cspNonce?: string): Record<string, string> {
+  const styleSource = cspNonce ? `'self' 'nonce-${cspNonce}'` : "'self'";
   return {
     "Cache-Control": "no-store",
-    "Content-Security-Policy":
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'none'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    "Content-Security-Policy": `default-src 'self'; script-src 'self'; style-src ${styleSource}; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`,
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
   };
@@ -84,10 +85,10 @@ function errorResponse(error: unknown): Response {
   return json({ schema: 1, ok: false, error: "request_failed" }, 500);
 }
 
-function staticFile(
+async function staticFile(
   staticRoot: string,
   pathname: string,
-): Response | undefined {
+): Promise<Response | undefined> {
   const relativePath = pathname === "/" ? "index.html" : pathname.slice(1);
   if (relativePath !== "index.html" && !relativePath.startsWith("assets/"))
     return undefined;
@@ -102,15 +103,23 @@ function staticFile(
   if (absolute !== root && !absolute.startsWith(root + sep)) return undefined;
   if (!existsSync(absolute) || !lstatSync(absolute).isFile()) return undefined;
   const extension = absolute.slice(absolute.lastIndexOf(".")).toLowerCase();
+  const isIndex = relativePath === "index.html";
+  const cspNonce = isIndex ? randomBytes(18).toString("base64") : undefined;
   const headers = {
-    ...securityHeaders(),
+    ...securityHeaders(cspNonce),
     "Cache-Control":
       relativePath === "index.html"
         ? "no-store"
         : "public, max-age=31536000, immutable",
     "Content-Type": contentTypes[extension] ?? "application/octet-stream",
   };
-  return new Response(Bun.file(absolute), { headers });
+  if (!isIndex) return new Response(Bun.file(absolute), { headers });
+
+  const html = await Bun.file(absolute).text();
+  return new Response(
+    html.replaceAll("__OPENLIA_CSP_NONCE__", cspNonce ?? ""),
+    { headers },
+  );
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -193,7 +202,7 @@ export function createWorkspaceHandler(
       }
       if (request.method === "GET" && url.pathname.startsWith("/assets/")) {
         return (
-          staticFile(staticRoot, url.pathname) ??
+          (await staticFile(staticRoot, url.pathname)) ??
           json({ schema: 1, ok: false, error: "not_found" }, 404)
         );
       }
@@ -209,7 +218,7 @@ export function createWorkspaceHandler(
           url.pathname === "/skills")
       ) {
         return (
-          staticFile(staticRoot, "/") ??
+          (await staticFile(staticRoot, "/")) ??
           json({ schema: 1, ok: false, error: "not_found" }, 404)
         );
       }

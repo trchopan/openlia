@@ -194,8 +194,9 @@ describe("SkillDetailPane", () => {
       />,
     );
 
-    const textarea = screen.getByRole("textbox");
-    fireEvent.change(textarea, { target: { value: "# Changed Instructions" } });
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "# Changed Instructions";
+    fireEvent.input(editor, { bubbles: true, inputType: "insertText" });
     expect(handleDraftChange).toHaveBeenCalledWith("# Changed Instructions");
 
     const saveBtn = screen.getByText("Save");
