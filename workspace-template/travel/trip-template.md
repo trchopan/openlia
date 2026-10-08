@@ -1,10 +1,13 @@
-# [Trip Title]
+---
+$schema: ./trip-template.schema.json
+start_date: null # YYYY-MM-DD
+end_date: null # YYYY-MM-DD
+destination: null
+purpose: null # vacation | work / conference | family | relocation
+status: null # planning | booked | in-progress | completed
+---
 
-## Overview
-- Dates: YYYY-MM-DD to YYYY-MM-DD
-- Destination:
-- Purpose: [vacation | work / conference | family | relocation]
-- Status: planning | booked | in-progress | completed
+# <Trip Title>
 
 ## Itinerary Outline
 - Day 1 (YYYY-MM-DD):

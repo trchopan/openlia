@@ -35,6 +35,10 @@ services:
         target: /opt/data/skills/openlia-skill-migration
         read_only: true
       - type: bind
+        source: "${OPENLIA_SYSTEM_SKILLS_ROOT:?OPENLIA_SYSTEM_SKILLS_ROOT is required}/workspace-template-customization"
+        target: /opt/data/skills/workspace-template-customization
+        read_only: true
+      - type: bind
         source: "${OPENLIA_SECRET_DIR:?OPENLIA_SECRET_DIR is required}"
         target: /run/openlia-secrets
         read_only: true

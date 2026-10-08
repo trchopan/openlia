@@ -17,14 +17,24 @@ import (
 )
 
 const (
-	distributionName         = "openlia-personal-os"
-	hashScope                = "skill-files-v1"
-	protectedSkillName       = "openlia-skill-migration"
-	fallbackBlockStart       = "# BEGIN OPENLIA MANAGED FALLBACK PROVIDERS"
-	fallbackBlockEnd         = "# END OPENLIA MANAGED FALLBACK PROVIDERS"
-	outputLanguageBlockStart = "<!-- BEGIN OPENLIA MANAGED OUTPUT LANGUAGE -->"
-	outputLanguageBlockEnd   = "<!-- END OPENLIA MANAGED OUTPUT LANGUAGE -->"
+	distributionName           = "openlia-personal-os"
+	hashScope                  = "skill-files-v1"
+	protectedSkillName         = "openlia-skill-migration"
+	workspaceTemplateSkillName = "workspace-template-customization"
+	fallbackBlockStart         = "# BEGIN OPENLIA MANAGED FALLBACK PROVIDERS"
+	fallbackBlockEnd           = "# END OPENLIA MANAGED FALLBACK PROVIDERS"
+	outputLanguageBlockStart   = "<!-- BEGIN OPENLIA MANAGED OUTPUT LANGUAGE -->"
+	outputLanguageBlockEnd     = "<!-- END OPENLIA MANAGED OUTPUT LANGUAGE -->"
 )
+
+func isProtectedSystemSkill(name string) bool {
+	switch name {
+	case protectedSkillName, workspaceTemplateSkillName:
+		return true
+	default:
+		return false
+	}
+}
 
 // ProfileOperator synchronizes distribution-owned profile files while leaving
 // the workspace and locally customized skills untouched.
@@ -310,7 +320,7 @@ func (p *ProfileOperator) Sync() (ProfileSyncResult, error) {
 		return ProfileSyncResult{}, fmt.Errorf("read runtime skills: %w", err)
 	}
 	for _, entry := range entries {
-		if entry.Name() == ".openlia-disabled" || entry.Name() == protectedSkillName || (!entry.IsDir() && entry.Type()&os.ModeSymlink == 0) {
+		if entry.Name() == ".openlia-disabled" || isProtectedSystemSkill(entry.Name()) || (!entry.IsDir() && entry.Type()&os.ModeSymlink == 0) {
 			continue
 		}
 		if _, statErr := os.Stat(filepath.Join(sourceRoot, entry.Name())); statErr == nil {
@@ -625,7 +635,7 @@ func (p *ProfileOperator) syncProtectedSkills() error {
 		if err := ValidateSafeComponent(entry.Name(), "protected skill"); err != nil {
 			return err
 		}
-		if entry.Name() != protectedSkillName {
+		if !isProtectedSystemSkill(entry.Name()) {
 			return fmt.Errorf("unsupported protected skill %s", entry.Name())
 		}
 		source := filepath.Join(sourceRoot, entry.Name())
@@ -697,7 +707,7 @@ func (p *ProfileOperator) Status(selected string) (SkillStatusResult, error) {
 		return SkillStatusResult{}, fmt.Errorf("read runtime skills: %w", err)
 	}
 	for _, entry := range runtimeEntries {
-		if entry.Name() == ".openlia-disabled" || entry.Name() == protectedSkillName || (!entry.IsDir() && entry.Type()&os.ModeSymlink == 0) {
+		if entry.Name() == ".openlia-disabled" || isProtectedSystemSkill(entry.Name()) || (!entry.IsDir() && entry.Type()&os.ModeSymlink == 0) {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(sourceRoot, entry.Name())); err == nil {

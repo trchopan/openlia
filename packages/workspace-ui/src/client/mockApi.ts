@@ -100,37 +100,6 @@ export function createMockWorkspaceApi({
     {
       author: undefined,
       bundled: true,
-      category: "productivity",
-      description: "Review durable personal claims with explicit evidence.",
-      enabled: true,
-      fileCount: 2,
-      files: [
-        {
-          editable: true,
-          modified_at: modifiedAt,
-          path: "SKILL.md",
-          size: 450,
-        },
-        {
-          editable: true,
-          modified_at: modifiedAt,
-          path: "scripts/review.py",
-          size: 120,
-        },
-      ],
-      id: "claim-review",
-      lastUsedAt: "2026-09-24T00:00:00.000Z",
-      name: "claim-review",
-      pinned: true,
-      platforms: ["macos", "linux"],
-      prerequisites: { env_vars: ["CLAIM_API_KEY"] },
-      tags: ["claims", "memory"],
-      useCount: 14,
-      version: "0.1.0",
-    },
-    {
-      author: undefined,
-      bundled: true,
       category: "research",
       description: "Exhaustive multi-source research investigation.",
       enabled: true,
@@ -233,8 +202,6 @@ export function createMockWorkspaceApi({
   ];
 
   const mockSkillFiles: Record<string, string> = {
-    "claim-review:SKILL.md": `---\nname: claim-review\ndescription: Review durable personal claims with explicit evidence.\nversion: 0.1.0\nplatforms: [macos, linux]\nprerequisites:\n  env_vars: [CLAIM_API_KEY]\nmetadata:\n  hermes:\n    tags: [claims, memory]\n    category: productivity\n---\n\n# Claim Review\n\nReview durable personal claims with explicit evidence.\n`,
-    "claim-review:scripts/review.py": "print('Reviewing personal claims...')\n",
     "deep-research:SKILL.md": `---\nname: deep-research\ndescription: Exhaustive multi-source research investigation.\nversion: 1.0.0\nplatforms: [macos, linux]\nmetadata:\n  hermes:\n    tags: [research, web]\n    category: research\n---\n\n# Deep Research\n\nPerform in-depth multi-phase web research.\n`,
     "deep-research:templates/report.md":
       "# Research Report Template\n\n## Overview\n",
@@ -244,8 +211,6 @@ export function createMockWorkspaceApi({
   };
 
   const mockSkillRevisions: Record<string, string> = {
-    "claim-review:SKILL.md": "sha256:mock-claim-md",
-    "claim-review:scripts/review.py": "sha256:mock-claim-py",
     "deep-research:SKILL.md": "sha256:mock-deep-md",
     "deep-research:templates/report.md": "sha256:mock-deep-tpl",
     "productivity/notion:SKILL.md": "sha256:mock-notion-md",

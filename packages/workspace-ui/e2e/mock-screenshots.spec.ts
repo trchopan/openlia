@@ -205,9 +205,9 @@ test.describe("mock visual catalog", () => {
   });
 
   test("skills auxiliary files subtab", async ({ page }, testInfo) => {
-    await page.goto("/skills/claim-review");
+    await page.goto("/skills/deep-research");
     await page.getByRole("button", { name: /Files \(/ }).click();
-    await expect(page.getByText("scripts/review.py")).toBeVisible();
+    await expect(page.getByText("templates/report.md")).toBeVisible();
     await captureScreenshot(page, testInfo, "skills-auxiliary-files");
   });
 

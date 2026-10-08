@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Build an evidence matrix from researcher-supplied source notes."""
+"""Build a deterministic evidence matrix from researcher-supplied source notes."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
 
 
 WEIGHTS = {"authority": 0.4, "quality": 0.3, "recency": 0.1, "relevance": 0.2}
+SCORE_FIELDS = tuple(WEIGHTS)
 
 
 def _score(source: dict[str, Any], key: str) -> float:
@@ -23,9 +25,23 @@ def _score(source: dict[str, Any], key: str) -> float:
         number = float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{key} score must be a number") from exc
-    if not 0 <= number <= 5:
-        raise ValueError(f"{key} score must be between 0 and 5")
+    if not math.isfinite(number) or not 0 <= number <= 5:
+        raise ValueError(f"{key} score must be a finite number between 0 and 5")
     return number
+
+
+def _text(source: dict[str, Any], key: str) -> str:
+    value = source.get(key)
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _source_id(source: dict[str, Any], index: int) -> str:
+    identifier = _text(source, "id") or f"source-{index:03d}"
+    if not identifier:
+        raise ValueError(f"source {index} id must not be empty")
+    return identifier
 
 
 def build_matrix(data: dict[str, Any]) -> dict[str, Any]:
@@ -34,48 +50,85 @@ def build_matrix(data: dict[str, Any]) -> dict[str, Any]:
     sources = data.get("sources", [])
     if not isinstance(sources, list) or not all(isinstance(source, dict) for source in sources):
         raise ValueError("sources must be a list of objects")
+
     rows: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
     for index, source in enumerate(sources, start=1):
-        title = str(source.get("title") or f"Source {index}")
-        scores = {key: _score(source, key) for key in WEIGHTS}
-        missing = [key for key in WEIGHTS if key not in source]
-        total = round(sum(scores[key] * WEIGHTS[key] for key in WEIGHTS), 3)
+        identifier = _source_id(source, index)
+        if identifier in seen_ids:
+            raise ValueError(f"duplicate source id: {identifier}")
+        seen_ids.add(identifier)
+        scores = {key: _score(source, key) for key in SCORE_FIELDS}
+        missing = [key for key in SCORE_FIELDS if source.get(key) is None]
+        total = round(sum(scores[key] * WEIGHTS[key] for key in SCORE_FIELDS), 3)
         rows.append(
             {
-                "id": str(source.get("id") or f"source-{index:03d}"),
-                "title": title,
-                "url": str(source.get("url") or ""),
+                "id": identifier,
+                "title": _text(source, "title") or f"Source {index}",
+                "url": _text(source, "url"),
+                "publisher": _text(source, "publisher"),
+                "source_type": _text(source, "source_type") or "unspecified",
+                "accessed_at": _text(source, "accessed_at"),
+                "claim": _text(source, "claim"),
+                "counterevidence": _text(source, "counterevidence"),
                 "score": total,
+                "scores": scores,
                 "missing_dimensions": missing,
-                "notes": str(source.get("notes") or ""),
+                "notes": _text(source, "notes"),
             }
         )
     rows.sort(key=lambda row: (-row["score"], row["title"].casefold(), row["id"]))
-    gaps = []
+
+    gaps: list[str] = []
     if not rows:
         gaps.append("No sources were supplied.")
     if rows and all(row["score"] < 3 for row in rows):
         gaps.append("No source reached a weighted confidence score of 3.0.")
     if any(row["missing_dimensions"] for row in rows):
         gaps.append("One or more source dimensions are missing; verify before relying on the ranking.")
+    if any(not row["url"] for row in rows):
+        gaps.append("One or more sources has no stable URL or reference; preserve a local source reference before relying on it.")
+    if any(not row["accessed_at"] for row in rows):
+        gaps.append("One or more sources has no access date; freshness cannot be checked.")
+    if any(not row["claim"] for row in rows):
+        gaps.append("One or more sources has no stated claim; connect each source to a specific question.")
+
     return {
-        "question": str(data.get("question") or ""),
+        "question": _text(data, "question"),
         "sources": rows,
         "evidence_gaps": gaps,
-        "method": "Weighted source notes only; this helper does not fetch or verify URLs.",
+        "method": "Weighted source notes only; this helper does not fetch, verify, or follow URLs.",
     }
 
 
 def render_markdown(result: dict[str, Any]) -> str:
-    lines = ["# Research Matrix", "", f"Question: {result['question'] or 'Unspecified'}", "", "## Sources", ""]
+    lines = [
+        "# Research Matrix",
+        "",
+        f"Question: {result['question'] or 'Unspecified'}",
+        "",
+        "## Sources",
+        "",
+    ]
     if result["sources"]:
         for source in result["sources"]:
-            url = f" - {source['url']}" if source["url"] else ""
-            lines.append(f"- {source['title']}: {source['score']:.3f}{url}")
+            details = [f"score={source['score']:.3f}", f"type={source['source_type']}"]
+            if source["publisher"]:
+                details.append(f"publisher={source['publisher']}")
+            if source["accessed_at"]:
+                details.append(f"accessed={source['accessed_at']}")
+            if source["missing_dimensions"]:
+                details.append(f"missing={','.join(source['missing_dimensions'])}")
+            reference = f" - {source['url']}" if source["url"] else ""
+            lines.append(f"- `{source['id']}` {source['title']}: {'; '.join(details)}{reference}")
     else:
         lines.append("- No sources supplied.")
     lines.extend(["", "## Evidence Gaps", ""])
-    lines.extend(f"- {gap}" for gap in result["evidence_gaps"] or ["No mechanical gaps detected; assess the claims manually."])
+    lines.extend(
+        f"- {gap}"
+        for gap in result["evidence_gaps"]
+        or ["No mechanical gaps detected; assess the claims manually."]
+    )
     lines.extend(["", "## Method", "", result["method"], ""])
     return "\n".join(lines)
 
@@ -85,14 +138,41 @@ def self_test() -> None:
         {
             "question": "What evidence is strongest?",
             "sources": [
-                {"title": "Primary source", "authority": 5, "quality": 4, "recency": 4, "relevance": 5},
-                {"title": "Partial source", "authority": 2, "quality": 2, "relevance": 2},
+                {
+                    "id": "primary",
+                    "title": "Primary source",
+                    "url": "https://example.invalid/primary",
+                    "publisher": "Accountable institution",
+                    "source_type": "official",
+                    "accessed_at": "2026-10-08",
+                    "claim": "The stated result.",
+                    "authority": 5,
+                    "quality": 4,
+                    "recency": 4,
+                    "relevance": 5,
+                },
+                {"id": "partial", "title": "Partial source", "authority": 2, "quality": 2, "relevance": 2},
             ],
         }
     )
     assert result["sources"][0]["title"] == "Primary source"
     assert "recency" in result["sources"][1]["missing_dimensions"]
+    assert "access date" in " ".join(result["evidence_gaps"])
     assert "Research Matrix" in render_markdown(result)
+
+    try:
+        build_matrix({"sources": [{"id": "same"}, {"id": "same"}]})
+    except ValueError as exc:
+        assert str(exc) == "duplicate source id: same"
+    else:
+        raise AssertionError("duplicate source IDs must be rejected")
+
+    try:
+        build_matrix({"sources": [{"authority": True}]})
+    except ValueError as exc:
+        assert str(exc) == "authority score must be a number"
+    else:
+        raise AssertionError("boolean scores must be rejected")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -110,7 +190,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("input is required unless --self-test is used")
     try:
         result = build_matrix(json.loads(args.input.read_text(encoding="utf-8")))
-        rendered = json.dumps(result, indent=2, sort_keys=True, ensure_ascii=True) + "\n" if args.format == "json" else render_markdown(result)
+        rendered = (
+            json.dumps(result, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
+            if args.format == "json"
+            else render_markdown(result)
+        )
         if args.output:
             args.output.write_text(rendered, encoding="utf-8")
         else:

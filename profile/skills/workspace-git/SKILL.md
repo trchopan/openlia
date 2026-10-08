@@ -15,8 +15,7 @@ metadata:
 
 The OpenLia workspace is `/opt/data/workspace`. It is maintained as a local
 Git repository for history tracking. OpenLia does not configure Git remotes or
-synchronize workspace history over the network. Encrypted OpenLia backups are
-the recovery mechanism.
+synchronize workspace history over the network.
 
 ## Safety Rules
 

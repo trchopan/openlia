@@ -14,3 +14,4 @@ distribution_owned:
   - cron/
 system_owned:
   - system-skills/openlia-skill-migration/
+  - system-skills/workspace-template-customization/

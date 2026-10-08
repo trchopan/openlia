@@ -63,11 +63,11 @@ RUN sed -i \
     install -m 0755 "/tmp/uv/uv-${uv_target}/uvx" /usr/local/bin/uvx; \
     rm -rf /tmp/bun /tmp/uv "${bun_archive}" "${uv_archive}"
 
-COPY profile/skills/claim-review/requirements.txt /tmp/claim-req.txt
+COPY profile/system-skills/workspace-template-customization/requirements.txt /tmp/workspace-template-req.txt
 RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache \
-	--requirement /tmp/claim-req.txt \
+	--requirement /tmp/workspace-template-req.txt \
 	&& uv pip install --python /opt/hermes/.venv/bin/python --no-cache pip-audit==2.9.0 \
-	&& rm -f /tmp/claim-req.txt
+	&& rm -f /tmp/workspace-template-req.txt
 
 COPY --chmod=0755 docker/secret-source.sh /usr/local/bin/openlia-secret-source
 COPY docker/openlia_link_rewriter.py /opt/hermes/.venv/lib/python3.13/site-packages/openlia_link_rewriter.py

@@ -1,10 +1,12 @@
-# [Item / Purchase Title]
+---
+$schema: ./item-template.schema.json
+category: null # electronics | household | clothing | tools | books | other
+classification: null # essential need | quality-of-life upgrade | discretionary want
+priority: null # urgent | medium | low
+status: null # researching | watching-price | ready-to-buy | purchased | abandoned
+---
 
-## Assessment
-- Category: [electronics | household | clothing | tools | books | other]
-- Classification: [essential need | quality-of-life upgrade | discretionary want]
-- Priority: urgent | medium | low
-- Status: researching | watching-price | ready-to-buy | purchased | abandoned
+# <Item / Purchase Title>
 
 ## Budget & Price Targets
 - Target price ceiling:

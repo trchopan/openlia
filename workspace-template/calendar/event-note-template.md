@@ -1,9 +1,12 @@
-# [Event Title]
+---
+$schema: ./event-note-template.schema.json
+starts_at: null # ISO-8601 date-time, e.g. 2026-08-12T09:00:00Z
+location: null
+video_link: null
+attendees: [] # e.g. ["[[Person Name]]"]
+---
 
-## Details
-- Date & Time: YYYY-MM-DD HH:MM
-- Location / Video Link:
-- Attendees / People: [[Person Name]]
+# <Event Title>
 
 ## Purpose & Agenda
 - Objective:

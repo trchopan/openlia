@@ -1,8 +1,10 @@
-# [Finance Review / Plan Title]
+---
+$schema: ./finance-template.schema.json
+period: null # YYYY-MM or YYYY-QN
+review_date: null # YYYY-MM-DD
+---
 
-## Scope & Period
-- Period: [e.g. YYYY-MM or YYYY-QN]
-- Review Date: YYYY-MM-DD
+# <Finance Review / Plan Title>
 
 ## Spending Summary & Targets
 - Essential living: Target vs Actual

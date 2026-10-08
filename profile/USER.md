@@ -4,8 +4,10 @@
 This file is seeded to /opt/data/memories/USER.md on initial bootstrap.
 It provides Hermes with immediate context on the person OpenLia assists.
 The user can update this via chat (using Hermes memory tool) or direct operator edits.
-Durable, verifiable personal facts should be recorded under workspace/knowledge/claims/,
-using the claim-record starter format at workspace/knowledge/claim-record.md.
+Durable, verifiable personal facts should be recorded under
+workspace/knowledge/claims/, using
+workspace/knowledge/claims/claim-template.md and the schema referenced by its
+`$schema` frontmatter property.
 -->
 
 ## Profile

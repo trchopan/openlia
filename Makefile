@@ -3,7 +3,7 @@ GO ?= go
 VENV ?= .venv
 PYTHON ?= $(shell if [ -f "$(VENV)/bin/python3" ]; then echo "$(VENV)/bin/python3"; else echo "python3"; fi)
 
-.PHONY: help build build-host build-cli build-operator build-operator-linux-amd64 build-operator-linux-arm64 test lint compose-config venv bun-install bun-check bun-build skills-test skills-verify clean-logs smoke smoke-local smoke-local-live
+.PHONY: help build build-host build-cli build-operator build-operator-linux-amd64 build-operator-linux-arm64 test lint compose-config venv bun-install bun-check bun-build skills-test skills-verify workspace-templates-test clean-logs smoke smoke-local smoke-local-live
 
 help:
 	@printf '%s\n' \
@@ -16,6 +16,7 @@ help:
 		'test               Run Go, Python, skill, and operator tests' \
 		'venv               Create local virtualenv and install dependencies from requirements-dev.txt' \
 		'skills-test        Run offline skill self-tests' \
+		'workspace-templates-test  Validate bundled workspace and skill templates' \
 		'skills-verify      Run bundled skill and browser relay tests' \
 		'clean-logs         Purge local .playwright-mcp and verification test logs' \
 		'deploy-dev         Verify skills and deploy to local dev stack' \
@@ -53,6 +54,7 @@ venv:
 	@echo "Virtual environment ready in $(VENV)."
 
 test:
+	$(MAKE) workspace-templates-test
 	$(MAKE) bun-install bun-check bun-build
 	go test ./...
 	go vet ./...
@@ -91,6 +93,10 @@ compose-config:
 
 skills-test:
 	$(PYTHON) tests/verify_skills.py --offline
+
+workspace-templates-test:
+	$(PYTHON) tests/validate_workspace_templates.py --self-test
+	$(PYTHON) tests/validate_workspace_templates.py
 
 skills-verify:
 	$(PYTHON) tests/verify_skills.py --offline

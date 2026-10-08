@@ -195,14 +195,19 @@ func TestProfileSyncSeedsMissingWorkspaceTemplatesPreservingExistingFiles(t *tes
 	repo := t.TempDir()
 	runtime := filepath.Join(t.TempDir(), "runtime")
 	for path, contents := range map[string]string{
-		filepath.Join(repo, "profile", "SOUL.md"):                                 "soul\n",
-		filepath.Join(repo, "profile", "AGENTS.md"):                               "agents\n",
-		filepath.Join(repo, "profile", "USER.md"):                                 "# User Profile\n",
-		filepath.Join(repo, "profile", "config.yaml"):                             "config\n",
-		filepath.Join(repo, "release", "manifest.json"):                           `{"openlia":"test"}`,
-		filepath.Join(repo, "workspace-template", "knowledge", "claim-record.md"): "new claim template\n",
-		filepath.Join(repo, "workspace-template", "existing.md"):                  "template original\n",
-		filepath.Join(repo, "workspace-template", "AGENTS.md"):                    "agents template\n",
+		filepath.Join(repo, "profile", "SOUL.md"):                                                      "soul\n",
+		filepath.Join(repo, "profile", "AGENTS.md"):                                                    "agents\n",
+		filepath.Join(repo, "profile", "USER.md"):                                                      "# User Profile\n",
+		filepath.Join(repo, "profile", "config.yaml"):                                                  "config\n",
+		filepath.Join(repo, "release", "manifest.json"):                                                `{"openlia":"test"}`,
+		filepath.Join(repo, "workspace-template", "knowledge", "claims", "claim-template.md"):          "new claim template\n",
+		filepath.Join(repo, "workspace-template", "knowledge", "claims", "claim-template.schema.json"): "new claim schema\n",
+		filepath.Join(repo, "workspace-template", "goals", "goal-template.md"):                         "default goal template\n",
+		filepath.Join(repo, "workspace-template", "goals", "goal-template.schema.json"):                "default goal schema\n",
+		filepath.Join(repo, "workspace-template", "tasks", "task-template.md"):                         "default task template\n",
+		filepath.Join(repo, "workspace-template", "tasks", "task-template.schema.json"):                "default task schema\n",
+		filepath.Join(repo, "workspace-template", "existing.md"):                                       "template original\n",
+		filepath.Join(repo, "workspace-template", "AGENTS.md"):                                         "agents template\n",
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -223,6 +228,27 @@ func TestProfileSyncSeedsMissingWorkspaceTemplatesPreservingExistingFiles(t *tes
 	if err := os.WriteFile(existingUserFile, []byte("user customized content\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	legacyTemplate := filepath.Join(workspace, "knowledge", "claim-record.md")
+	if err := os.MkdirAll(filepath.Dir(legacyTemplate), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyTemplate, []byte("legacy user template\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	customSchema := filepath.Join(workspace, "goals", "goal-template.schema.json")
+	if err := os.MkdirAll(filepath.Dir(customSchema), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(customSchema, []byte("user customized schema\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	customTemplate := filepath.Join(workspace, "tasks", "task-template.md")
+	if err := os.MkdirAll(filepath.Dir(customTemplate), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(customTemplate, []byte("user customized template\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	p := NewProfileOperator(config)
 	p.Now = func() time.Time { return time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC) }
@@ -231,7 +257,7 @@ func TestProfileSyncSeedsMissingWorkspaceTemplatesPreservingExistingFiles(t *tes
 	}
 
 	// 1. Newly introduced template file should be seeded
-	seededFile := filepath.Join(workspace, "knowledge", "claim-record.md")
+	seededFile := filepath.Join(workspace, "knowledge", "claims", "claim-template.md")
 	seededData, err := os.ReadFile(seededFile)
 	if err != nil {
 		t.Fatalf("missing seeded template file: %v", err)
@@ -239,9 +265,29 @@ func TestProfileSyncSeedsMissingWorkspaceTemplatesPreservingExistingFiles(t *tes
 	if string(seededData) != "new claim template\n" {
 		t.Fatalf("unexpected seeded template data: %q", string(seededData))
 	}
-	oldTemplate := filepath.Join(workspace, "knowledge", "claims", "claim-record.md")
-	if _, err := os.Stat(oldTemplate); !os.IsNotExist(err) {
-		t.Fatalf("claim template must be outside the indexed claims directory; stat error: %v", err)
+	seededSchema, err := os.ReadFile(filepath.Join(workspace, "knowledge", "claims", "claim-template.schema.json"))
+	if err != nil || string(seededSchema) != "new claim schema\n" {
+		t.Fatalf("missing seeded claim schema: %q, %v", seededSchema, err)
+	}
+	seededGoalTemplate, err := os.ReadFile(filepath.Join(workspace, "goals", "goal-template.md"))
+	if err != nil || string(seededGoalTemplate) != "default goal template\n" {
+		t.Fatalf("missing default goal template: %q, %v", seededGoalTemplate, err)
+	}
+	preservedSchema, err := os.ReadFile(customSchema)
+	if err != nil || string(preservedSchema) != "user customized schema\n" {
+		t.Fatalf("custom goal schema was overwritten: %q, %v", preservedSchema, err)
+	}
+	seededTaskSchema, err := os.ReadFile(filepath.Join(workspace, "tasks", "task-template.schema.json"))
+	if err != nil || string(seededTaskSchema) != "default task schema\n" {
+		t.Fatalf("missing default task schema: %q, %v", seededTaskSchema, err)
+	}
+	preservedTemplate, err := os.ReadFile(customTemplate)
+	if err != nil || string(preservedTemplate) != "user customized template\n" {
+		t.Fatalf("custom task template was overwritten: %q, %v", preservedTemplate, err)
+	}
+	legacyData, err := os.ReadFile(legacyTemplate)
+	if err != nil || string(legacyData) != "legacy user template\n" {
+		t.Fatalf("existing legacy template was not preserved: %q, %v", legacyData, err)
 	}
 
 	// 2. Existing user file must be preserved intact without overwrite

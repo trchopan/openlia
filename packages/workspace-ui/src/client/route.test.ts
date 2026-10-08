@@ -142,11 +142,11 @@ describe("route helpers", () => {
       view: undefined,
     });
 
-    expect(parseRoute("/?tab=skills&skill=claim-review")).toEqual({
+    expect(parseRoute("/?tab=skills&skill=weekly-review")).toEqual({
       filter: undefined,
       path: undefined,
       scenario: undefined,
-      skill: "claim-review",
+      skill: "weekly-review",
       skillFile: undefined,
       tab: "skills",
       view: undefined,

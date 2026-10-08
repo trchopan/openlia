@@ -1,10 +1,14 @@
-# [Decision Title]
+---
+$schema: ./decision-template.schema.json
+status: null # proposed | decided | superseded | abandoned
+decision_date: null # YYYY-MM-DD
+review_date: null # YYYY-MM-DD
+---
+
+# <Decision Title>
 
 ## Question
 What specific decision needs to be made?
-
-## Status
-proposed | decided | superseded | abandoned
 
 ## Context And Constraints
 - Context:
@@ -30,9 +34,7 @@ proposed | decided | superseded | abandoned
 
 ## Chosen Option & Rationale
 - Chosen option:
-- Decision date: YYYY-MM-DD
 - Rationale:
 
-## Review Date And Outcome
-- Review date: YYYY-MM-DD
+## Review Outcome
 - Actual outcome / retrospective:

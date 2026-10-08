@@ -1,1 +1,1 @@
--r profile/skills/claim-review/requirements.txt
+-r profile/system-skills/workspace-template-customization/requirements.txt

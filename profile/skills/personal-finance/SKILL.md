@@ -63,11 +63,9 @@ existing accounts without explaining the proposed change first.
    `stats`, `balance`, `register`, `incomestatement`, `balancesheet`, and
    `cashflow`. Add an explicit period or account query when appropriate, and
    record the journal path, date range, account scope, and currencies used.
-6. For a structured review, normalize the relevant hledger account totals into
-   JSON for `scripts/finance_review.py`. Its `income` values use hledger's
-   normal sign convention, where income balances are usually negative and
-   expense balances are usually positive. Treat the helper as a presentation
-   aid, not as a replacement for hledger validation.
+6. For a structured review, use hledger's report output directly. Keep each
+   figure tied to its source report and scope, and distinguish reported totals
+   from any explicitly shown derived calculations.
 7. Separate reported facts from interpretation. Call out pending or uncleared
    entries, omitted accounts, incomplete periods, missing prices, and any
    assumptions about currency conversion or account classification.

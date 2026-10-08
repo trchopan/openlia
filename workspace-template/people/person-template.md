@@ -1,12 +1,14 @@
-# [Person Name]
+---
+$schema: ./person-template.schema.json
+relationship: null # colleague | mentor | collaborator | friend | family | advisor
+organization: null
+role: null
+location: null
+timezone: null
+important_dates: [] # e.g. ["Birthday: 05-01"]
+---
 
-## Relationship & Context
-- Relationship: [colleague | mentor | collaborator | friend | family | advisor]
-- Organization / Role:
-- Location / Timezone:
-
-## Important Dates
-- Birthday / Anniversary:
+# <Person Name>
 
 ## Open Loops & Commitments
 - [ ] Promised to them:

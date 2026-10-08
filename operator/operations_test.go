@@ -554,7 +554,7 @@ func TestDurableBackupExcludesRebuildableSkillsAndCaches(t *testing.T) {
 		filepath.Join(config.DataRoot, "home", "package.bin"):                           "package",
 		filepath.Join(config.DataRoot, "skills", "creative", "DESCRIPTION.md"):          "bundled metadata",
 		filepath.Join(config.DataRoot, "skills", "creative", "ascii-video", "SKILL.md"): "bundled",
-		filepath.Join(config.DataRoot, "skills", "claim-review", "SKILL.md"):            "managed",
+		filepath.Join(config.DataRoot, "skills", "weekly-review", "SKILL.md"):           "managed",
 		filepath.Join(config.DataRoot, "skills", ".bundled_manifest"):                   "ascii-video:hash\n",
 		filepath.Join(config.RuntimeRoot, "open-webui", "webui.db"):                     "open-webui",
 	}
@@ -569,7 +569,7 @@ func TestDurableBackupExcludesRebuildableSkillsAndCaches(t *testing.T) {
 	result, identity := createTestEncryptedBackup(t, &config, "durable-scope", time.Now())
 	plainArchive := decryptTestBackup(t, config.BackupRoot, result.Archive, identity)
 	names := archiveNames(t, plainArchive)
-	for _, expected := range []string{"hermes/workspace/keep.md", "hermes/skills/claim-review/SKILL.md"} {
+	for _, expected := range []string{"hermes/workspace/keep.md", "hermes/skills/weekly-review/SKILL.md"} {
 		if !names[expected] {
 			t.Fatalf("durable member missing %s: %v", expected, names)
 		}

@@ -1,14 +1,14 @@
-# [Goal Title]
+---
+$schema: ./goal-template.schema.json
+status: null # active | paused | completed | abandoned
+target_completion: null # YYYY-MM-DD
+review_rhythm: null # weekly | monthly | quarterly
+---
+
+# <Goal Title>
 
 ## Objective
 What outcome do you want to achieve, and why does this matter?
-
-## Status
-active | paused | completed | abandoned
-
-## Timeframe
-- Target completion: YYYY-MM-DD (or Quarter/Year)
-- Review rhythm: weekly | monthly | quarterly
 
 ## Linked Areas & Projects
 - Area: [[Area Name]]

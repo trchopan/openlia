@@ -23,9 +23,10 @@ replacement for the license files shipped by those projects or images.
 | `golang.org/x/crypto`, `x/sys`, `x/term` | Versions in [`go.mod`](go.mod) | BSD-3-Clause | [golang.org/x repositories](https://go.googlesource.com/) |
 
 Go module pins and transitive dependencies are declared in
-[`go.mod`](go.mod) and [`go.sum`](go.sum). The Python dependency above is declared in
-[`profile/skills/claim-review/requirements.txt`](profile/skills/claim-review/requirements.txt)
-and is also used by the development requirements file.
+[`go.mod`](go.mod) and [`go.sum`](go.sum). The Python dependencies above are
+declared in
+[`profile/system-skills/workspace-template-customization/requirements.txt`](profile/system-skills/workspace-template-customization/requirements.txt)
+and are also used by the development requirements file.
 
 ## Container Base Images and Packages
 

@@ -35,9 +35,12 @@ func TestShellQuote(t *testing.T) {
 
 func TestReleaseArchiveContainsWorkspaceMarkers(t *testing.T) {
 	assets := fstest.MapFS{
-		"workspace-template/inbox/.gitkeep":                      &fstest.MapFile{Data: []byte{}},
-		"profile/SOUL.md":                                        &fstest.MapFile{Data: []byte("safe")},
-		"profile/system-skills/openlia-skill-migration/SKILL.md": &fstest.MapFile{Data: []byte("protected")},
+		"workspace-template/inbox/.gitkeep":                  &fstest.MapFile{Data: []byte{}},
+		"workspace-template/goals/goal-template.schema.json": &fstest.MapFile{Data: []byte(`{"type":"object"}`)},
+		"profile/SOUL.md": &fstest.MapFile{Data: []byte("safe")},
+		"profile/system-skills/openlia-skill-migration/SKILL.md":                               &fstest.MapFile{Data: []byte("protected")},
+		"profile/system-skills/workspace-template-customization/SKILL.md":                      &fstest.MapFile{Data: []byte("protected")},
+		"profile/system-skills/workspace-template-customization/scripts/validate_workspace.py": &fstest.MapFile{Data: []byte("validator")},
 	}
 	archive, digest, err := releaseArchive(assets)
 	if err != nil {
@@ -65,8 +68,17 @@ func TestReleaseArchiveContainsWorkspaceMarkers(t *testing.T) {
 	if !seen["workspace-template/inbox/.gitkeep"] {
 		t.Fatal("workspace marker was omitted from embedded release")
 	}
+	if !seen["workspace-template/goals/goal-template.schema.json"] {
+		t.Fatal("workspace schema was omitted from embedded release")
+	}
 	if !seen["profile/system-skills/openlia-skill-migration/SKILL.md"] {
 		t.Fatal("protected migration skill was omitted from release")
+	}
+	if !seen["profile/system-skills/workspace-template-customization/SKILL.md"] {
+		t.Fatal("protected workspace template skill was omitted from release")
+	}
+	if !seen["profile/system-skills/workspace-template-customization/scripts/validate_workspace.py"] {
+		t.Fatal("workspace validator was omitted from release")
 	}
 }
 

@@ -534,7 +534,6 @@ def run(mode: str, args: argparse.Namespace) -> list[dict[str, Any]]:
             "deep-research",
             "personal-finance",
             "workspace-git",
-            "claim-review",
             "workspace-organize",
         ):
             results.append(run_case(f"SKILL-{skill}", ["go", "run", ".", "skills", "test", skill]))

@@ -47,37 +47,41 @@ func TestForkPreservesCustomizedSkillAcrossProfileUpdate(t *testing.T) {
 	}
 }
 
-func TestProtectedMigrationSkillCannotBeForked(t *testing.T) {
-	config, now := migrationTestConfig(t)
-	systemSkill := filepath.Join(config.RepositoryRoot, "profile", "system-skills", protectedSkillName, "SKILL.md")
-	if err := os.MkdirAll(filepath.Dir(systemSkill), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(systemSkill, []byte("system\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := NewProfileOperator(config).Sync(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ForkSkill(config, protectedSkillName, now); err == nil {
-		t.Fatal("protected migration skill was forked")
-	}
-	if _, err := os.Stat(filepath.Join(config.SystemSkillsRoot, protectedSkillName, "SKILL.md")); err != nil {
-		t.Fatalf("protected skill was not synchronized: %v", err)
-	}
-	protectedPath := filepath.Join(config.SystemSkillsRoot, protectedSkillName, "SKILL.md")
-	if err := os.WriteFile(protectedPath, []byte("tampered\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := NewProfileOperator(config).Sync(); err != nil {
-		t.Fatal(err)
-	}
-	contents, err := os.ReadFile(protectedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(contents) != "system\n" {
-		t.Fatalf("protected skill was not restored: %q", contents)
+func TestProtectedSystemSkillsCannotBeForkedOrTampered(t *testing.T) {
+	for _, name := range []string{protectedSkillName, workspaceTemplateSkillName} {
+		t.Run(name, func(t *testing.T) {
+			config, now := migrationTestConfig(t)
+			systemSkill := filepath.Join(config.RepositoryRoot, "profile", "system-skills", name, "SKILL.md")
+			if err := os.MkdirAll(filepath.Dir(systemSkill), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(systemSkill, []byte("system\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := NewProfileOperator(config).Sync(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ForkSkill(config, name, now); err == nil {
+				t.Fatal("protected system skill was forked")
+			}
+			protectedPath := filepath.Join(config.SystemSkillsRoot, name, "SKILL.md")
+			if _, err := os.Stat(protectedPath); err != nil {
+				t.Fatalf("protected skill was not synchronized: %v", err)
+			}
+			if err := os.WriteFile(protectedPath, []byte("tampered\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := NewProfileOperator(config).Sync(); err != nil {
+				t.Fatal(err)
+			}
+			contents, err := os.ReadFile(protectedPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(contents) != "system\n" {
+				t.Fatalf("protected skill was not restored: %q", contents)
+			}
+		})
 	}
 }
 

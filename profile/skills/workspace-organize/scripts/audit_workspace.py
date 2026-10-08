@@ -12,6 +12,19 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+SCRIPT_PATH = Path(__file__).resolve()
+SYSTEM_SCRIPTS_CANDIDATES = (
+    SCRIPT_PATH.parents[3] / "system-skills" / "workspace-template-customization" / "scripts",
+    SCRIPT_PATH.parents[3] / "skills" / "workspace-template-customization" / "scripts",
+    SCRIPT_PATH.parents[2] / "workspace-template-customization" / "scripts",
+)
+for SYSTEM_SCRIPTS in SYSTEM_SCRIPTS_CANDIDATES:
+    if SYSTEM_SCRIPTS.is_dir() and str(SYSTEM_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SYSTEM_SCRIPTS))
+        break
+
+from workspace_registry import allowed_root_domains, load_registry
+
 CANONICAL_DOMAINS = {
     "inbox",
     "goals",
@@ -36,6 +49,8 @@ ALLOWED_ROOT_FILES = {
     ".gitignore",
     ".git",
     ".DS_Store",
+    "workspace.yaml",
+    "workspace.schema.json",
 }
 
 MD_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((?!https?://|mailto:|/files/)([^)#]+)(?:#[^)]+)?\)")
@@ -92,8 +107,11 @@ def mask_markdown_code(content: str) -> str:
     return INLINE_CODE_PATTERN.sub(_blank_code, masked)
 
 
-def audit_root_files(workspace: Path) -> list[dict[str, Any]]:
+def audit_root_files(
+    workspace: Path, registry: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
     issues = []
+    allowed_domains = allowed_root_domains(registry) or CANONICAL_DOMAINS
     try:
         for entry in workspace.iterdir():
             if entry.name in ALLOWED_ROOT_FILES or entry.name.startswith("."):
@@ -105,12 +123,12 @@ def audit_root_files(workspace: Path) -> list[dict[str, Any]]:
                     "observation": f"File '{entry.name}' is located at workspace root outside canonical domains.",
                     "suggestion": "Move file into an appropriate domain (e.g. inbox/, knowledge/, or archive/).",
                 })
-            elif entry.is_dir() and entry.name not in CANONICAL_DOMAINS:
+            elif entry.is_dir() and entry.name not in allowed_domains:
                 issues.append({
-                    "type": "non-canonical-directory",
+                    "type": "unregistered-directory",
                     "file": entry.name,
-                    "observation": f"Directory '{entry.name}/' is not one of the 15 canonical Personal OS domains.",
-                    "suggestion": "Review whether contents belong inside a canonical domain or archive/.",
+                    "observation": f"Directory '{entry.name}/' is not a registered Personal OS domain.",
+                    "suggestion": "Propose an entry in workspace.yaml, or review whether contents belong inside a registered domain or archive/.",
                 })
     except Exception as e:
         issues.append({"type": "audit-error", "file": ".", "observation": str(e), "suggestion": "Check permissions."})
@@ -245,7 +263,7 @@ def audit_claims(workspace: Path) -> list[dict[str, Any]]:
         return issues
     for root, _, files in os.walk(claims_dir):
         for file in files:
-            if not file.endswith(".md") or file in ("claim-record.md", "README.md"):
+            if not file.endswith(".md") or file.endswith("-template.md") or file == "README.md":
                 continue
             file_path = Path(root, file)
             rel_path = file_path.relative_to(workspace).as_posix()
@@ -254,12 +272,12 @@ def audit_claims(workspace: Path) -> list[dict[str, Any]]:
             except Exception:
                 continue
             status_match = STATUS_PATTERN.search(content)
-            if status_match and status_match.group(1).lower() in ("provisional", "candidate", "disputed"):
+            if status_match and status_match.group(1).lower() in ("candidate", "contested"):
                 issues.append({
-                    "type": "provisional-claim",
+                    "type": "claim-requires-review",
                     "file": rel_path,
-                    "observation": f"Claim in '{rel_path}' is '{status_match.group(1)}' and requires verification.",
-                    "suggestion": "Review supporting evidence or update status to active/retracted.",
+                    "observation": f"Claim in '{rel_path}' is '{status_match.group(1)}' and requires review.",
+                    "suggestion": "Review its evidence and provenance before changing its status.",
                 })
     return issues
 
@@ -269,22 +287,40 @@ def run_audit(workspace_dir: str | Path) -> dict[str, Any]:
     if not workspace.is_dir():
         raise FileNotFoundError(f"Workspace directory not found: {workspace}")
 
-    root_issues = audit_root_files(workspace)
+    registry_issues: list[dict[str, Any]] = []
+    try:
+        registry = load_registry(workspace)
+    except ValueError as exc:
+        registry = None
+        registry_issues.append({
+            "type": "workspace-registry",
+            "file": "workspace.yaml",
+            "observation": str(exc),
+            "suggestion": "Repair workspace.yaml or remove it to use the legacy 15-domain fallback.",
+        })
+
+    root_issues = audit_root_files(workspace, registry)
     inbox_issues = audit_inbox(workspace)
     broken_link_issues = audit_broken_links(workspace)
     project_issues = audit_completed_projects(workspace)
     claim_issues = audit_claims(workspace)
 
-    all_issues = root_issues + inbox_issues + broken_link_issues + project_issues + claim_issues
+    all_issues = registry_issues + root_issues + inbox_issues + broken_link_issues + project_issues + claim_issues
     return {
         "workspace": str(workspace),
         "total_issues": len(all_issues),
         "summary": {
-            "stray_root_files": len(root_issues),
+            "stray_root_files": sum(
+                1 for issue in root_issues if issue["type"] == "stray-root-file"
+            ),
             "unfiled_inbox_items": len(inbox_issues),
             "broken_links": len(broken_link_issues),
             "completed_projects": len(project_issues),
             "claims_requiring_review": len(claim_issues),
+            "registry_errors": len(registry_issues),
+            "unregistered_directories": sum(
+                1 for issue in root_issues if issue["type"] == "unregistered-directory"
+            ),
         },
         "issues": all_issues,
     }
@@ -296,6 +332,63 @@ def self_test() -> None:
         # Create canonical dirs
         for d in ("inbox", "projects", "knowledge/claims"):
             (tmp / d).mkdir(parents=True)
+
+        core_roots = (
+            "inbox",
+            "goals",
+            "areas",
+            "projects",
+            "knowledge",
+            "ideas",
+            "decisions",
+            "monitors",
+            "tasks",
+            "calendar",
+            "people",
+            "shopping",
+            "travel",
+            "finance",
+            "archive",
+        )
+        (tmp / "workspace.schema.json").write_text(
+            '{"$schema":"https://json-schema.org/draft/2020-12/schema",'
+            '"type":"object","properties":{"$schema":{"const":"./workspace.schema.json"},'
+            '"version":{"const":1},"domains":{"type":"array","minItems":15}},'
+            '"required":["$schema","version","domains"],"additionalProperties":false}\n',
+            encoding="utf-8",
+        )
+        registry_lines = [
+            "$schema: ./workspace.schema.json",
+            "version: 1",
+            "domains:",
+        ]
+        for root_name in core_roots:
+            registry_lines.extend(
+                [
+                    f"  - path: {root_name}",
+                    "    kind: core",
+                    f"    label: {root_name.title()}",
+                    f"    purpose: {root_name.title()} records",
+                ]
+            )
+        registry_lines.extend(
+            [
+                "  - path: learning",
+                "    kind: extension",
+                "    label: Learning",
+                "    purpose: Learning records",
+                "    lifecycle: active -> archive",
+                "  - path: learning/topics",
+                "    kind: extension",
+                "    label: Learning Topics",
+                "    purpose: Learning topic records",
+                "    lifecycle: topic -> archive",
+            ]
+        )
+        (tmp / "workspace.yaml").write_text(
+            "\n".join(registry_lines) + "\n", encoding="utf-8"
+        )
+        (tmp / "music").mkdir()
 
         # 1. Stray root file
         (tmp / "scratch_notes.txt").write_text("random scratch note", encoding="utf-8")
@@ -315,15 +408,20 @@ def self_test() -> None:
             encoding="utf-8",
         )
 
-        # 5. Provisional claim
+        # 5. Candidate claim and starter template
         (tmp / "knowledge" / "claims" / "c001.md").write_text(
-            "---\nstatus: provisional\n---\nUser prefers window seats.\n",
+            "---\nstatus: candidate\n---\nUser prefers window seats.\n",
+            encoding="utf-8",
+        )
+        (tmp / "knowledge" / "claims" / "claim-template.md").write_text(
+            "---\nstatus: candidate\n---\n# <Claim Record>\n",
             encoding="utf-8",
         )
 
         result = run_audit(tmp)
-        assert result["total_issues"] == 5, f"Expected 5 issues, got {result['total_issues']}: {result['issues']}"
+        assert result["total_issues"] == 6, f"Expected 6 issues, got {result['total_issues']}: {result['issues']}"
         assert result["summary"]["stray_root_files"] == 1
+        assert result["summary"]["unregistered_directories"] == 1
         assert result["summary"]["unfiled_inbox_items"] == 1
         assert result["summary"]["broken_links"] == 1
         assert result["summary"]["completed_projects"] == 1
