@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -171,9 +172,97 @@ func TestWorkspaceUIPasswordRejectsNonInteractiveSetup(t *testing.T) {
 	}
 }
 
-func TestUninstallRequiresExplicitTargetRootAndProject(t *testing.T) {
+func TestUninstallWithoutConfigRequiresExplicitSelection(t *testing.T) {
+	t.Setenv("OPENLIA_CONFIG", filepath.Join(t.TempDir(), "missing.toml"))
 	if got := commandUninstall(Options{}, nil); got != ExitUsage {
-		t.Fatalf("uninstall without deployment arguments exit code = %d, want %d", got, ExitUsage)
+		t.Fatalf("uninstall without config or deployment arguments exit code = %d, want %d", got, ExitUsage)
+	}
+}
+
+func TestResolveMaintenanceDeploymentUsesConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("OPENLIA_CONFIG", path)
+	want := defaultConfig()
+	want.Target = "root@example.test"
+	want.InstallRoot = "/opt/example"
+	want.Project = "example"
+	if err := saveConfig(want); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveMaintenanceDeployment(deploymentSelectors{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Target != want.Target || got.InstallRoot != want.InstallRoot || got.Project != want.Project {
+		t.Fatalf("resolved deployment = %#v, want target=%q root=%q project=%q", got, want.Target, want.InstallRoot, want.Project)
+	}
+}
+
+func TestResolveMaintenanceDeploymentAcceptsMatchingAssertions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("OPENLIA_CONFIG", path)
+	want := defaultConfig()
+	want.Target = "root@example.test"
+	want.InstallRoot = "/opt/example"
+	want.Project = "example"
+	if err := saveConfig(want); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := resolveMaintenanceDeployment(deploymentSelectors{
+		mode:       "ssh",
+		modeSet:    true,
+		target:     want.Target,
+		targetSet:  true,
+		root:       want.InstallRoot,
+		rootSet:    true,
+		project:    want.Project,
+		projectSet: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveMaintenanceDeploymentRejectsConflictingAssertions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("OPENLIA_CONFIG", path)
+	want := defaultConfig()
+	want.Target = "root@example.test"
+	want.InstallRoot = "/opt/example"
+	want.Project = "example"
+	if err := saveConfig(want); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := resolveMaintenanceDeployment(deploymentSelectors{
+		target:    "root@other.example.test",
+		targetSet: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "target") {
+		t.Fatalf("conflicting target error = %v", err)
+	}
+}
+
+func TestResolveMaintenanceDeploymentSupportsExplicitSelectionWithoutConfig(t *testing.T) {
+	t.Setenv("OPENLIA_CONFIG", filepath.Join(t.TempDir(), "missing.toml"))
+
+	got, err := resolveMaintenanceDeployment(deploymentSelectors{
+		mode:       "ssh",
+		modeSet:    true,
+		target:     "root@example.test",
+		targetSet:  true,
+		root:       "/opt/example",
+		rootSet:    true,
+		project:    "example",
+		projectSet: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Mode != "ssh" || got.Target != "root@example.test" || got.InstallRoot != "/opt/example" || got.Project != "example" {
+		t.Fatalf("explicit selection = %#v", got)
 	}
 }
 

@@ -851,7 +851,7 @@ openlia logs --follow
 openlia stop
 openlia start
 openlia restart
-openlia uninstall --local --project NAME --root /path
+openlia uninstall
 openlia uninstall --target user@host --project NAME --root /path
 openlia backup create
 openlia backup keygen
@@ -871,6 +871,12 @@ Use a separate operator config when managing another deployment:
 ```sh
 OPENLIA_CONFIG="$HOME/.config/openlia/remote.toml" openlia status
 ```
+
+Maintenance commands use the selected operator config by default. `uninstall`
+shows the resolved deployment before confirmation; repeated `--local`,
+`--target`, `--root`, or `--project` values are assertions and must match the
+config. If no config exists, provide a complete explicit selection. Conflicting
+arguments are rejected rather than silently selecting another deployment.
 
 `openlia backup create` creates an encrypted durable backup of the workspace,
 workspace Git history, Hermes agent state, profile-managed files, metadata, and

@@ -183,9 +183,6 @@ When testing is complete, tear down all resources to leave both local and target
 3. Run non-interactive uninstallation:
    ```bash
    OPENLIA_CONFIG=~/.config/openlia/dev/config.toml ./openlia uninstall \
-     --target user@test-host \
-     --project openlia_dev \
-     --root /opt/openlia_dev \
      --non-interactive \
      --json
    ```
