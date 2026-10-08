@@ -90,7 +90,7 @@ Usage:
   openlia status [--json]
   openlia doctor [--json]
   openlia deploy | start | stop | restart
-  openlia uninstall [--local|--target user@host] --project NAME --root /path
+  openlia uninstall [--local|--target user@host] [--project NAME] [--root /path]
   openlia logs [--follow]
   openlia update [openlia|hermes|locho|open-webui]
   openlia skills list|show|test

@@ -592,39 +592,41 @@ func deploymentResultState(raw []byte) (string, bool) {
 func commandUninstall(options Options, args []string) int {
 	set := newFlagSet("uninstall")
 	local := set.Bool("local", false, "uninstall the agent on this machine")
-	target := set.String("target", "", "uninstall the agent on this SSH target")
-	root := set.String("root", "", "specific OpenLia installation root on the selected agent machine")
-	project := set.String("project", "", "Compose project name")
+	target := set.String("target", "", "assert or select the SSH target")
+	root := set.String("root", "", "assert or select the OpenLia installation root")
+	project := set.String("project", "", "assert or select the Compose project name")
 	if err := set.Parse(args); err != nil {
 		return ExitUsage
 	}
 	if set.NArg() != 0 {
 		return fail(options, ExitUsage, "uninstall does not accept positional arguments", nil)
 	}
-	if (*local && *target != "") || (!*local && *target == "") || *root == "" || *project == "" {
-		return fail(options, ExitUsage, "uninstall requires either --local or --target, plus --root and --project", nil)
+	if *local && *target != "" {
+		return fail(options, ExitUsage, "--local and --target are mutually exclusive", nil)
 	}
-	config := defaultConfig()
+	mode := "ssh"
 	if *local {
-		config.Mode = "local"
-	} else {
-		config.Mode = "ssh"
-		config.Target = *target
+		mode = "local"
 	}
-	config.InstallRoot = *root
-	config.Project = *project
-	if existing, err := loadConfig(); err == nil && existing.Mode == config.Mode && existing.Target == config.Target && existing.InstallRoot == config.InstallRoot && existing.Project == config.Project {
-		config = existing
+	config, err := resolveMaintenanceDeployment(deploymentSelectors{
+		mode:       mode,
+		modeSet:    hasArgument(args, "--local") || hasArgument(args, "--target"),
+		target:     *target,
+		targetSet:  hasArgument(args, "--target"),
+		root:       *root,
+		rootSet:    hasArgument(args, "--root"),
+		project:    *project,
+		projectSet: hasArgument(args, "--project"),
+	})
+	if err != nil {
+		return fail(options, ExitUsage, err.Error(), map[string]any{"config": configPath()})
 	}
-	config.Mode = "local"
-	if !*local {
-		config.Mode = "ssh"
-		config.Target = *target
-	}
-	config.InstallRoot = *root
-	config.Project = *project
 	if err := validateConfig(config); err != nil {
 		return fail(options, ExitUsage, err.Error(), nil)
+	}
+	if !options.JSON {
+		fmt.Fprintln(os.Stderr, deploymentSummary(config))
+		fmt.Fprintln(os.Stderr)
 	}
 	ctx, cancel := remoteContext()
 	defer cancel()
@@ -669,8 +671,8 @@ func commandUninstall(options Options, args []string) int {
 		fmt.Fprintln(os.Stderr, "No remote backup destination is configured; uninstall will remove local archives without leaving a remote recovery copy.")
 	}
 	if !options.NonInteractive {
-		expected := "uninstall " + config.InstallRoot
-		fmt.Fprintf(os.Stderr, "Permanently remove OpenLia from %s at %s? Type %q to continue: ", config.Mode, config.InstallRoot, expected)
+		expected := "uninstall " + config.Project
+		fmt.Fprintf(os.Stderr, "Permanently remove this deployment and its workspace? Type %q to continue: ", expected)
 		answer, readErr := bufio.NewReader(os.Stdin).ReadString('\n')
 		if readErr != nil || strings.TrimSpace(answer) != expected {
 			return fail(options, ExitFailure, "uninstall cancelled", nil)
@@ -679,6 +681,18 @@ func commandUninstall(options Options, args []string) int {
 	raw, err := newDeployment(config).uninstall(ctx)
 	if err != nil {
 		return fail(options, ExitFailure, err.Error(), map[string]any{"mode": config.Mode, "target": config.Target, "root": config.InstallRoot})
+	}
+	if options.JSON {
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return fail(options, ExitFailure, "could not parse uninstall result", nil)
+		}
+		payload["config"] = configPath()
+		payload["mode"] = config.Mode
+		payload["project"] = config.Project
+		payload["root"] = config.InstallRoot
+		payload["target"] = config.Target
+		return writeResult(options, payload, "")
 	}
 	return renderRemote(options, raw, "openlia uninstall: "+redact(string(raw)))
 }
