@@ -34,15 +34,19 @@ metadata:
   - `claim` -> `knowledge/claims/`
   - `archive` -> `archive/`
   - `review` -> remain in `inbox/` pending clarification
-- A route is only a suggestion. Every domain write still requires explicit approval for the named candidate(s).
-- Resolve a route through the active workspace registry. A matching extension
-  may override a core route only when its context tags match the item. If the
-  registry has no destination for a route, hold the candidate in `inbox/` and
-  propose a registry extension.
+- A route is only a destination suggestion. Resolve it through the active
+  workspace registry, then check `assistant-policy.yaml` for `create_records`,
+  `update_records`, or `archive_records` delegation in that domain.
+- A clear candidate may be filed automatically when the current request or
+  standing delegation authorizes the operation. An ambiguous candidate stays
+  in the review file and asks for the smallest clarification or approval.
+- A matching extension may override a core route only when its context tags
+  match the item. If the registry has no destination, hold the candidate in
+  `inbox/` and propose a registry extension.
 
 ## Chat Intake & Review Procedure (Conversational Mode)
 
-1. Receive the unstructured text, message, or chat excerpt as an intake request. Do not stage a workspace file for an unrelated message that was not presented for capture or triage.
+1. Receive the unstructured text, message, or chat excerpt as an intake request. Do not stage a workspace file for an unrelated message that was not presented for capture or triage. Read `assistant-policy.yaml` before deciding which writes are delegated.
 2. Choose a slug that is stable and safe for a filename. Create or stage a review document under `inbox/YYYY-MM-DD-chat-<slug>.md`; if that path already exists, use a non-destructive suffix such as `-2` rather than overwriting it.
 3. Read the relevant workspace templates before proposing a destination. Preserve the original source, source identifier, capture date, and any explicit source timestamp without guessing missing values.
 4. Extract and organize candidate items:
@@ -52,15 +56,33 @@ metadata:
    - **Proposed Durable Claims**: one specific candidate statement with an explicit kind (`reported`, `observed`, `inferred`, or `hypothetical`), stable source reference, evidence, and temporal scope when available. Keep it a candidate.
    - **Route and Destination**: record the suggested route, workspace destination, confidence, and rationale for every candidate.
    - **Unclear / Needs Confirmation**: missing times, ambiguous dates, unclear owners, conflicting statements, or unverified facts.
-5. Write the review with `Status: pending-review`. Do not create target records during staging. A review-file write is permitted only as part of the requested intake flow and must remain inside the configured workspace root.
-6. Reply to the user with a concise summary (3-5 bullets), a clickable workspace link (`[Review Title](openlia://workspace/inbox/YYYY-MM-DD-chat-<slug>.md)`), and the candidate IDs needing a decision.
-7. Request scoped approval, for example: `Approve C-2026-10-08-001 and C-2026-10-08-003 for the proposed destinations.` A bare `Approved` means approve all unambiguous candidates only when the review explicitly says so; otherwise ask for candidate IDs.
-8. Wait for explicit approval before creating or changing records in `calendar/`, `tasks/`, `decisions/`, `ideas/`, `knowledge/`, or `archive/`. Approval for a workspace calendar note does not authorize changing an external calendar.
-9. Once specific candidates are approved:
+5. Write the review with `Status: pending-review`. The review-file write is
+   permitted as part of the requested intake flow and must remain inside the
+   configured workspace root.
+6. File only unambiguous candidates covered by the current request or the
+   standing delegation policy. Re-read the destination template/schema before
+   each write. Mark the candidate's authorization as `direct-request` or
+   `standing-delegation` and preserve the source link.
+7. Reply with a concise summary (3-5 bullets), a clickable review link
+   (`[Review Title](openlia://workspace/inbox/YYYY-MM-DD-chat-<slug>.md)`),
+   created-record links, and candidate IDs still needing a decision.
+8. Ask for scoped approval only for candidates outside delegation or needing
+   clarification, for example: `Approve C-2026-10-08-001 for the proposed
+   destination.` A bare `Approved` means approve all unambiguous pending
+   candidates only when the review explicitly says so. Approval for a workspace
+   calendar note does not authorize changing an external calendar.
+9. Once specific candidates are authorized by delegation or explicit approval:
    - Re-read the source review and the destination template/schema immediately before writing.
-   - Create or update only the approved target records. Use `knowledge/claims/` as the canonical durable-claim store; keep Hermes memory as a cache only.
-   - Update the review with `Status: approved` or `Status: partially-approved`, the approved and rejected candidate IDs, the approval timestamp including timezone, and canonical links to created records.
-   - Inspect the diff, stage only the approved files, and follow the `workspace-git` skill for a local `backup: ...` commit. Never push or create an empty commit.
+    - Create or update only the authorized target records. Use
+      `knowledge/claims/` as the canonical durable-claim store; keep Hermes
+      memory as a cache only.
+    - Update the review with `Status: approved` or `Status: partially-approved`,
+      the authorized and rejected candidate IDs, the authorization source, the
+      timestamp including timezone when available, and canonical links to
+      created records.
+    - Inspect the diff, stage only the authorized files, and follow the
+      `workspace-git` skill when local Git commits are enabled. Never push or
+      create an empty commit.
 
 ## Batch JSON Triage Procedure (Structured Mode)
 
@@ -70,24 +92,29 @@ metadata:
 3. Review every route, especially `review`, `archive`, `event`, `claim`, and any item with an unsupported explicit type.
 4. Treat helper output as a deterministic suggestion, not a filing instruction.
    Registered destinations are valid suggestions; an `inbox/` destination or a
-   missing destination means an extension or clarification is needed. Propose
-   file moves or record creation; apply them only after scoped approval.
+   missing destination means an extension or clarification is needed. Apply a
+   suggestion only when the current request or loaded policy authorizes it and
+   the item is clear.
 
 Input is a JSON list or `{ "items": [...] }` with optional `id`, `title`,
 `subject`, `content`, `tags`, `route`, `category`, and explicit `type` fields.
 Supported explicit route values are `task`, `event`, `decision`, `idea`,
 `research`, `claim`, `archive`, and `review`. Unknown explicit route/type values
 are held for manual review instead of being silently ignored. The optional
-`--workspace-root` loads the user-owned `workspace.yaml`; without it, the
-helper uses the legacy core route map. The helper is local-only, deterministic,
-and does not modify the input or create directories.
+`--workspace-root` loads the user-owned `workspace.yaml` and
+`assistant-policy.yaml`; without it, the helper uses the legacy core route map
+and no standing delegation. The helper is local-only, deterministic, and does
+not modify the input or create directories.
 
 ## Pitfalls
 
-- Never create calendar events, tasks, or permanent claim records directly from an unreviewed chat message without user approval.
+- Never create a record from text that was not presented for capture or triage.
+  A requested intake or matching standing delegation is sufficient authority
+  for a clear local record; preserve the source and report the action.
 - Do not guess or infer missing dates, medical interpretations, or deadlines; mark them explicitly in `Unclear / Needs Confirmation`.
 - Do not treat a keyword match as evidence for a durable claim. Claims require a source reference and remain candidates until reviewed.
-- Do not overwrite an existing review file, silently replace a conflicting claim, or apply a broad approval to ambiguous candidates.
+- Do not overwrite an existing review file, silently replace a conflicting
+  claim, or apply delegation to ambiguous candidates.
 - Do not embed environment-specific HTTP origins; use canonical `openlia://` workspace URIs.
 
 ## Verification
@@ -95,6 +122,8 @@ and does not modify the input or create directories.
 Confirm that:
 1. Every requested chat intake has one collision-safe staged review file in `inbox/`.
 2. Every candidate has an ID, route, destination, rationale, confidence, and approval state.
-3. Consequential calendar/task/decision/idea/claim/archive writes occur ONLY after scoped explicit approval.
+3. Consequential writes occur only after scoped direct-request,
+   standing-delegation, or explicit approval authorization; external calendar
+   changes remain separate.
 4. Source review documents are preserved for provenance, and durable claims cite a stable source reference.
 5. The final response links only to canonical `openlia://workspace/...` paths and does not claim a write or commit until verified.

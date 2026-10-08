@@ -19,7 +19,7 @@ Use for a morning or on-demand briefing that synthesizes calendar events,
 active tasks, monitors, recent changes, and personal priorities into an
 actionable snapshot.
 
-Read `workspace.yaml` first when it exists. The registry controls which core
+Read `workspace.yaml` and `assistant-policy.yaml` first when they exist. The registry controls which core
 and user-registered extension paths are included. A registered extension is
 included only when it opts into briefings; an unregistered directory is never
 silently scanned.
@@ -60,11 +60,13 @@ commitments.
 
 ## Report Structure
 
-Use `templates/briefing.md` as the report skeleton and write the completed
-report directly to `inbox/daily-briefing/YYYY-MM-DD.md`. Create the
-`inbox/daily-briefing/` directory when it does not exist. The template headings
-are the report contract. Replace the starter prompts with report content while
-preserving the template's heading structure:
+Use `templates/briefing.md` as the report skeleton. For an interactive run,
+write the completed report to `inbox/daily-briefing/YYYY-MM-DD.md` when report
+writing is authorized. For a scheduled run, use the configured
+`scheduled_work.report_destination` instead. Create the destination directory
+when it does not exist. The template headings are the report contract. Replace
+the starter prompts with report content while preserving the template's
+heading structure:
 
 1. **Today**: focus, evidenced calendar events, tasks, follow-ups, and active
    monitors. If no calendar or task records are available, say so explicitly;
@@ -91,13 +93,19 @@ that the corresponding evidence is unavailable.
 
 ## Delivery
 
-- By default, save the dated report to
-  `inbox/daily-briefing/YYYY-MM-DD.md`.
-- If the caller explicitly requests read-only/no-write delivery (including a
-  scheduled run), return the structured report in chat and do not write a
-  workspace report.
+- By default, save an interactive dated report to the registered
+  `inbox/daily-briefing/YYYY-MM-DD.md` when the current request or
+  `assistant-policy.yaml` authorizes `generate_reports`.
+- If the caller explicitly requests read-only/no-write delivery, return the
+  structured report in chat and do not write a workspace report. For scheduled
+  runs, resolve `scheduled_work.report_destination` and write only to
+  `<report_destination>/YYYY-MM-DD.md` when `scheduled_work.enabled` and
+  `generate_reports` are both enabled. The destination must remain beneath a
+  registered and policy-allowed workspace domain; never fall back to the
+  interactive default when the configured destination is unavailable. Otherwise
+  return the report in the job output.
 - For a saved report, return 3–6 concise bullets in the user's configured
-  output language and link to
+  output language and link to the actual saved path, for example
   `[Daily briefing YYYY-MM-DD](openlia://workspace/inbox/daily-briefing/YYYY-MM-DD.md)`.
 - Send the full structured report in chat only when the caller requests
   no-write delivery or explicitly asks for the entire report. Do not link to a
@@ -106,8 +114,9 @@ that the corresponding evidence is unavailable.
 
 ## Safety
 
-A briefing is read-only with respect to source records: never create tasks,
-modify calendar entries, send messages, or change source documents. A requested
-dated report is the only workspace file written. Review the completed report
-for the template headings, explicit citations, and unsupported claims before
-delivery.
+A briefing is read-only with respect to source records unless a separate
+delegated action is explicitly in scope: never create tasks, modify calendar
+entries, send messages, or change source documents merely because a briefing
+mentions them. A delegated report write is limited to the configured report
+destination. Review the completed report for the template headings, explicit
+citations, unsupported claims, and the authority used before delivery.

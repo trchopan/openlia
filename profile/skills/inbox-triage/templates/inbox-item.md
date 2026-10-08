@@ -6,6 +6,7 @@
 - Title:
 - Status: pending-review | partially-approved | approved | rejected
 - Approval timestamp: [ISO-8601 timestamp with timezone, or blank]
+- Authorization: direct-request | standing-delegation | explicit-approval | pending
 
 **Source**
 
@@ -27,7 +28,8 @@
 - Destination: [registered workspace path, or inbox/ when unresolved]
 - Rationale:
 - Confidence: high | medium | low
-- Approval: pending | approved | rejected
+- Approval: pending | authorized | approved | rejected
+- Authorization: direct-request | standing-delegation | explicit-approval | pending
 - Owner:
 - Due date or event time: [explicit date/time and timezone, or unknown]
 - Participants / location:

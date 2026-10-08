@@ -26,7 +26,9 @@ of outcomes for the next period.
    claims requiring review. Read claim records directly from
    `knowledge/claims/`; check their status, `valid_until`, and `review_after`
    against the current date when assembling the claim input.
-4. Draft a short next-week list and ask before changing workspace records.
+4. Draft a short next-week list. Apply routine updates only when the current
+   request or `assistant-policy.yaml` delegates them; otherwise ask before
+   changing workspace records.
 
 The input object accepts `week`, `projects`, `tasks`, `decisions`, and `claims`
 lists. Claim records are supplied directly as read-only summaries; statuses are
@@ -36,7 +38,9 @@ compared literally and the output is deterministic.
 
 - Do not equate activity with progress or add tasks to fill space.
 - Do not close a task or decision merely because it is old.
-- Do not activate, retract, or supersede a claim during a review without approval.
+- Do not activate, retract, or supersede a claim during a review unless the
+  current request or policy explicitly authorizes that memory action. Inferred
+  claims remain candidates by default.
 - A review does not authorize messages, purchases, or scheduling.
 
 ## Verification

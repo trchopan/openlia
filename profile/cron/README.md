@@ -4,16 +4,18 @@ No cron jobs are enabled by this profile. Scheduled agent work must be
 reviewed after the interactive workflows and credentials are configured.
 
 When ready, create additional jobs through the Hermes cron interface and keep
-them paused until reviewed. Scheduled daily briefings and weekly reviews must
-explicitly request read-only/no-write delivery and return their reports in the
-job output; the interactive daily-briefing default writes a dated workspace
-report. Cron is configured to deny dangerous commands and unattended approval
-requests.
+them paused until reviewed. Scheduled work must read `assistant-policy.yaml`.
+The starter policy permits routine local workspace actions and report writes,
+but external side effects remain gated. A scheduled daily briefing may save a
+dated report only when `scheduled_work.enabled` and its action list permit
+`generate_reports`; otherwise return the report in the job output. An explicit
+read-only instruction always takes precedence. Cron is configured to deny
+dangerous commands and unattended approval requests.
 
 Example review flow:
 
 ```text
-hermes cron create "every 1d at 09:00" "Run /daily-briefing using read-only inputs; return the structured report in chat only and do not write workspace files." --skill daily-briefing --paused
+hermes cron create "every 1d at 09:00" "Run /daily-briefing within assistant-policy.yaml; save the dated report only if scheduled_work permits generate_reports, otherwise return it in chat." --skill daily-briefing --paused
 hermes cron list
 hermes cron resume <job-id>
 ```

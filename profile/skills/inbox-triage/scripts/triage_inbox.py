@@ -21,7 +21,7 @@ for SYSTEM_SCRIPTS in SYSTEM_SCRIPTS_CANDIDATES:
         sys.path.insert(0, str(SYSTEM_SCRIPTS))
         break
 
-from workspace_registry import load_registry, resolve_route_destination
+from workspace_registry import load_policy, load_registry, policy_allows, resolve_route_destination
 
 
 ROUTES = ("task", "event", "decision", "idea", "research", "claim", "archive", "review")
@@ -119,7 +119,9 @@ def _identifier(item: dict[str, Any], index: int) -> str:
 
 
 def triage(
-    items: list[dict[str, Any]], registry: dict[str, Any] | None = None
+    items: list[dict[str, Any]],
+    registry: dict[str, Any] | None = None,
+    policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     result: list[dict[str, Any]] = []
     counts = {route: 0 for route in ROUTES}
@@ -142,6 +144,11 @@ def triage(
             if destination is None:
                 destination = "inbox/"
         details = ROUTE_DETAILS[route]
+        authorization_action = "archive_records" if route == "archive" else "create_records"
+        delegated = (
+            route != "review"
+            and policy_allows(policy, authorization_action, destination)
+        )
         confidence = (
             "low"
             if route == "review"
@@ -157,8 +164,11 @@ def triage(
             "reason": reason,
             "confidence": confidence,
             "needs_review": route == "review" or "manual review is required" in reason,
-            "approval_required": True,
-            "approval_state": "pending",
+            "delegation_available": delegated,
+            "authorization_action": authorization_action,
+            "approval_required": not delegated,
+            "approval_state": "delegated" if delegated else "pending",
+            "authorization": "standing-delegation" if delegated else "pending",
             "next_step": details["next_step"],
         }
         result.append(record)
@@ -208,6 +218,22 @@ def self_test() -> None:
     assert output["items"][4]["needs_review"] is True
     assert output["items"][8]["needs_review"] is True
 
+    delegated = triage(
+        [{"id": "task", "title": "Follow up on the draft"}],
+        policy={
+            "delegation": {
+                "workspace": {
+                    "enabled": True,
+                    "allowed_actions": ["create_records"],
+                    "allowed_domains": ["tasks"],
+                }
+            }
+        },
+    )
+    assert delegated["items"][0]["delegation_available"] is True
+    assert delegated["items"][0]["approval_required"] is False
+    assert delegated["items"][0]["authorization"] == "standing-delegation"
+
     registry = {
         "domains": [
             {"path": "inbox", "kind": "core", "route": "review", "tags": []},
@@ -245,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--workspace-root",
         type=Path,
-        help="Workspace root containing workspace.yaml; legacy routes are used when omitted",
+        help="Workspace root containing workspace.yaml and assistant-policy.yaml; legacy routes and no standing delegation are used when omitted",
     )
     parser.add_argument("--output", type=Path, help="Write JSON output to this file")
     parser.add_argument("--self-test", action="store_true", help="Run the built-in deterministic test")
@@ -258,7 +284,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("input is required unless --self-test is used")
     try:
         registry = load_registry(args.workspace_root) if args.workspace_root else None
-        payload = triage(load_items(args.input), registry)
+        policy = load_policy(args.workspace_root, registry=registry) if args.workspace_root else None
+        payload = triage(load_items(args.input), registry, policy)
         rendered = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
         if args.output:
             args.output.write_text(rendered, encoding="utf-8")

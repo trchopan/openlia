@@ -23,7 +23,7 @@ for SYSTEM_SCRIPTS in SYSTEM_SCRIPTS_CANDIDATES:
         sys.path.insert(0, str(SYSTEM_SCRIPTS))
         break
 
-from workspace_registry import allowed_root_domains, load_registry
+from workspace_registry import allowed_root_domains, load_policy, load_registry
 
 CANONICAL_DOMAINS = {
     "inbox",
@@ -51,6 +51,8 @@ ALLOWED_ROOT_FILES = {
     ".DS_Store",
     "workspace.yaml",
     "workspace.schema.json",
+    "assistant-policy.yaml",
+    "assistant-policy.schema.json",
 }
 
 MD_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((?!https?://|mailto:|/files/)([^)#]+)(?:#[^)]+)?\)")
@@ -288,10 +290,12 @@ def run_audit(workspace_dir: str | Path) -> dict[str, Any]:
         raise FileNotFoundError(f"Workspace directory not found: {workspace}")
 
     registry_issues: list[dict[str, Any]] = []
+    registry_loaded = True
     try:
         registry = load_registry(workspace)
     except ValueError as exc:
         registry = None
+        registry_loaded = False
         registry_issues.append({
             "type": "workspace-registry",
             "file": "workspace.yaml",
@@ -299,13 +303,25 @@ def run_audit(workspace_dir: str | Path) -> dict[str, Any]:
             "suggestion": "Repair workspace.yaml or remove it to use the legacy 15-domain fallback.",
         })
 
+    policy_issues: list[dict[str, Any]] = []
+    if registry_loaded:
+        try:
+            load_policy(workspace, registry=registry)
+        except ValueError as exc:
+            policy_issues.append({
+                "type": "assistant-policy",
+                "file": "assistant-policy.yaml",
+                "observation": str(exc),
+                "suggestion": "Repair assistant-policy.yaml and its schema before allowing delegated writes.",
+            })
+
     root_issues = audit_root_files(workspace, registry)
     inbox_issues = audit_inbox(workspace)
     broken_link_issues = audit_broken_links(workspace)
     project_issues = audit_completed_projects(workspace)
     claim_issues = audit_claims(workspace)
 
-    all_issues = registry_issues + root_issues + inbox_issues + broken_link_issues + project_issues + claim_issues
+    all_issues = registry_issues + policy_issues + root_issues + inbox_issues + broken_link_issues + project_issues + claim_issues
     return {
         "workspace": str(workspace),
         "total_issues": len(all_issues),
@@ -318,6 +334,7 @@ def run_audit(workspace_dir: str | Path) -> dict[str, Any]:
             "completed_projects": len(project_issues),
             "claims_requiring_review": len(claim_issues),
             "registry_errors": len(registry_issues),
+            "policy_errors": len(policy_issues),
             "unregistered_directories": sum(
                 1 for issue in root_issues if issue["type"] == "unregistered-directory"
             ),

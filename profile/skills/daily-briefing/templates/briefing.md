@@ -43,7 +43,7 @@ date: YYYY-MM-DD
 
 ### Questions
 
-- What needs explicit approval?
+- What needs clarification, explicit approval, or an external-action decision?
 
 ## Important-Urgent Matrix
 
