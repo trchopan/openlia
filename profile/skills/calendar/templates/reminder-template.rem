@@ -1,0 +1,38 @@
+# OpenLia Remind Calendar Template
+# Reference: https://manpages.debian.org/testing/remind/remind.1.en.html
+#
+# Syntax:
+#   REM <date_spec> [AT <time>] [DURATION <duration>] [TAG <tags>] [INFO "<Header>: <Value>"]... MSG <Summary>
+#
+# Supported INFO Headers:
+#   INFO "Attendees: Name <email>, [[Person]]"
+#   INFO "Location: Address, Room, or Venue"
+#   INFO "Map-Url: https://maps.google.com/?q=..."
+#   INFO "Video-Link: https://meet.google.com/... or https://zoom.us/..."
+#   INFO "Description: Agenda, background, or meeting context"
+#   INFO "Event-Note: calendar/YYYY-MM-DD-event-title.md"
+
+# Example 1: In-person meeting with physical location and Google Maps link
+# REM 2026-10-15 AT 10:00 DURATION 1:00 \
+#     TAG meeting client \
+#     INFO "Location: 123 Market St, San Francisco, CA" \
+#     INFO "Map-Url: https://maps.google.com/?q=123+Market+St+San+Francisco+CA" \
+#     INFO "Attendees: Alice Smith <alice@example.com>, [[Bob Jones]]" \
+#     INFO "Description: Quarterly client sync and roadmap review" \
+#     INFO "Event-Note: calendar/2026-10-15-client-review.md" \
+#     MSG Client Roadmap Review
+
+# Example 2: Remote video conference with Google Meet / Zoom link
+# REM 2026-10-16 AT 14:30 DURATION 0:45 \
+#     TAG 1on1 \
+#     INFO "Video-Link: https://meet.google.com/abc-defg-hij" \
+#     INFO "Attendees: Carol Danvers <carol@example.com>" \
+#     INFO "Description: Bi-weekly 1:1 sync" \
+#     MSG 1:1 with Carol
+
+# Example 3: Recurring weekly team standup
+# REM Mon Tue Wed Thu Fri AT 09:30 DURATION 0:15 \
+#     TAG standup \
+#     INFO "Video-Link: https://zoom.us/j/1234567890" \
+#     INFO "Attendees: [[Engineering Team]]" \
+#     MSG Daily Standup

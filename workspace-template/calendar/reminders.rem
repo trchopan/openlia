@@ -1,0 +1,13 @@
+# OpenLia Workspace Calendar
+# Powered by Remind (https://manpages.debian.org/testing/remind/remind.1.en.html)
+#
+# Syntax:
+#   REM <date_spec> [AT <time>] [DURATION <duration>] [TAG <tags>] [INFO "<Header>: <Value>"]... MSG <Summary>
+#
+# Supported INFO Headers:
+#   INFO "Attendees: Name <email>, [[Person]]"
+#   INFO "Location: Physical address, office room, or venue"
+#   INFO "Map-Url: https://maps.google.com/?q=..."
+#   INFO "Video-Link: https://meet.google.com/... or https://zoom.us/..."
+#   INFO "Description: Meeting details and agenda"
+#   INFO "Event-Note: calendar/YYYY-MM-DD-event-note.md"
