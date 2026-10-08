@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -9,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { WorkspaceDiagnosticsResponse } from "../shared/api";
 import { createWorkspaceHandler } from "./app";
 import { revision } from "./workspace";
 
@@ -226,6 +228,89 @@ describe("workspace HTTP handler", () => {
     expect(await staleResponse.json()).toMatchObject({
       error: "revision_conflict",
     });
+  });
+
+  test("renames a file and rejects collisions and protected names", async () => {
+    const originalPath = join(root, "note.md");
+    writeFileSync(originalPath, "content");
+    const readResponse = await request("/api/workspace/file?path=note.md");
+    const doc = (await readResponse.json()) as { revision: string };
+
+    const renameBody = JSON.stringify({
+      expected_revision: doc.revision,
+      new_name: "renamed.md",
+      path: "note.md",
+    });
+    const renameRes = await request("/api/workspace/rename", {
+      body: renameBody,
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    expect(renameRes.status).toBe(200);
+    const renamePayload = (await renameRes.json()) as {
+      ok: boolean;
+      path: string;
+      previous_path: string;
+    };
+    expect(renamePayload.ok).toBe(true);
+    expect(renamePayload.path).toBe("renamed.md");
+    expect(renamePayload.previous_path).toBe("note.md");
+    expect(existsSync(join(root, "renamed.md"))).toBe(true);
+    expect(existsSync(originalPath)).toBe(false);
+
+    // Collision check
+    writeFileSync(join(root, "exists.md"), "already here");
+    const conflictBody = JSON.stringify({
+      expected_revision: doc.revision,
+      new_name: "exists.md",
+      path: "renamed.md",
+    });
+    const conflictRes = await request("/api/workspace/rename", {
+      body: conflictBody,
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    expect(conflictRes.status).toBe(409);
+
+    // Protected template check
+    const templateBody = JSON.stringify({
+      expected_revision: doc.revision,
+      new_name: "task-template.md",
+      path: "renamed.md",
+    });
+    const templateRes = await request("/api/workspace/rename", {
+      body: templateBody,
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    expect(templateRes.status).toBe(403);
+  });
+
+  test("moves a file into a new folder and validates diagnostics", async () => {
+    writeFileSync(join(root, "source.md"), "hello world");
+    const readResponse = await request("/api/workspace/file?path=source.md");
+    const doc = (await readResponse.json()) as { revision: string };
+
+    const moveBody = JSON.stringify({
+      destination_path: "subfolder/moved.md",
+      expected_revision: doc.revision,
+      source_path: "source.md",
+    });
+    const moveRes = await request("/api/workspace/move", {
+      body: moveBody,
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    expect(moveRes.status).toBe(200);
+    expect(existsSync(join(root, "subfolder", "moved.md"))).toBe(true);
+    expect(existsSync(join(root, "source.md"))).toBe(false);
+
+    // Diagnostics endpoint check
+    const diagRes = await request("/api/workspace/diagnostics");
+    expect(diagRes.status).toBe(200);
+    const diagPayload = (await diagRes.json()) as WorkspaceDiagnosticsResponse;
+    expect(diagPayload.schema).toBe(1);
+    expect(Array.isArray(diagPayload.issues)).toBe(true);
   });
 
   test("protects delete requests with authentication and same-origin checks", async () => {

@@ -15,22 +15,46 @@ export interface WorkspaceTreeResponse {
   truncated: boolean;
 }
 
+export interface WorkspaceFileValidation {
+  valid: boolean;
+  schema_path?: string;
+  errors: string[];
+}
+
 export interface WorkspaceFile extends WorkspaceFileMetadata {
   schema: 1;
   content: string;
   revision: string;
+  validation?: WorkspaceFileValidation;
 }
 
 export interface WorkspaceWriteResponse extends WorkspaceFileMetadata {
   schema: 1;
   ok: true;
   revision: string;
+  validation?: WorkspaceFileValidation;
 }
 
 export interface WorkspaceDeleteResponse {
   schema: 1;
   ok: true;
   path: string;
+}
+
+export interface WorkspaceMoveResponse extends WorkspaceFileMetadata {
+  schema: 1;
+  ok: true;
+  previous_path: string;
+  revision: string;
+  validation?: WorkspaceFileValidation;
+}
+
+export interface WorkspaceRenameResponse extends WorkspaceFileMetadata {
+  schema: 1;
+  ok: true;
+  previous_path: string;
+  revision: string;
+  validation?: WorkspaceFileValidation;
 }
 
 export interface WorkspaceGitStatus {
@@ -85,6 +109,30 @@ export interface WorkspaceWriteRequest {
 export interface WorkspaceDeleteRequest {
   path: string;
   expected_revision: string;
+}
+
+export interface WorkspaceMoveRequest {
+  source_path: string;
+  destination_path: string;
+  expected_revision: string;
+}
+
+export interface WorkspaceRenameRequest {
+  path: string;
+  new_name: string;
+  expected_revision: string;
+}
+
+export interface WorkspaceDiagnosticIssue {
+  path: string;
+  schema_path?: string | undefined;
+  errors: string[];
+}
+
+export interface WorkspaceDiagnosticsResponse {
+  schema: 1;
+  valid: boolean;
+  issues: WorkspaceDiagnosticIssue[];
 }
 
 export interface AuthSessionResponse {

@@ -3,11 +3,14 @@ import type {
   AuthSessionResponse,
   SkillDetail,
   WorkspaceActivityResponse,
-  WorkspaceErrorResponse,
   WorkspaceDeleteResponse,
+  WorkspaceDiagnosticsResponse,
+  WorkspaceErrorResponse,
   WorkspaceFile,
   WorkspaceFileMetadata,
   WorkspaceGitStatus,
+  WorkspaceMoveResponse,
+  WorkspaceRenameResponse,
   WorkspaceTreeEntry,
   WorkspaceTreeResponse,
   WorkspaceWriteResponse,
@@ -310,6 +313,90 @@ export function createMockWorkspaceApi({
         (entry) => !(entry.kind === "file" && entry.path === requestedPath),
       );
       return { ok: true, path: requestedPath, schema: 1 };
+    },
+    async renameFile(
+      requestedPath,
+      newName,
+      expectedRevision,
+    ): Promise<WorkspaceRenameResponse> {
+      requireAuthentication();
+      const currentContent = fileContents[requestedPath];
+      if (currentContent === undefined) throw error(404, "not_found");
+      const currentRev = fileRevisions[requestedPath] ?? revision;
+      if (expectedRevision !== currentRev) {
+        throw error(409, "revision_conflict", currentRev);
+      }
+      const parts = requestedPath.split("/");
+      parts[parts.length - 1] = newName;
+      const newPath = parts.join("/");
+      if (fileContents[newPath] !== undefined) {
+        throw error(409, "destination_exists");
+      }
+      delete fileContents[requestedPath];
+      delete fileRevisions[requestedPath];
+      fileContents[newPath] = currentContent;
+      fileRevisions[newPath] = currentRev;
+      entries = entries.map((entry) => {
+        if (entry.kind === "file" && entry.path === requestedPath) {
+          return { ...entry, path: newPath };
+        }
+        return entry;
+      });
+      return {
+        ...metadata(newPath, currentContent),
+        ok: true,
+        previous_path: requestedPath,
+        revision: currentRev,
+        schema: 1,
+      };
+    },
+    async moveFile(
+      sourcePath,
+      destinationPath,
+      expectedRevision,
+    ): Promise<WorkspaceMoveResponse> {
+      requireAuthentication();
+      const currentContent = fileContents[sourcePath];
+      if (currentContent === undefined) throw error(404, "not_found");
+      const currentRev = fileRevisions[sourcePath] ?? revision;
+      if (expectedRevision !== currentRev) {
+        throw error(409, "revision_conflict", currentRev);
+      }
+      if (fileContents[destinationPath] !== undefined) {
+        throw error(409, "destination_exists");
+      }
+      delete fileContents[sourcePath];
+      delete fileRevisions[sourcePath];
+      fileContents[destinationPath] = currentContent;
+      fileRevisions[destinationPath] = currentRev;
+
+      // Add parent directory to entries if not already present
+      const destDir = destinationPath.split("/").slice(0, -1).join("/");
+      if (destDir && !entries.some((e) => e.path === destDir)) {
+        entries.push({ kind: "directory", path: destDir });
+      }
+
+      entries = entries.map((entry) => {
+        if (entry.kind === "file" && entry.path === sourcePath) {
+          return { ...entry, path: destinationPath };
+        }
+        return entry;
+      });
+      return {
+        ...metadata(destinationPath, currentContent),
+        ok: true,
+        previous_path: sourcePath,
+        revision: currentRev,
+        schema: 1,
+      };
+    },
+    async loadDiagnostics(): Promise<WorkspaceDiagnosticsResponse> {
+      requireAuthentication();
+      return {
+        issues: [],
+        schema: 1,
+        valid: true,
+      };
     },
     async loadGitStatus(): Promise<WorkspaceGitStatus> {
       requireAuthentication();

@@ -6,8 +6,10 @@ import type {
   SkillToggleEnableRequest,
   SkillTogglePinRequest,
   SkillWriteRequest,
-  WorkspaceErrorResponse,
   WorkspaceDeleteRequest,
+  WorkspaceErrorResponse,
+  WorkspaceMoveRequest,
+  WorkspaceRenameRequest,
   WorkspaceWriteRequest,
 } from "../shared/api";
 import { Authenticator } from "./auth";
@@ -376,6 +378,69 @@ export function createWorkspaceHandler(
         return json(
           service.delete(deleteRequest.path, deleteRequest.expected_revision),
         );
+      }
+      if (
+        request.method === "POST" &&
+        url.pathname === "/api/workspace/rename"
+      ) {
+        if (!sameOrigin(request, url, publicOrigin))
+          return json(
+            { schema: 1, ok: false, error: "origin_not_allowed" },
+            403,
+          );
+        const bodyResult = await readJson(request, maxDeleteRequestBytes);
+        if (bodyResult.tooLarge)
+          return json(
+            { schema: 1, ok: false, error: "request_too_large" },
+            413,
+          );
+        const body: unknown = bodyResult.value;
+        if (!isObject(body))
+          return json(
+            { schema: 1, ok: false, error: "request_body_must_be_json" },
+            400,
+          );
+        const renameRequest = body as Partial<WorkspaceRenameRequest>;
+        return json(
+          service.rename(
+            renameRequest.path,
+            renameRequest.new_name,
+            renameRequest.expected_revision,
+          ),
+        );
+      }
+      if (request.method === "POST" && url.pathname === "/api/workspace/move") {
+        if (!sameOrigin(request, url, publicOrigin))
+          return json(
+            { schema: 1, ok: false, error: "origin_not_allowed" },
+            403,
+          );
+        const bodyResult = await readJson(request, maxDeleteRequestBytes);
+        if (bodyResult.tooLarge)
+          return json(
+            { schema: 1, ok: false, error: "request_too_large" },
+            413,
+          );
+        const body: unknown = bodyResult.value;
+        if (!isObject(body))
+          return json(
+            { schema: 1, ok: false, error: "request_body_must_be_json" },
+            400,
+          );
+        const moveRequest = body as Partial<WorkspaceMoveRequest>;
+        return json(
+          service.move(
+            moveRequest.source_path,
+            moveRequest.destination_path,
+            moveRequest.expected_revision,
+          ),
+        );
+      }
+      if (
+        request.method === "GET" &&
+        url.pathname === "/api/workspace/diagnostics"
+      ) {
+        return json(service.diagnostics());
       }
       if (request.method === "GET" && url.pathname === "/api/skills/list") {
         return json(skillService.list());
