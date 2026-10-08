@@ -13,6 +13,7 @@ import {
 import { ActivitySection } from "./ActivitySection";
 import type {
   WorkspaceActivityResponse,
+  WorkspaceDiagnosticsResponse,
   WorkspaceFile,
   WorkspaceGitStatus,
   WorkspaceTreeEntry,
@@ -22,6 +23,8 @@ import {
   buildWorkspaceLink,
   copyToClipboard,
 } from "./openliaLinks";
+export { RenameFileDialog } from "./RenameFileDialog";
+export { MoveFileDialog } from "./MoveFileDialog";
 
 export type WorkspaceView = "edit" | "preview" | "info";
 
@@ -395,6 +398,9 @@ export function FileNavigator({
   onFilterChange,
   onOpenFile,
   onOpenActivity,
+  onRenameFile,
+  onMoveFile,
+  onDeleteFile,
   onRetry,
   revealToken = 0,
   selectedPath,
@@ -409,6 +415,9 @@ export function FileNavigator({
   onFilterChange: (value: string) => void;
   onOpenFile: (path: string) => void;
   onOpenActivity?: (() => void) | undefined;
+  onRenameFile?: ((path: string) => void) | undefined;
+  onMoveFile?: ((path: string) => void) | undefined;
+  onDeleteFile?: ((path: string) => void) | undefined;
   onRetry: () => void;
   revealToken?: number | undefined;
   selectedPath: string | undefined;
@@ -564,26 +573,112 @@ export function FileNavigator({
                   )}
                 </>
               ) : (
-                <button
-                  ref={(el) => {
-                    if (el) {
-                      fileButtonRefs.current.set(node.path, el);
-                    } else {
-                      fileButtonRefs.current.delete(node.path);
+                <div className="group relative flex items-center">
+                  <button
+                    ref={(el) => {
+                      if (el) {
+                        fileButtonRefs.current.set(node.path, el);
+                      } else {
+                        fileButtonRefs.current.delete(node.path);
+                      }
+                    }}
+                    aria-current={
+                      selectedPath === node.path ? "page" : undefined
                     }
-                  }}
-                  aria-current={selectedPath === node.path ? "page" : undefined}
-                  className={`workspace-tree-row workspace-tree-file ${selectedPath === node.path ? "workspace-tree-file-selected" : ""} ${highlightedPath === node.path ? "workspace-tree-file-highlight" : ""}`}
-                  onClick={() => onOpenFile(node.path)}
-                  style={{ paddingInlineStart: `${depth * 12 + 28}px` }}
-                  title={node.path}
-                  type="button"
-                >
-                  <span className="min-w-0 truncate">{node.name}</span>
-                  {!node.editable && (
-                    <span className="text-[10px]">Read only</span>
+                    className={`workspace-tree-row workspace-tree-file flex-1 pr-7 ${selectedPath === node.path ? "workspace-tree-file-selected" : ""} ${highlightedPath === node.path ? "workspace-tree-file-highlight" : ""}`}
+                    onClick={() => onOpenFile(node.path)}
+                    style={{ paddingInlineStart: `${depth * 12 + 28}px` }}
+                    title={node.path}
+                    type="button"
+                  >
+                    <span className="min-w-0 truncate">{node.name}</span>
+                    {!node.editable && (
+                      <span className="text-[10px]">Read only</span>
+                    )}
+                  </button>
+                  {(onRenameFile || onMoveFile || onDeleteFile) && (
+                    <div className="dropdown dropdown-end absolute right-1 z-10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <button
+                        aria-label={`Actions for ${node.name}`}
+                        className="btn btn-ghost btn-xs btn-square h-5 w-5 text-base-content/60 hover:text-base-content"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                        }}
+                        type="button"
+                      >
+                        <svg
+                          className="h-3 w-3"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <title>More file actions</title>
+                          <circle cx="12" cy="5" r="2" />
+                          <circle cx="12" cy="12" r="2" />
+                          <circle cx="12" cy="19" r="2" />
+                        </svg>
+                      </button>
+                      <ul className="dropdown-content menu z-30 rounded-box border border-base-content/10 bg-base-100 p-1 shadow-lg text-xs w-36">
+                        {onRenameFile && node.editable && (
+                          <li>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                (document.activeElement as HTMLElement)?.blur();
+                                onRenameFile(node.path);
+                              }}
+                              type="button"
+                            >
+                              Rename...
+                            </button>
+                          </li>
+                        )}
+                        {onMoveFile && node.editable && (
+                          <li>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                (document.activeElement as HTMLElement)?.blur();
+                                onMoveFile(node.path);
+                              }}
+                              type="button"
+                            >
+                              Move...
+                            </button>
+                          </li>
+                        )}
+                        <li>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              (document.activeElement as HTMLElement)?.blur();
+                              void copyToClipboard(
+                                buildWorkspaceLink(node.path),
+                              );
+                            }}
+                            type="button"
+                          >
+                            Copy Link
+                          </button>
+                        </li>
+                        {onDeleteFile && node.editable && (
+                          <li>
+                            <button
+                              className="text-error"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                (document.activeElement as HTMLElement)?.blur();
+                                onDeleteFile(node.path);
+                              }}
+                              type="button"
+                            >
+                              Delete...
+                            </button>
+                          </li>
+                        )}
+                      </ul>
+                    </div>
                   )}
-                </button>
+                </div>
               )}
             </li>
           );
@@ -1053,6 +1148,36 @@ export function DocumentInspector({
               </dd>
             </div>
           </dl>
+          {file.validation && (
+            <div className="mt-4 rounded-lg border border-base-content/10 bg-base-200/40 p-3 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wide text-base-content/60">
+                  Template & Schema
+                </span>
+                <span
+                  className={`badge badge-xs font-mono ${
+                    file.validation.valid ? "badge-success" : "badge-warning"
+                  }`}
+                >
+                  {file.validation.valid ? "Conforming" : "Issues Found"}
+                </span>
+              </div>
+              {file.validation.schema_path && (
+                <p className="text-[11px] font-mono text-base-content/60 truncate">
+                  Schema: {file.validation.schema_path}
+                </p>
+              )}
+              {!file.validation.valid && file.validation.errors.length > 0 && (
+                <ul className="list-disc list-inside text-xs text-warning space-y-1 pt-1">
+                  {file.validation.errors.map((err) => (
+                    <li key={err} className="break-words">
+                      {err}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           <div className="mt-8">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-base-content/50">
@@ -1138,7 +1263,9 @@ export function DocumentPane({
   onDelete,
   onDownload,
   onDraftChange,
+  onMove,
   onOpenDetails,
+  onRename,
   onRevealInTree,
   onRetry,
   onSave,
@@ -1149,6 +1276,8 @@ export function DocumentPane({
   onNavigateLink,
   activity,
   activityLoading,
+  diagnostics,
+  diagnosticsLoading,
   onOpenFile,
   onRefreshActivity,
 }: {
@@ -1163,7 +1292,9 @@ export function DocumentPane({
   onDelete: () => void;
   onDownload: () => void;
   onDraftChange: (value: string) => void;
+  onMove?: (() => void) | undefined;
   onOpenDetails: () => void;
+  onRename?: (() => void) | undefined;
   onRevealInTree?: (() => void) | undefined;
   onRetry: () => void;
   onSave: () => void;
@@ -1174,6 +1305,8 @@ export function DocumentPane({
   onNavigateLink?: ((href: string) => void) | undefined;
   activity?: WorkspaceActivityResponse | null | undefined;
   activityLoading?: boolean | undefined;
+  diagnostics?: WorkspaceDiagnosticsResponse | null | undefined;
+  diagnosticsLoading?: boolean | undefined;
   onOpenFile?: ((path: string) => void) | undefined;
   onRefreshActivity?: (() => void) | undefined;
 }) {
@@ -1352,6 +1485,20 @@ export function DocumentPane({
                       Copy URI
                     </button>
                   </li>
+                  {onRename && file.editable && (
+                    <li>
+                      <button onClick={onRename} type="button">
+                        Rename...
+                      </button>
+                    </li>
+                  )}
+                  {onMove && file.editable && (
+                    <li>
+                      <button onClick={onMove} type="button">
+                        Move...
+                      </button>
+                    </li>
+                  )}
                   <li>
                     <button onClick={onOpenDetails} type="button">
                       {detailsOpen ? "Hide Details" : "Show Details"}
@@ -1387,6 +1534,42 @@ export function DocumentPane({
                   This file changed after you opened it.
                 </p>
                 <p className="text-sm">{conflict}</p>
+              </div>
+            </div>
+          )}
+          {file.validation && !file.validation.valid && (
+            <div
+              className="alert alert-warning rounded-none py-2 px-4 text-xs flex items-start gap-2"
+              role="status"
+            >
+              <svg
+                className="h-4 w-4 shrink-0 text-warning mt-0.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+              >
+                <title>Validation warning</title>
+                <path
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">
+                  Template & Schema Warning
+                  {file.validation.schema_path && (
+                    <span className="font-normal font-mono opacity-80 ml-1">
+                      ({file.validation.schema_path})
+                    </span>
+                  )}
+                </p>
+                <ul className="list-disc list-inside mt-1 space-y-0.5 opacity-90">
+                  {file.validation.errors.map((err) => (
+                    <li key={err}>{err}</li>
+                  ))}
+                </ul>
               </div>
             </div>
           )}
@@ -1448,6 +1631,8 @@ export function DocumentPane({
       ) : (
         <ActivitySection
           activity={activity ?? null}
+          diagnostics={diagnostics ?? null}
+          diagnosticsLoading={diagnosticsLoading ?? false}
           loading={activityLoading ?? false}
           onOpenFile={onOpenFile ?? (() => {})}
           onRefresh={onRefreshActivity}

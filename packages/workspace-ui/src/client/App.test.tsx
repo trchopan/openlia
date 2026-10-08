@@ -600,4 +600,112 @@ messages:
       );
     });
   });
+
+  test("renames a file via DocumentPane action menu and navigates to new path", async () => {
+    const api = createMockWorkspaceApi();
+    render(<App api={api} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+    expect(
+      await screen.findByRole("article", { name: "Markdown preview" }),
+    ).toBeInTheDocument();
+
+    // Click Document action menu
+    fireEvent.click(screen.getByRole("button", { name: "Document actions" }));
+    const renameButtons = screen.getAllByRole("button", { name: "Rename..." });
+    const renameBtn = renameButtons.at(-1);
+    expect(renameBtn).toBeDefined();
+    if (renameBtn) fireEvent.click(renameBtn);
+
+    // Rename dialog appears
+    const input = screen.getByRole("textbox", { name: /new file name/i });
+    fireEvent.change(input, { target: { value: "renamed-notes.md" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    // Document is updated to renamed file
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: "renamed-notes.md" }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  test("moves a file into a folder via DocumentPane action menu", async () => {
+    const api = createMockWorkspaceApi();
+    render(<App api={api} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
+    expect(
+      await screen.findByRole("article", { name: "Markdown preview" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Document actions" }));
+    const moveButtons = screen.getAllByRole("button", { name: "Move..." });
+    const moveBtn = moveButtons.at(-1);
+    expect(moveBtn).toBeDefined();
+    if (moveBtn) fireEvent.click(moveBtn);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Enter new folder path" }),
+    );
+    const folderInput = screen.getByPlaceholderText(
+      "e.g. archive or tasks/done",
+    );
+    fireEvent.change(folderInput, { target: { value: "archive" } });
+    fireEvent.click(screen.getByRole("button", { name: "Move" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("archive/notes.md", { selector: ".workspace-path" }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  test("displays template & schema diagnostics on the dashboard and warning banner on file", async () => {
+    const api = createMockWorkspaceApi();
+    api.loadDiagnostics = async () => ({
+      issues: [
+        {
+          errors: ["frontmatter: missing required property 'title'"],
+          path: "notes.md",
+          schema_path: "notes.schema.json",
+        },
+      ],
+      schema: 1,
+      valid: false,
+    });
+    const origLoadFile = api.loadFile.bind(api);
+    api.loadFile = async (p: string) => {
+      const f = await origLoadFile(p);
+      return {
+        ...f,
+        validation: {
+          errors: ["frontmatter: missing required property 'title'"],
+          schema_path: "notes.schema.json",
+          valid: false,
+        },
+      };
+    };
+
+    render(<App api={api} />);
+
+    // On dashboard (/), Template & Schema Health should be visible
+    expect(
+      await screen.findByText("Template & Schema Health"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 issue")).toBeInTheDocument();
+    expect(
+      screen.getByText("frontmatter: missing required property 'title'"),
+    ).toBeInTheDocument();
+
+    // Click "Open & Fix"
+    fireEvent.click(screen.getByRole("button", { name: "Open & Fix" }));
+
+    // File opens and warning banner is shown
+    expect(
+      await screen.findByText("Template & Schema Warning"),
+    ).toBeInTheDocument();
+    // Permissive editing: Edit button is still available
+    expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled();
+  });
 });

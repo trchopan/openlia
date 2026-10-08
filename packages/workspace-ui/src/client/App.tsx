@@ -1,10 +1,18 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   SkillDetail,
   SkillFileEntry,
   SkillFileResponse,
   SkillSummary,
   WorkspaceActivityResponse,
+  WorkspaceDiagnosticsResponse,
   WorkspaceFile,
   WorkspaceGitStatus,
   WorkspaceTreeEntry,
@@ -26,6 +34,8 @@ import {
   DocumentInspector,
   DocumentPane,
   FileNavigator,
+  MoveFileDialog,
+  RenameFileDialog,
   WorkspaceHeader,
   type WorkspaceView,
 } from "./components";
@@ -215,6 +225,21 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   );
   const [activityLoading, setActivityLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [diagnostics, setDiagnostics] =
+    useState<WorkspaceDiagnosticsResponse | null>(null);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [pendingRename, setPendingRename] = useState<{
+    path: string;
+    revision?: string | undefined;
+  } | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renameError, setRenameError] = useState("");
+  const [pendingMove, setPendingMove] = useState<{
+    path: string;
+    revision?: string | undefined;
+  } | null>(null);
+  const [moving, setMoving] = useState(false);
+  const [moveError, setMoveError] = useState("");
 
   // Skills state
   const [skills, setSkills] = useState<SkillSummary[]>([]);
@@ -282,6 +307,21 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         ? buildWorkspaceLink(file.path)
         : undefined;
 
+  const directories = useMemo(() => {
+    const set = new Set<string>();
+    for (const entry of tree) {
+      if (entry.kind === "directory") {
+        set.add(entry.path);
+      } else {
+        const slashIdx = entry.path.lastIndexOf("/");
+        if (slashIdx > 0) {
+          set.add(entry.path.slice(0, slashIdx));
+        }
+      }
+    }
+    return Array.from(set).sort();
+  }, [tree]);
+
   const appStateRef = useRef({
     activeTab,
     dirty,
@@ -327,17 +367,23 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           return;
         }
 
-        const [treeResponse, gitResponse, skillsResponse, activityResponse] =
-          await Promise.all([
-            api.loadTree(),
-            api.loadGitStatus().catch(() => null),
-            api.loadSkills().catch(() => ({
-              categories: [],
-              schema: 1 as const,
-              skills: [],
-            })),
-            api.loadActivity().catch(() => null),
-          ]);
+        const [
+          treeResponse,
+          gitResponse,
+          skillsResponse,
+          activityResponse,
+          diagnosticsResponse,
+        ] = await Promise.all([
+          api.loadTree(),
+          api.loadGitStatus().catch(() => null),
+          api.loadSkills().catch(() => ({
+            categories: [],
+            schema: 1 as const,
+            skills: [],
+          })),
+          api.loadActivity().catch(() => null),
+          api.loadDiagnostics().catch(() => null),
+        ]);
         if (isActive && !isActive()) return;
 
         setTree(treeResponse.entries);
@@ -346,6 +392,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         setSkills(skillsResponse.skills);
         setSkillCategories(skillsResponse.categories);
         setActivity(activityResponse);
+        setDiagnostics(diagnosticsResponse);
         setNeedsLogin(false);
         setAuthReady(true);
 
@@ -389,10 +436,11 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     try {
       const { activeTab, docDirty, file } = appStateRef.current;
       if (activeTab === "documents") {
-        const [treeRes, gitRes, activityRes] = await Promise.all([
+        const [treeRes, gitRes, activityRes, diagRes] = await Promise.all([
           api.loadTree().catch(() => null),
           api.loadGitStatus().catch(() => null),
           api.loadActivity().catch(() => null),
+          api.loadDiagnostics().catch(() => null),
         ]);
 
         if (treeRes) {
@@ -410,6 +458,10 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
         if (activityRes) {
           setActivity(activityRes);
+        }
+
+        if (diagRes) {
+          setDiagnostics(diagRes);
         }
 
         if (file) {
@@ -615,6 +667,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     setTree([]);
     setSkills([]);
     setGit(null);
+    setDiagnostics(null);
     setNeedsLogin(true);
     setAuthRequired(true);
     setAuthReady(true);
@@ -629,21 +682,28 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       setPassword("");
       setNeedsLogin(false);
       setLoading(true);
-      const [treeResponse, gitResponse, skillsResponse, activityResponse] =
-        await Promise.all([
-          api.loadTree(),
-          api.loadGitStatus().catch(() => null),
-          api
-            .loadSkills()
-            .catch(() => ({ categories: [], schema: 1 as const, skills: [] })),
-          api.loadActivity().catch(() => null),
-        ]);
+      const [
+        treeResponse,
+        gitResponse,
+        skillsResponse,
+        activityResponse,
+        diagnosticsResponse,
+      ] = await Promise.all([
+        api.loadTree(),
+        api.loadGitStatus().catch(() => null),
+        api
+          .loadSkills()
+          .catch(() => ({ categories: [], schema: 1 as const, skills: [] })),
+        api.loadActivity().catch(() => null),
+        api.loadDiagnostics().catch(() => null),
+      ]);
       setTree(treeResponse.entries);
       setTreeTruncated(treeResponse.truncated);
       setGit(gitResponse);
       setSkills(skillsResponse.skills);
       setSkillCategories(skillsResponse.categories);
       setActivity(activityResponse);
+      setDiagnostics(diagnosticsResponse);
       setWorkspaceError("");
 
       if (!initialPathOpened.current) {
@@ -690,6 +750,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     setGit(null);
     setFile(null);
     setDraft("");
+    setDiagnostics(null);
     setSelectedSkillDetail(null);
     setSelectedSkillFile(null);
     setNeedsLogin(true);
@@ -705,12 +766,33 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     else void performSignOut();
   }
 
-  function requestDelete() {
-    if (!file || deleting) return;
+  function requestDelete(path?: string) {
+    const targetPath = path ?? file?.path;
+    if (!targetPath || deleting) return;
     setPendingDelete({
-      dirty: docDirty,
-      path: file.path,
-      revision: file.revision,
+      dirty: file?.path === targetPath ? docDirty : false,
+      path: targetPath,
+      revision: file?.path === targetPath ? file.revision : "",
+    });
+  }
+
+  function requestRename(path?: string) {
+    const targetPath = path ?? file?.path;
+    if (!targetPath || renaming) return;
+    setRenameError("");
+    setPendingRename({
+      path: targetPath,
+      revision: file?.path === targetPath ? file.revision : undefined,
+    });
+  }
+
+  function requestMove(path?: string) {
+    const targetPath = path ?? file?.path;
+    if (!targetPath || moving) return;
+    setMoveError("");
+    setPendingMove({
+      path: targetPath,
+      revision: file?.path === targetPath ? file.revision : undefined,
     });
   }
 
@@ -907,15 +989,19 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     try {
       const response = await api.saveFile(file.path, draft, file.revision);
       setFile({ ...file, ...response, content: draft });
-      const [treeResponse, nextGit, nextActivity] = await Promise.all([
-        api.loadTree(),
-        api.loadGitStatus().catch(() => null),
-        api.loadActivity().catch(() => null),
-      ]);
+      const [treeResponse, nextGit, nextActivity, nextDiag] = await Promise.all(
+        [
+          api.loadTree(),
+          api.loadGitStatus().catch(() => null),
+          api.loadActivity().catch(() => null),
+          api.loadDiagnostics().catch(() => null),
+        ],
+      );
       setTree(treeResponse.entries);
       setTreeTruncated(treeResponse.truncated);
       if (nextGit) setGit(nextGit);
       if (nextActivity) setActivity(nextActivity);
+      if (nextDiag) setDiagnostics(nextDiag);
       return true;
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
@@ -940,7 +1026,12 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     setDocumentError("");
     setConflict("");
     try {
-      await api.deleteFile(pending.path, pending.revision);
+      let revision = pending.revision;
+      if (!revision) {
+        const loaded = await api.loadFile(pending.path);
+        revision = loaded.revision;
+      }
+      await api.deleteFile(pending.path, revision);
       setPendingDelete(null);
       if (file?.path === pending.path) {
         setFile(null);
@@ -960,17 +1051,21 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           { replace: true },
         );
       }
-      const [treeResponse, nextGit, nextActivity] = await Promise.all([
-        api.loadTree().catch(() => null),
-        api.loadGitStatus().catch(() => null),
-        api.loadActivity().catch(() => null),
-      ]);
+      const [treeResponse, nextGit, nextActivity, nextDiag] = await Promise.all(
+        [
+          api.loadTree().catch(() => null),
+          api.loadGitStatus().catch(() => null),
+          api.loadActivity().catch(() => null),
+          api.loadDiagnostics().catch(() => null),
+        ],
+      );
       if (treeResponse) {
         setTree(treeResponse.entries);
         setTreeTruncated(treeResponse.truncated);
       }
       if (nextGit) setGit(nextGit);
       if (nextActivity) setActivity(nextActivity);
+      if (nextDiag) setDiagnostics(nextDiag);
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         setPendingDelete(null);
@@ -981,11 +1076,15 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         setDraft("");
         setConflict("");
         setDocumentError("This document no longer exists.");
-        const treeResponse = await api.loadTree().catch(() => null);
+        const [treeResponse, nextDiag] = await Promise.all([
+          api.loadTree().catch(() => null),
+          api.loadDiagnostics().catch(() => null),
+        ]);
         if (treeResponse) {
           setTree(treeResponse.entries);
           setTreeTruncated(treeResponse.truncated);
         }
+        if (nextDiag) setDiagnostics(nextDiag);
         navigateRoute({ tab: "documents" }, { replace: true });
       } else if (caught instanceof ApiError && caught.status === 409) {
         setPendingDelete(null);
@@ -995,6 +1094,134 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       }
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function handleRename(newName: string): Promise<void> {
+    if (!pendingRename || renaming) return;
+    setRenaming(true);
+    setRenameError("");
+    try {
+      if (file?.path === pendingRename.path && docDirty) {
+        const saved = await save();
+        if (!saved) {
+          setRenaming(false);
+          return;
+        }
+      }
+      let revision =
+        file?.path === pendingRename.path
+          ? file.revision
+          : pendingRename.revision;
+      if (!revision) {
+        const target = await api.loadFile(pendingRename.path);
+        revision = target.revision;
+      }
+      const res = await api.renameFile(pendingRename.path, newName, revision);
+      const oldPath = pendingRename.path;
+      setPendingRename(null);
+      if (file?.path === oldPath) {
+        await openFile(res.path, { keepView: true, replaceHistory: true });
+      }
+      const [treeRes, nextGit, nextActivity, nextDiag] = await Promise.all([
+        api.loadTree().catch(() => null),
+        api.loadGitStatus().catch(() => null),
+        api.loadActivity().catch(() => null),
+        api.loadDiagnostics().catch(() => null),
+      ]);
+      if (treeRes) {
+        setTree(treeRes.entries);
+        setTreeTruncated(treeRes.truncated);
+      }
+      if (nextGit) setGit(nextGit);
+      if (nextActivity) setActivity(nextActivity);
+      if (nextDiag) setDiagnostics(nextDiag);
+    } catch (caught) {
+      if (caught instanceof ApiError) {
+        if (caught.status === 409) {
+          setRenameError(
+            "The file was modified elsewhere or the target name already exists.",
+          );
+        } else if (caught.status === 401) {
+          setPendingRename(null);
+          handleUnauthorized();
+        } else {
+          setRenameError(
+            caught.payload?.error
+              ? String(caught.payload.error)
+              : "Failed to rename file.",
+          );
+        }
+      } else {
+        setRenameError("Failed to rename file.");
+      }
+    } finally {
+      setRenaming(false);
+    }
+  }
+
+  async function handleMove(destinationPath: string): Promise<void> {
+    if (!pendingMove || moving) return;
+    setMoving(true);
+    setMoveError("");
+    try {
+      if (file?.path === pendingMove.path && docDirty) {
+        const saved = await save();
+        if (!saved) {
+          setMoving(false);
+          return;
+        }
+      }
+      let revision =
+        file?.path === pendingMove.path ? file.revision : pendingMove.revision;
+      if (!revision) {
+        const target = await api.loadFile(pendingMove.path);
+        revision = target.revision;
+      }
+      const res = await api.moveFile(
+        pendingMove.path,
+        destinationPath,
+        revision,
+      );
+      const oldPath = pendingMove.path;
+      setPendingMove(null);
+      if (file?.path === oldPath) {
+        await openFile(res.path, { keepView: true, replaceHistory: true });
+      }
+      const [treeRes, nextGit, nextActivity, nextDiag] = await Promise.all([
+        api.loadTree().catch(() => null),
+        api.loadGitStatus().catch(() => null),
+        api.loadActivity().catch(() => null),
+        api.loadDiagnostics().catch(() => null),
+      ]);
+      if (treeRes) {
+        setTree(treeRes.entries);
+        setTreeTruncated(treeRes.truncated);
+      }
+      if (nextGit) setGit(nextGit);
+      if (nextActivity) setActivity(nextActivity);
+      if (nextDiag) setDiagnostics(nextDiag);
+    } catch (caught) {
+      if (caught instanceof ApiError) {
+        if (caught.status === 409) {
+          setMoveError(
+            "The destination path already exists or the file changed elsewhere.",
+          );
+        } else if (caught.status === 401) {
+          setPendingMove(null);
+          handleUnauthorized();
+        } else {
+          setMoveError(
+            caught.payload?.error
+              ? String(caught.payload.error)
+              : "Failed to move file.",
+          );
+        }
+      } else {
+        setMoveError("Failed to move file.");
+      }
+    } finally {
+      setMoving(false);
     }
   }
 
@@ -1290,9 +1517,12 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
               setFilesOpen(false);
               filesButtonRef.current?.focus();
             }}
+            onDeleteFile={(path) => requestDelete(path)}
             onFilterChange={handleFilterChange}
+            onMoveFile={(path) => requestMove(path)}
             onOpenFile={requestOpenFile}
             onOpenActivity={() => requestOpenFile("")}
+            onRenameFile={(path) => requestRename(path)}
             onRetry={() => void loadWorkspace()}
             revealToken={revealToken}
             selectedPath={file?.path}
@@ -1303,28 +1533,42 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             activity={activity}
             activityLoading={activityLoading}
             conflict={conflict}
+            deleting={deleting}
             detailsOpen={detailsOpen}
+            diagnostics={diagnostics}
+            diagnosticsLoading={diagnosticsLoading}
             diff={diff}
             documentError={documentError}
             draft={draft}
             file={file}
             fileLoading={fileLoading}
             onCloseFiles={() => setFilesOpen(true)}
-            onDelete={requestDelete}
+            onDelete={() => requestDelete()}
             onDownload={() => {
               if (file) window.location.href = api.downloadUrl(file.path);
             }}
             onDraftChange={setDraft}
+            onMove={() => requestMove()}
             onNavigateLink={handleNavigateLink}
             onOpenDetails={openHeaderDetails}
             onOpenFile={requestOpenFile}
+            onRename={() => requestRename()}
             onRefreshActivity={() => {
               setActivityLoading(true);
-              api
-                .loadActivity()
-                .then((res) => setActivity(res))
-                .catch(() => {})
-                .finally(() => setActivityLoading(false));
+              setDiagnosticsLoading(true);
+              Promise.all([
+                api
+                  .loadActivity()
+                  .then((res) => setActivity(res))
+                  .catch(() => {}),
+                api
+                  .loadDiagnostics()
+                  .then((res) => setDiagnostics(res))
+                  .catch(() => {}),
+              ]).finally(() => {
+                setActivityLoading(false);
+                setDiagnosticsLoading(false);
+              });
             }}
             onRevealInTree={file ? handleRevealInTree : undefined}
             onRetry={() => {
@@ -1336,7 +1580,6 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
               if (pathToRetry) void openFile(pathToRetry, { keepView: true });
             }}
             onSave={() => void save()}
-            deleting={deleting}
             onViewChange={handleViewChange}
             saving={saving}
             view={view}
@@ -1465,6 +1708,33 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           filePath={pendingDelete.path}
           onCancel={() => setPendingDelete(null)}
           onConfirm={() => void deleteFile()}
+        />
+      )}
+
+      {pendingRename && (
+        <RenameFileDialog
+          error={renameError}
+          filePath={pendingRename.path}
+          onCancel={() => {
+            setPendingRename(null);
+            setRenameError("");
+          }}
+          onRename={(newName) => void handleRename(newName)}
+          renaming={renaming}
+        />
+      )}
+
+      {pendingMove && (
+        <MoveFileDialog
+          directories={directories}
+          error={moveError}
+          filePath={pendingMove.path}
+          moving={moving}
+          onCancel={() => {
+            setPendingMove(null);
+            setMoveError("");
+          }}
+          onMove={(destinationPath) => void handleMove(destinationPath)}
         />
       )}
 
