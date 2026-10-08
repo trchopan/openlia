@@ -8,20 +8,19 @@
 - Approval timestamp: [ISO-8601 timestamp with timezone, or blank]
 - Authorization: direct-request | standing-delegation | explicit-approval | pending
 
-**Source**
+## Source Context
 
-- Original message or source summary:
 - Explicit source timestamp: [timestamp, or unknown]
-- Provenance notes:
+- Provenance notes: [source ownership, verification state, and other context]
 
-**People & Ownership**
+## People & Ownership
 
 - Person / role / relationship / confidence:
 - Proposed owner(s):
 
-**Proposed Extractions**
+## Proposed Extractions
 
-**Candidate C-YYYY-MM-DD-001**
+### Candidate C-YYYY-MM-DD-001
 
 - Summary:
 - Route: task | event | decision | idea | research | claim | archive | review
@@ -37,12 +36,18 @@
 - Evidence / source reference:
 - Target record: [canonical workspace link after an approved write, or blank]
 
-**Unclear / Needs Confirmation**
+## Unclear / Needs Confirmation
 
 - [Question, ambiguity, missing field, or conflicting evidence]
 
-**Approval**
+## Approval
 
 - Approved candidate IDs:
 - Rejected candidate IDs:
 - Approval scope or note:
+
+## Original Message
+
+<!-- ORIGINAL MESSAGE START -->
+[Preserve the original message here as Markdown. Do not add blockquote markers.]
+<!-- ORIGINAL MESSAGE END -->

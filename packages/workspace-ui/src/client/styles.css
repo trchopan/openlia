@@ -388,6 +388,39 @@ textarea {
   white-space: pre;
 }
 
+.workspace-original-message {
+  margin-top: 2.5rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--color-base-content) 16%, transparent);
+  border-radius: 0.8rem;
+  background: color-mix(in oklab, var(--color-base-200) 68%, var(--color-base-100));
+}
+
+.workspace-markdown .workspace-original-message-heading {
+  margin: 0;
+  border-bottom: 1px solid color-mix(in oklab, var(--color-base-content) 12%, transparent);
+  background: color-mix(in oklab, var(--color-base-200) 82%, var(--color-base-100));
+  padding: 0.7rem 1.25rem;
+  color: color-mix(in oklab, var(--color-base-content) 68%, transparent);
+  font-size: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.workspace-original-message-content {
+  padding: 1rem clamp(1rem, 3vw, 1.5rem);
+}
+
+.workspace-original-message-content > :first-child {
+  margin-top: 0;
+}
+
+.workspace-original-message-content > :last-child {
+  margin-bottom: 0;
+}
+
 .workspace-markdown table {
   display: block;
   max-width: 100%;

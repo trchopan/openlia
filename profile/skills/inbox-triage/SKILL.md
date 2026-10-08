@@ -48,8 +48,8 @@ metadata:
 
 1. Receive the unstructured text, message, or chat excerpt as an intake request. Do not stage a workspace file for an unrelated message that was not presented for capture or triage. Read `assistant-policy.yaml` before deciding which writes are delegated.
 2. Choose a slug that is stable and safe for a filename. Create or stage a review document under `inbox/YYYY-MM-DD-chat-<slug>.md`; if that path already exists, use a non-destructive suffix such as `-2` rather than overwriting it.
-3. Read the relevant workspace templates before proposing a destination. Preserve the original source, source identifier, capture date, and any explicit source timestamp without guessing missing values.
-4. Extract and organize candidate items:
+3. Read the relevant workspace templates before proposing a destination. Preserve the original source, source identifier, capture date, and any explicit source timestamp without guessing missing values. Keep the original message at the bottom of the review file between the exact standalone markers `<!-- ORIGINAL MESSAGE START -->` and `<!-- ORIGINAL MESSAGE END -->`. Preserve its Markdown and wording; do not prefix the message with `>` quote markers or otherwise reformat it.
+4. Extract and organize candidate items above the original-message section:
    - **People & Ownership**: distinguish the user, spouse/family, colleagues, and external persons; label uncertain identity or ownership.
    - **Proposed Tasks**: concrete physical next actions with one owner and an optional explicit due date.
    - **Proposed Events**: title, explicit date/time and timezone if present, participants, and location. Missing time remains unresolved.
@@ -111,6 +111,11 @@ not modify the input or create directories.
 - Never create a record from text that was not presented for capture or triage.
   A requested intake or matching standing delegation is sufficient authority
   for a clear local record; preserve the source and report the action.
+- Keep the original message at the bottom of the review file between the exact
+  `<!-- ORIGINAL MESSAGE START -->` and `<!-- ORIGINAL MESSAGE END -->` markers.
+  The markers are storage delimiters, not part of the source content. Do not
+  wrap a long source in Markdown blockquotes, because the Workspace UI gives
+  the marked section its own readable source panel.
 - Do not guess or infer missing dates, medical interpretations, or deadlines; mark them explicitly in `Unclear / Needs Confirmation`.
 - Do not treat a keyword match as evidence for a durable claim. Claims require a source reference and remain candidates until reviewed.
 - Do not overwrite an existing review file, silently replace a conflicting

@@ -1,16 +1,7 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode, RefObject } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { FrontmatterBlock } from "./FrontmatterBlock";
-import { parseMarkdownFrontmatter } from "./frontmatter";
-import {
-  isChatgptExportPath,
-  parseChatgptExport,
-  presentationContent,
-  type ChatExport,
-} from "./chatgpt";
-import { ActivitySection } from "./ActivitySection";
 import type {
   WorkspaceActivityResponse,
   WorkspaceDiagnosticsResponse,
@@ -18,13 +9,24 @@ import type {
   WorkspaceGitStatus,
   WorkspaceTreeEntry,
 } from "../shared/api";
+import { ActivitySection } from "./ActivitySection";
+import {
+  type ChatExport,
+  isChatgptExportPath,
+  parseChatgptExport,
+  presentationContent,
+} from "./chatgpt";
+import { FrontmatterBlock } from "./FrontmatterBlock";
+import { parseMarkdownFrontmatter } from "./frontmatter";
+import { extractOriginalMessage } from "./markdown";
 import {
   buildCanonicalWorkspaceUri,
   buildWorkspaceLink,
   copyToClipboard,
 } from "./openliaLinks";
-export { RenameFileDialog } from "./RenameFileDialog";
+
 export { MoveFileDialog } from "./MoveFileDialog";
+export { RenameFileDialog } from "./RenameFileDialog";
 
 export type WorkspaceView = "edit" | "preview" | "info";
 
@@ -854,9 +856,14 @@ export function MarkdownPreview({
   currentFilePath?: string | undefined;
   onNavigateLink?: ((href: string) => void) | undefined;
 }) {
-  const { frontmatter, rawYaml, body } = useMemo(
-    () => parseMarkdownFrontmatter(content),
-    [content],
+  const {
+    frontmatter,
+    rawYaml,
+    body: markdownBody,
+  } = useMemo(() => parseMarkdownFrontmatter(content), [content]);
+  const { body, originalMessage } = useMemo(
+    () => extractOriginalMessage(markdownBody),
+    [markdownBody],
   );
 
   const customComponents = useMemo(() => {
@@ -928,13 +935,34 @@ export function MarkdownPreview({
       {frontmatter && rawYaml && (
         <FrontmatterBlock data={frontmatter} rawYaml={rawYaml} />
       )}
-      <ReactMarkdown
-        components={customComponents}
-        remarkPlugins={[remarkGfm]}
-        urlTransform={transformMarkdownUrl}
-      >
-        {body}
-      </ReactMarkdown>
+      {body && (
+        <ReactMarkdown
+          components={customComponents}
+          remarkPlugins={[remarkGfm]}
+          urlTransform={transformMarkdownUrl}
+        >
+          {body}
+        </ReactMarkdown>
+      )}
+      {originalMessage !== null && (
+        <section
+          aria-label="Original message"
+          className="workspace-original-message"
+        >
+          <h2 className="workspace-original-message-heading">
+            Original message
+          </h2>
+          <div className="workspace-original-message-content">
+            <ReactMarkdown
+              components={customComponents}
+              remarkPlugins={[remarkGfm]}
+              urlTransform={transformMarkdownUrl}
+            >
+              {originalMessage}
+            </ReactMarkdown>
+          </div>
+        </section>
+      )}
     </article>
   );
 }

@@ -60,6 +60,42 @@ This is the document body.
     expect(screen.getByText("This is the document body.")).toBeInTheDocument();
   });
 
+  test("renders a marked original message in a separate source panel", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={`# Review
+
+## Proposed extraction
+
+Keep this above the source panel.
+
+<!-- ORIGINAL MESSAGE START -->
+
+# Original title
+
+The **original** message.
+
+<!-- ORIGINAL MESSAGE END -->`}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Proposed extraction" }),
+    ).toBeInTheDocument();
+    const sourcePanel = screen.getByRole("region", {
+      name: "Original message",
+    });
+    expect(sourcePanel).toHaveClass("workspace-original-message");
+    expect(
+      within(sourcePanel).getByRole("heading", { name: "Original message" }),
+    ).toBeInTheDocument();
+    expect(
+      within(sourcePanel).getByRole("heading", { name: "Original title" }),
+    ).toBeInTheDocument();
+    expect(within(sourcePanel).getByText("original")).toBeInTheDocument();
+    expect(container.querySelector("script")).toBeNull();
+  });
+
   test("renders a ChatGPT export as a conversation with sources", () => {
     render(
       <ChatgptPreview
