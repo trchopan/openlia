@@ -57,6 +57,8 @@ func TestConfigRoundTrip(t *testing.T) {
 		Root:               "/home/browser/services/openlia-browser",
 		ExtensionTokenFile: "/home/browser/services/playwright-server-token.txt",
 	}
+	want.WorkspaceGitSchedule = "30 2 * * *"
+	want.WorkspaceGitEnabled = true
 	if err := saveConfig(want); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +66,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Target != want.Target || got.Model != want.Model || got.OutputLanguage != want.OutputLanguage || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || got.LochoRelayConfigSource != want.LochoRelayConfigSource || got.LochoRelaySecretsSource != want.LochoRelaySecretsSource || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || strings.Join(got.EnabledTools, ",") != strings.Join(want.EnabledTools, ",") || got.BackupIdentityFile != want.BackupIdentityFile || got.BackupKnownHosts != want.BackupKnownHosts || got.BackupRecipient != want.BackupRecipient || got.BackupSchedule != want.BackupSchedule || got.BackupScheduleEnabled != want.BackupScheduleEnabled || got.BackupRemoteRetention != want.BackupRemoteRetention || len(got.BackupDestinations) != len(want.BackupDestinations) || got.BackupDestinations[0] != want.BackupDestinations[0] || got.BackupDestinations[1] != want.BackupDestinations[1] || got.OpenLiaBrowser != want.OpenLiaBrowser {
+	if got.Target != want.Target || got.Model != want.Model || got.OutputLanguage != want.OutputLanguage || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || got.LochoRelayConfigSource != want.LochoRelayConfigSource || got.LochoRelaySecretsSource != want.LochoRelaySecretsSource || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || strings.Join(got.EnabledTools, ",") != strings.Join(want.EnabledTools, ",") || got.BackupIdentityFile != want.BackupIdentityFile || got.BackupKnownHosts != want.BackupKnownHosts || got.BackupRecipient != want.BackupRecipient || got.BackupSchedule != want.BackupSchedule || got.BackupScheduleEnabled != want.BackupScheduleEnabled || got.BackupRemoteRetention != want.BackupRemoteRetention || len(got.BackupDestinations) != len(want.BackupDestinations) || got.BackupDestinations[0] != want.BackupDestinations[0] || got.BackupDestinations[1] != want.BackupDestinations[1] || got.WorkspaceGitSchedule != want.WorkspaceGitSchedule || got.WorkspaceGitEnabled != want.WorkspaceGitEnabled || got.OpenLiaBrowser != want.OpenLiaBrowser {
 		t.Fatalf("round trip mismatch: got %#v want %#v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -589,5 +591,32 @@ func TestOpenWebUIRender(t *testing.T) {
 	rendered = renderConfig(config)
 	if !strings.Contains(rendered, "auth = false\n") {
 		t.Fatalf("rendered config missing auth = false:\n%s", rendered)
+	}
+}
+
+func TestWorkspaceGitConfigValidation(t *testing.T) {
+	config := defaultConfig()
+	config.WorkspaceGitSchedule = "invalid-cron"
+	if err := validateConfig(config); err == nil {
+		t.Fatal("expected error on invalid workspace_git.schedule, got nil")
+	}
+
+	config.WorkspaceGitSchedule = "30 4 * * *"
+	if err := validateConfig(config); err != nil {
+		t.Fatalf("valid workspace_git.schedule rejected: %v", err)
+	}
+}
+
+func TestWorkspaceGitConfigDefaults(t *testing.T) {
+	config := defaultConfig()
+	if config.WorkspaceGitSchedule != "0 4 * * *" {
+		t.Fatalf("default schedule = %q, want '0 4 * * *'", config.WorkspaceGitSchedule)
+	}
+	if !config.WorkspaceGitEnabled {
+		t.Fatal("default enabled should be true")
+	}
+	rendered := renderConfig(config)
+	if !strings.Contains(rendered, "[workspace_git]\nenabled = true\nschedule = \"0 4 * * *\"\n") {
+		t.Fatalf("rendered config missing [workspace_git]:\n%s", rendered)
 	}
 }

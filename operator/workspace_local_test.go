@@ -169,3 +169,26 @@ func runWorkspaceGitCommand(t *testing.T, workspace string, args ...string) stri
 	}
 	return strings.TrimSpace(string(output))
 }
+
+func TestWorkspaceGitConfiguresHermesCronSchedule(t *testing.T) {
+	workspace := t.TempDir()
+	runner := &localWorkspaceGitRunner{workspace: workspace}
+	compose := NewCompose(Config{ProjectName: "test", ComposeProjectDir: t.TempDir(), ComposeFile: filepath.Join(t.TempDir(), "compose.yaml")}, runner)
+	result, err := WorkspaceGit(context.Background(), compose, WorkspaceGitOptions{
+		Action:   "setup",
+		Schedule: "0 4 * * *",
+		Enabled:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.OK {
+		t.Fatalf("unexpected setup result: %+v", result)
+	}
+	if runner.cronCalls != 1 {
+		t.Fatalf("expected 1 cron call, got %d", runner.cronCalls)
+	}
+	if result.Cron != "scheduled: 0 4 * * *" {
+		t.Fatalf("expected result.Cron 'scheduled: 0 4 * * *', got %q", result.Cron)
+	}
+}

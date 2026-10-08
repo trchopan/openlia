@@ -1,7 +1,7 @@
 ---
 name: workspace-git
-description: Track approved or delegated workspace changes in local Git history.
-version: 0.2.0
+description: Record consolidated daily workspace changes in local Git history with structured commits.
+version: 0.3.0
 platforms: [linux]
 required_environment_variables: []
 required_credential_files: []
@@ -17,38 +17,64 @@ The OpenLia workspace is `/opt/data/workspace`. It is maintained as a local
 Git repository for history tracking. OpenLia does not configure Git remotes or
 synchronize workspace history over the network.
 
+## Operating Model
+
+- **Scheduled Daily Run**: This skill runs automatically once a day (default every
+  night at 04:00, configured in `config.toml` under `[workspace_git]`).
+- **On-Demand**: It can also be invoked manually on demand (`/workspace-git`).
+- **No Change, No Commit**: If `git status` reports no uncommitted working tree
+  changes, no commit is created.
+- **Multiple Appropriate Commits**: When changes exist, files are grouped logically
+  by workspace domain or topic and committed in separate, structured commits rather
+  than a single monolithic commit.
+- **Conversational Decoupling**: Daytime interactive tasks and routine skills
+  (such as `inbox-triage` and `workspace-organize`) do not perform immediate Git commits;
+  all changes are consolidated into this skill's scheduled run.
+
 ## Safety Rules
 
 - Never put tokens, credentials, OAuth files, private keys, or raw secret
   exports in the workspace.
+- Never stage or commit `.env`, `auth.json`, `sessions/`, `logs/`, or `cache/`.
 - Never use `git reset --hard`, `git clean`, or destructive conflict handling.
-- Inspect the status and current branch before changing the repository.
-- Do not stage unrelated changes or create empty commits.
 - Do not add a Git remote or use Git network operations; use OpenLia backups
-  for recovery.
+  for durable encrypted recovery.
 
-## Inspect History
+## History Recording Procedure
 
-```bash
-cd /opt/data/workspace
-git status --short --branch
-git log -10 --oneline
-```
+1. **Check Status**:
+   ```bash
+   cd /opt/data/workspace
+   git status --short --branch
+   ```
 
-## Record an Approved Change
+2. **Evaluate Changes**:
+   - If the output shows no modifications or untracked files, report:
+     `"Workspace Git working tree is clean. No commits required."`
+     and exit immediately without creating empty commits.
 
-After an approved or delegated coherent workspace update, and only when
-`assistant-policy.yaml` permits `local_git_commits`, stage only the intended
-files and commit a concise history entry:
+3. **Plan Commit Batches**:
+   Use the bundled deterministic helper to group changed files into domains:
+   ```bash
+   git status --porcelain | awk '{print $2}' | python /opt/data/skills/workspace-git/scripts/check_workspace_git.py --plan
+   ```
+   Or group files logically by directory:
+   - `tasks/` & `projects/` -> `docs(tasks): update task records`
+   - `inbox/` -> `docs(inbox): file intake records`
+   - `knowledge/` -> `feat(knowledge): update research and claims`
+   - `reports/` -> `docs(reports): archive generated reports`
+   - `decisions/` -> `docs(decisions): record decision log`
+   - `areas/` -> `docs(areas): update area standards`
+   - Root configuration -> `chore(workspace): update workspace files`
 
-```bash
-cd /opt/data/workspace
-git status --short --branch
-git add -- path/to/authorized-file.md
-git diff --cached
-git commit -m "backup: describe the workspace update"
-```
+4. **Execute Structured Commits**:
+   For each group with safe files:
+   ```bash
+   git add -- <group-files>
+   git diff --cached --name-only
+   git commit -m "<conventional commit message describing updates>"
+   ```
 
-If the index is unchanged, do not create an empty commit. Report the resulting
-commit and working-tree status. Use `openlia backup create` to create a durable
-encrypted backup.
+5. **Report Summary**:
+   Provide a concise summary of the commits created and verify the working tree
+   is clean.

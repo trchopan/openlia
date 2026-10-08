@@ -7,7 +7,9 @@ import (
 )
 
 type WorkspaceGitOptions struct {
-	Action string
+	Action   string
+	Schedule string
+	Enabled  bool
 }
 
 type WorkspaceGitResult struct {
@@ -16,6 +18,7 @@ type WorkspaceGitResult struct {
 	Workspace string `json:"workspace,omitempty"`
 	Branch    string `json:"branch,omitempty"`
 	Status    string `json:"status,omitempty"`
+	Cron      string `json:"cron,omitempty"`
 }
 
 const workspacePath = "/opt/data/workspace"
@@ -95,7 +98,42 @@ func WorkspaceGit(ctx context.Context, compose Compose, options WorkspaceGitOpti
 		}
 	}
 
-	return WorkspaceGitResult{OK: true, Action: options.Action, Workspace: workspacePath, Branch: workspaceBranch}, nil
+	cronResult := ""
+	if (options.Action == "setup" || options.Action == "ensure") && options.Enabled {
+		if res, err := reconcileWorkspaceGitCron(ctx, compose, options.Schedule, options.Enabled); err == nil {
+			cronResult = res
+		}
+	}
+
+	return WorkspaceGitResult{
+		OK:        true,
+		Action:    options.Action,
+		Workspace: workspacePath,
+		Branch:    workspaceBranch,
+		Cron:      cronResult,
+	}, nil
+}
+
+func reconcileWorkspaceGitCron(ctx context.Context, compose Compose, schedule string, enabled bool) (string, error) {
+	const cronName = "openlia-workspace-git"
+	runHermes := func(args ...string) (CommandResult, error) {
+		return compose.Run(ctx, append([]string{"exec", "-T", "-u", "10000", "hermes", "hermes"}, args...)...)
+	}
+	if !enabled {
+		_, _ = runHermes("cron", "pause", cronName)
+		return "disabled", nil
+	}
+	if schedule == "" {
+		schedule = "0 4 * * *"
+	}
+	prompt := "Run the workspace-git skill to review workspace changes and create appropriate structured Git commits for each changed area. If there are no changes, make no commit."
+	if _, err := runHermes("cron", "edit", cronName, "--schedule", schedule); err == nil {
+		return "scheduled: " + schedule, nil
+	}
+	if _, err := runHermes("cron", "create", schedule, prompt, "--name", cronName, "--skill", "workspace-git"); err != nil {
+		return "", err
+	}
+	return "scheduled: " + schedule, nil
 }
 
 func unstageProtectedWorkspacePaths(runGit func(...string) (CommandResult, error), hasHead bool) {
