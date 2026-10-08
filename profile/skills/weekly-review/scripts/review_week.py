@@ -37,9 +37,28 @@ def render_review(data: dict[str, Any]) -> str:
     decisions = _list(data, "decisions")
     claims = _list(data, "claims")
     completed = [task for task in tasks if str(task.get("status", "")).lower() in {"done", "completed"}]
-    open_tasks = [task for task in tasks if task not in completed]
-    active_projects = [project for project in projects if str(project.get("status", "active")).lower() not in {"done", "completed", "archived"}]
-    revisit = [decision for decision in decisions if decision.get("revisit") is True or decision.get("outcome") in (None, "")]
+    closed_tasks = [
+        task
+        for task in tasks
+        if str(task.get("status", "")).lower() in {"cancelled", "canceled", "archived"}
+    ]
+    open_tasks = [
+        task
+        for task in tasks
+        if str(task.get("status", "")).lower()
+        not in {"done", "completed", "cancelled", "canceled", "archived"}
+    ]
+    active_projects = [
+        project
+        for project in projects
+        if str(project.get("status") or "active").lower() == "active"
+    ]
+    revisit = [
+        decision
+        for decision in decisions
+        if decision.get("revisit") is True
+        or str(decision.get("status") or "").lower() in {"proposed", "pending", ""}
+    ]
     claim_review = [claim for claim in claims if claim.get("needs_review") is True or str(claim.get("status", "")).lower() in {"candidate", "stale", "contested"}]
 
     lines = [
@@ -50,6 +69,10 @@ def render_review(data: dict[str, Any]) -> str:
         "## Completed",
         "",
         *_bullets(completed, "No completed tasks supplied."),
+        "",
+        "## Closed / Cancelled",
+        "",
+        *_bullets(closed_tasks, "No cancelled or archived tasks supplied."),
         "",
         "## Active Projects",
         "",
@@ -80,16 +103,31 @@ def self_test() -> None:
     output = render_review(
         {
             "week": "2026-W01",
-            "projects": [{"title": "Active project", "status": "active"}],
-            "tasks": [{"title": "Finished task", "status": "done"}, {"title": "Open task", "status": "open"}],
-            "decisions": [{"title": "Unresolved choice"}],
+            "projects": [
+                {"title": "Active project", "status": "active"},
+                {"title": "Unspecified project", "status": None},
+                {"title": "Paused project", "status": "paused"},
+            ],
+            "tasks": [
+                {"title": "Finished task", "status": "done"},
+                {"title": "Cancelled task", "status": "cancelled"},
+                {"title": "Open task", "status": "open"},
+            ],
+            "decisions": [
+                {"title": "Unresolved choice", "status": None},
+                {"title": "Abandoned decision", "status": "abandoned"},
+            ],
             "claims": [{"claim": "A stale preference", "status": "stale", "needs_review": True}],
         }
     )
     assert "Finished task" in output
+    assert "Cancelled task" not in output.split("## Open Loops", 1)[1]
     assert "Open task" in output
     assert "Unresolved choice" in output
     assert "A stale preference" in output
+    assert "Unspecified project" in output
+    assert "Paused project" not in output
+    assert "Abandoned decision" not in output
 
 
 def main(argv: list[str] | None = None) -> int:
