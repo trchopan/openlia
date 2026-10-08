@@ -72,6 +72,8 @@ RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache \
 COPY --chmod=0755 docker/secret-source.sh /usr/local/bin/openlia-secret-source
 COPY docker/openlia_link_rewriter.py /opt/hermes/.venv/lib/python3.13/site-packages/openlia_link_rewriter.py
 COPY docker/openlia_link_rewriter.pth /opt/hermes/.venv/lib/python3.13/site-packages/openlia_link_rewriter.pth
+# OpenLia's policy plugin is bundled with the image and enabled by profile/config.yaml.
+COPY profile/plugins/openlia-policy /opt/hermes/plugins/openlia-policy
 
 ARG OPENLIA_PROJECT_NAME="openlia"
 ARG OPENLIA_ENABLED_TOOLS=""

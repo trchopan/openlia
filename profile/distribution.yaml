@@ -10,6 +10,7 @@ distribution_owned:
   - SOUL.md
   - AGENTS.md
   - config.yaml
+  - plugins/
   - skills/
   - cron/
 system_owned:

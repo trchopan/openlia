@@ -59,6 +59,7 @@ test:
 	go test ./...
 	go vet ./...
 	$(PYTHON) -m py_compile tests/smoke.py
+	$(PYTHON) -m unittest tests.test_openlia_policy_plugin
 	for script in profile/skills/*/scripts/*.py; do $(PYTHON) "$$script" --self-test; done
 
 bun-install:

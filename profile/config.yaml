@@ -45,6 +45,12 @@ skills:
   guard_agent_created: true
   project_discovery: false
 
+plugins:
+  # The policy plugin is bundled by the OpenLia image and is enabled by default.
+  enabled:
+    - openlia-policy
+  hook_callback_timeout: 30
+
 cron:
   preflight: true
   allow_agent_scheduling: false
