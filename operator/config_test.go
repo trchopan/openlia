@@ -106,49 +106,49 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	repo := t.TempDir()
 	runtime := filepath.Join(t.TempDir(), "runtime")
 	config, err := LoadConfigFromEnv(map[string]string{
-		"OPENLIA_REPO_ROOT":                  repo,
-		"OPENLIA_RUNTIME_ROOT":               runtime,
-		"OPENLIA_PROJECT_NAME":               "example",
-		"OPENLIA_PROVIDER":                   "copilot",
-		"OPENLIA_OUTPUT_LANGUAGE":            "vi",
-		"OPENLIA_FALLBACK_PROVIDERS":         `[{"provider":"custom","model":"gateway-model","base_url":"https://gateway.example.test/v1","key_env":"OPENAI_GATEWAY_API_KEY"},{"provider":"openai-api","model":"official-model"}]`,
-		"OPENLIA_LOCAL_MODE":                 "true",
-		"OPENLIA_ENABLED_SKILLS":             "daily-briefing,workspace-git",
-		"OPENLIA_ENABLED_TOOLS":              "pdf,office",
-		"OPENLIA_SKILLS_CONFIGURED":          "true",
-		"OPENLIA_WORKSPACE_UI_HOST":          "0.0.0.0",
-		"OPENLIA_WORKSPACE_UI_PORT":          "8090",
-		"OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN": "https://workspace.example.test",
-		"OPENLIA_WORKSPACE_UI_AUTH_REQUIRED": "true",
-		"OPENLIA_OPEN_WEBUI_HOST":            "127.0.0.1",
-		"OPENLIA_OPEN_WEBUI_PORT":            "8090",
-		"OPENLIA_OPEN_WEBUI_IMAGE":           "ghcr.io/open-webui/open-webui:main",
-		"OPENLIA_OPEN_WEBUI_AUTH":            "false",
-		"OPENLIA_LOCHO_VERSION":              "1.2.0",
-		"OPENLIA_LOCHO_X86_64_SHA256":        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"OPENLIA_LOCHO_ARM64_SHA256":         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"OPENLIA_REPO_ROOT":                     repo,
+		"OPENLIA_RUNTIME_ROOT":                  runtime,
+		"OPENLIA_PROJECT_NAME":                  "example",
+		"OPENLIA_PROVIDER":                      "copilot",
+		"OPENLIA_OUTPUT_LANGUAGE":               "vi",
+		"OPENLIA_FALLBACK_PROVIDERS":            `[{"provider":"custom","model":"gateway-model","base_url":"https://gateway.example.test/v1","key_env":"OPENAI_GATEWAY_API_KEY"},{"provider":"openai-api","model":"official-model"}]`,
+		"OPENLIA_LOCAL_MODE":                    "true",
+		"OPENLIA_ENABLED_SKILLS":                "daily-briefing,workspace-git",
+		"OPENLIA_INGESTION_MAX_CONCURRENT_JOBS": "2",
+		"OPENLIA_SKILLS_CONFIGURED":             "true",
+		"OPENLIA_WORKSPACE_UI_HOST":             "0.0.0.0",
+		"OPENLIA_WORKSPACE_UI_PORT":             "8090",
+		"OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN":    "https://workspace.example.test",
+		"OPENLIA_WORKSPACE_UI_AUTH_REQUIRED":    "true",
+		"OPENLIA_OPEN_WEBUI_HOST":               "127.0.0.1",
+		"OPENLIA_OPEN_WEBUI_PORT":               "8090",
+		"OPENLIA_OPEN_WEBUI_IMAGE":              "ghcr.io/open-webui/open-webui:main",
+		"OPENLIA_OPEN_WEBUI_AUTH":               "false",
+		"OPENLIA_LOCHO_VERSION":                 "1.2.0",
+		"OPENLIA_LOCHO_X86_64_SHA256":           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"OPENLIA_LOCHO_ARM64_SHA256":            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !config.LocalMode || !config.SkillsConfigured || config.OutputLanguage != "vi" || config.WorkspaceUIHost != "0.0.0.0" || config.WorkspaceUIPort != 8090 || config.WorkspaceUIPublicOrigin != "https://workspace.example.test" || config.OpenWebUIHost != "127.0.0.1" || config.OpenWebUIPort != 8090 || config.OpenWebUIImage != "ghcr.io/open-webui/open-webui:main" || config.OpenWebUIAuth != false || config.LochoX8664SHA256 != strings.Repeat("a", 64) || config.LochoARM64SHA256 != strings.Repeat("b", 64) || len(config.EnabledSkills) != 2 || strings.Join(config.EnabledTools, ",") != "pdf,office" || config.NetworkName != "example-private" || config.Provider != "copilot" || len(config.FallbackProviders) != 2 || config.FallbackProviders[0].BaseURL != "https://gateway.example.test/v1" || config.FallbackProviders[1].Model != "official-model" {
+	if !config.LocalMode || !config.SkillsConfigured || config.OutputLanguage != "vi" || config.WorkspaceUIHost != "0.0.0.0" || config.WorkspaceUIPort != 8090 || config.WorkspaceUIPublicOrigin != "https://workspace.example.test" || config.OpenWebUIHost != "127.0.0.1" || config.OpenWebUIPort != 8090 || config.OpenWebUIImage != "ghcr.io/open-webui/open-webui:main" || config.OpenWebUIAuth != false || config.LochoX8664SHA256 != strings.Repeat("a", 64) || config.LochoARM64SHA256 != strings.Repeat("b", 64) || len(config.EnabledSkills) != 2 || config.IngestionMaxConcurrentJobs != 2 || config.NetworkName != "example-private" || config.Provider != "copilot" || len(config.FallbackProviders) != 2 || config.FallbackProviders[0].BaseURL != "https://gateway.example.test/v1" || config.FallbackProviders[1].Model != "official-model" {
 		t.Fatalf("unexpected typed config: %+v", config)
 	}
-	wantImage := toolcatalog.ManagedHermesImage("example", []string{"pdf", "office"}, "v2026.9.14", "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294", toolcatalog.DefaultDebianSnapshot)
+	wantImage := toolcatalog.ManagedHermesImage("example", "v2026.9.14", "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294", toolcatalog.DefaultDebianSnapshot)
 	if config.HermesImage != wantImage {
 		t.Fatalf("managed Hermes image = %q, want %q", config.HermesImage, wantImage)
 	}
 }
 
-func TestLoadConfigFromEnvRejectsInvalidTools(t *testing.T) {
-	for _, value := range []string{"unknown", "pdf,pdf"} {
+func TestLoadConfigFromEnvRejectsInvalidIngestionConcurrency(t *testing.T) {
+	for _, value := range []string{"0", "invalid"} {
 		_, err := LoadConfigFromEnv(map[string]string{
-			"OPENLIA_REPO_ROOT":     t.TempDir(),
-			"OPENLIA_RUNTIME_ROOT":  filepath.Join(t.TempDir(), "runtime"),
-			"OPENLIA_ENABLED_TOOLS": value,
+			"OPENLIA_REPO_ROOT":                     t.TempDir(),
+			"OPENLIA_RUNTIME_ROOT":                  filepath.Join(t.TempDir(), "runtime"),
+			"OPENLIA_INGESTION_MAX_CONCURRENT_JOBS": value,
 		})
-		if err == nil || !strings.Contains(err.Error(), "OPENLIA_ENABLED_TOOLS") {
-			t.Fatalf("invalid tools %q error = %v", value, err)
+		if err == nil || !strings.Contains(err.Error(), "OPENLIA_INGESTION_MAX_CONCURRENT_JOBS") {
+			t.Fatalf("invalid ingestion concurrency %q error = %v", value, err)
 		}
 	}
 }

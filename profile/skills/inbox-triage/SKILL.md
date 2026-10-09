@@ -144,6 +144,12 @@ not modify the input or create directories.
   claim, or apply delegation to ambiguous candidates.
 - Do not embed environment-specific HTTP origins; use canonical `openlia://` workspace URIs.
 
+When an ingestion callback supplies an `event_id` and `action_id`, acknowledge
+the event before applying domain writes. Reuse the same `action_id` on retries,
+preserve stable candidate and record references, and mark the action complete
+only after the domain writes are durable. A callback retry with a completed
+action must not create another domain record.
+
 ## Verification
 
 Confirm that:

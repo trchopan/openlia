@@ -48,7 +48,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 	want.SecretSource = filepath.Join(temporary, "hermes.env")
 	want.EnabledSkills = []string{"daily-briefing", "deep-research"}
-	want.EnabledTools = []string{"pdf", "ocr", "media-transcripts"}
+	want.IngestionMaxConcurrentJobs = 2
 	want.OpenLiaBrowser = OpenLiaBrowserConfig{
 		Configured:         true,
 		Mode:               "ssh",
@@ -66,7 +66,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Target != want.Target || got.Model != want.Model || got.OutputLanguage != want.OutputLanguage || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || got.LochoRelayConfigSource != want.LochoRelayConfigSource || got.LochoRelaySecretsSource != want.LochoRelaySecretsSource || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || strings.Join(got.EnabledTools, ",") != strings.Join(want.EnabledTools, ",") || got.BackupIdentityFile != want.BackupIdentityFile || got.BackupKnownHosts != want.BackupKnownHosts || got.BackupRecipient != want.BackupRecipient || got.BackupSchedule != want.BackupSchedule || got.BackupScheduleEnabled != want.BackupScheduleEnabled || got.BackupRemoteRetention != want.BackupRemoteRetention || len(got.BackupDestinations) != len(want.BackupDestinations) || got.BackupDestinations[0] != want.BackupDestinations[0] || got.BackupDestinations[1] != want.BackupDestinations[1] || got.WorkspaceGitSchedule != want.WorkspaceGitSchedule || got.WorkspaceGitEnabled != want.WorkspaceGitEnabled || got.OpenLiaBrowser != want.OpenLiaBrowser {
+	if got.Target != want.Target || got.Model != want.Model || got.OutputLanguage != want.OutputLanguage || got.WorkspaceUIHost != want.WorkspaceUIHost || got.WorkspaceUIPort != want.WorkspaceUIPort || got.WorkspaceUIPublicOrigin != want.WorkspaceUIPublicOrigin || got.OpenWebUIHost != want.OpenWebUIHost || got.OpenWebUIPort != want.OpenWebUIPort || got.OpenWebUIImage != want.OpenWebUIImage || got.OpenWebUIAuth != want.OpenWebUIAuth || got.LochoRelayConfigSource != want.LochoRelayConfigSource || got.LochoRelaySecretsSource != want.LochoRelaySecretsSource || len(got.FallbackProviders) != 2 || got.FallbackProviders[0] != want.FallbackProviders[0] || got.FallbackProviders[1] != want.FallbackProviders[1] || got.Timezone != want.Timezone || got.SecretSource != want.SecretSource || len(got.EnabledSkills) != 2 || got.IngestionMaxConcurrentJobs != want.IngestionMaxConcurrentJobs || got.BackupIdentityFile != want.BackupIdentityFile || got.BackupKnownHosts != want.BackupKnownHosts || got.BackupRecipient != want.BackupRecipient || got.BackupSchedule != want.BackupSchedule || got.BackupScheduleEnabled != want.BackupScheduleEnabled || got.BackupRemoteRetention != want.BackupRemoteRetention || len(got.BackupDestinations) != len(want.BackupDestinations) || got.BackupDestinations[0] != want.BackupDestinations[0] || got.BackupDestinations[1] != want.BackupDestinations[1] || got.WorkspaceGitSchedule != want.WorkspaceGitSchedule || got.WorkspaceGitEnabled != want.WorkspaceGitEnabled || got.OpenLiaBrowser != want.OpenLiaBrowser {
 		t.Fatalf("round trip mismatch: got %#v want %#v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -78,13 +78,11 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 }
 
-func TestToolCapabilitiesRejectUnknownAndDuplicateValues(t *testing.T) {
-	for _, values := range [][]string{{"shell"}, {"pdf", "pdf"}} {
-		config := defaultConfig()
-		config.EnabledTools = values
-		if err := validateConfig(config); err == nil {
-			t.Fatalf("invalid tool capabilities accepted: %v", values)
-		}
+func TestIngestionConcurrencyMustBePositive(t *testing.T) {
+	config := defaultConfig()
+	config.IngestionMaxConcurrentJobs = 0
+	if err := validateConfig(config); err == nil {
+		t.Fatal("invalid ingestion concurrency accepted")
 	}
 }
 

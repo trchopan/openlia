@@ -116,6 +116,7 @@ export function protectedPath(path: string): boolean {
   const parts = lowerPath.split("/");
   const basename = parts.at(-1) ?? "";
   return (
+    lowerPath === "sources/document-passwords.toml" ||
     lowerPath === ".env" ||
     lowerPath.startsWith(".env.") ||
     lowerPath.endsWith(".env") ||

@@ -1,0 +1,349 @@
+"""SQLite-backed disposable execution state for durable ingestion."""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import time
+import uuid
+from contextlib import contextmanager
+from pathlib import Path
+
+
+LEASE_SECONDS = 90
+MAX_ATTEMPTS = 4
+
+
+def now() -> float:
+    return time.time()
+
+
+def new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex}"
+
+
+class IngestionQueue:
+    def __init__(self, root: Path):
+        self.root = root
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.path = root / "queue.sqlite"
+        self._initialize()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout=30000")
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=FULL")
+        return connection
+
+    @contextmanager
+    def _database(self):
+        connection = self._connect()
+        try:
+            yield connection
+        finally:
+            connection.close()
+
+    def _initialize(self) -> None:
+        with self._database() as db:
+            db.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS jobs (
+                    job_id TEXT PRIMARY KEY,
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    intake_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    version_id TEXT,
+                    operation TEXT NOT NULL,
+                    requested_outputs TEXT NOT NULL,
+                    password_profile TEXT,
+                    continuation TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    lease_owner TEXT,
+                    lease_generation INTEGER NOT NULL DEFAULT 0,
+                    lease_expires_at REAL,
+                    heartbeat_at REAL,
+                    next_attempt_at REAL,
+                    error_code TEXT,
+                    error_summary TEXT,
+                    result TEXT,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS jobs_due ON jobs(state, next_attempt_at);
+                CREATE TABLE IF NOT EXISTS events (
+                    event_id TEXT PRIMARY KEY,
+                    job_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    delivery_state TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at REAL NOT NULL,
+                    last_error TEXT,
+                    delivered_at REAL,
+                    acknowledged_at REAL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS events_due ON events(delivery_state, next_attempt_at);
+                CREATE TABLE IF NOT EXISTS actions (
+                    action_id TEXT PRIMARY KEY,
+                    event_id TEXT NOT NULL,
+                    intake_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    record_refs TEXT NOT NULL DEFAULT '[]',
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                """
+            )
+
+    def submit(self, request: dict) -> dict:
+        timestamp = now()
+        job_id = new_id("job")
+        continuation = dict(request.get("continuation") or {})
+        idempotency_key = request["idempotency_key"]
+        with self._database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute("SELECT * FROM jobs WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
+            if existing:
+                db.execute("COMMIT")
+                return dict(existing)
+            db.execute(
+                """INSERT INTO jobs (
+                    job_id, idempotency_key, intake_id, source_id, version_id, operation,
+                    requested_outputs, password_profile, continuation, state, next_attempt_at,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)""",
+                (
+                    job_id,
+                    idempotency_key,
+                    request["intake_id"],
+                    request["source_id"],
+                    request.get("version_id"),
+                    request["operation"],
+                    json.dumps(request.get("requested_outputs", []), sort_keys=True),
+                    request.get("password_profile"),
+                    json.dumps(continuation, sort_keys=True),
+                    timestamp,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            db.execute("COMMIT")
+        return self.get(job_id)
+
+    def get(self, job_id: str) -> dict:
+        with self._database() as db:
+            row = db.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        if row is None:
+            raise KeyError("job not found")
+        return self._decode_job(dict(row))
+
+    def get_by_intake(self, intake_id: str) -> dict:
+        with self._database() as db:
+            row = db.execute("SELECT * FROM jobs WHERE intake_id = ? ORDER BY created_at DESC LIMIT 1", (intake_id,)).fetchone()
+        if row is None:
+            raise KeyError("intake job not found")
+        return self._decode_job(dict(row))
+
+    def get_by_idempotency(self, idempotency_key: str) -> dict | None:
+        with self._database() as db:
+            row = db.execute("SELECT * FROM jobs WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
+        return self._decode_job(dict(row)) if row is not None else None
+
+    def claim(self, owner: str) -> dict | None:
+        timestamp = now()
+        with self._database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._reclaim_locked(db, timestamp)
+            row = db.execute(
+                """SELECT job_id FROM jobs
+                   WHERE state IN ('queued', 'retryable-failure')
+                     AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+                   ORDER BY created_at LIMIT 1""",
+                (timestamp,),
+            ).fetchone()
+            if row is None:
+                db.execute("COMMIT")
+                return None
+            generation = db.execute("SELECT lease_generation FROM jobs WHERE job_id = ?", (row["job_id"],)).fetchone()[0] + 1
+            db.execute(
+                """UPDATE jobs SET state='running', attempts=attempts+1,
+                   lease_owner=?, lease_generation=?, lease_expires_at=?, heartbeat_at=?, updated_at=?
+                   WHERE job_id=? AND state IN ('queued', 'retryable-failure')""",
+                (owner, generation, timestamp + LEASE_SECONDS, timestamp, timestamp, row["job_id"]),
+            )
+            db.execute("COMMIT")
+        return self.get(row["job_id"])
+
+    def heartbeat(self, job_id: str, owner: str, generation: int) -> bool:
+        timestamp = now()
+        with self._database() as db:
+            result = db.execute(
+                """UPDATE jobs SET lease_expires_at=?, heartbeat_at=?, updated_at=?
+                   WHERE job_id=? AND state='running' AND lease_owner=? AND lease_generation=?""",
+                (timestamp + LEASE_SECONDS, timestamp, timestamp, job_id, owner, generation),
+            )
+        return result.rowcount == 1
+
+    def owns(self, job_id: str, owner: str, generation: int) -> bool:
+        with self._database() as db:
+            row = db.execute("SELECT 1 FROM jobs WHERE job_id=? AND state='running' AND lease_owner=? AND lease_generation=?", (job_id, owner, generation)).fetchone()
+        return row is not None
+
+    def finish(self, job: dict, result: dict) -> str | None:
+        timestamp = now()
+        event_id = new_id("evt")
+        payload = dict(result)
+        payload.update({"event_id": event_id, "job_id": job["job_id"], "intake_id": job["intake_id"], "source_id": job["source_id"], "version_id": job.get("version_id")})
+        with self._database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            valid = db.execute(
+                "SELECT 1 FROM jobs WHERE job_id=? AND state='running' AND lease_owner=? AND lease_generation=?",
+                (job["job_id"], job["lease_owner"], job["lease_generation"]),
+            ).fetchone()
+            if valid is None:
+                db.execute("ROLLBACK")
+                return None
+            db.execute(
+                "UPDATE jobs SET state=?, result=?, lease_owner=NULL, lease_expires_at=NULL, updated_at=? WHERE job_id=?",
+                ("completed" if result.get("status") == "completed" else "partial", json.dumps(result, sort_keys=True), timestamp, job["job_id"]),
+            )
+            db.execute(
+                """INSERT INTO events (event_id, job_id, event_type, payload, delivery_state, next_attempt_at, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)""",
+                (event_id, job["job_id"], f"ingestion.{result.get('status', 'failed')}", json.dumps(payload, sort_keys=True), timestamp, timestamp, timestamp),
+            )
+            db.execute("COMMIT")
+        return event_id
+
+    def fail(self, job: dict, code: str, summary: str, retryable: bool) -> bool:
+        timestamp = now()
+        should_retry = retryable and job["attempts"] < MAX_ATTEMPTS
+        state = "retryable-failure" if should_retry else "failed"
+        delay = min(300, 2 ** max(0, job["attempts"] - 1))
+        with self._database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            result = db.execute(
+                """UPDATE jobs SET state=?, error_code=?, error_summary=?, next_attempt_at=?,
+                   lease_owner=NULL, lease_expires_at=NULL, updated_at=?
+                   WHERE job_id=? AND state='running' AND lease_owner=? AND lease_generation=?""",
+                (state, code, summary[:500], timestamp + delay if should_retry else None, timestamp, job["job_id"], job["lease_owner"], job["lease_generation"]),
+            )
+            if result.rowcount == 1 and not should_retry:
+                event_id = new_id("evt")
+                payload = {"event_id": event_id, "status": "failed", "job_id": job["job_id"], "intake_id": job["intake_id"], "source_id": job["source_id"], "version_id": job.get("version_id"), "error_code": code, "continuation": job.get("continuation", {}), "action": "Review the durable intake record and retry explicitly."}
+                db.execute("INSERT INTO events (event_id, job_id, event_type, payload, delivery_state, next_attempt_at, created_at, updated_at) VALUES (?, ?, 'ingestion.failed', ?, 'pending', ?, ?, ?)", (event_id, job["job_id"], json.dumps(payload, sort_keys=True), timestamp, timestamp, timestamp))
+            db.execute("COMMIT")
+        return result.rowcount == 1
+
+    def block_for_password(self, job: dict, code: str, summary: str) -> bool:
+        timestamp = now()
+        with self._database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            result = db.execute("UPDATE jobs SET state='awaiting-unlock', error_code=?, error_summary=?, lease_owner=NULL, lease_expires_at=NULL, updated_at=? WHERE job_id=? AND state='running' AND lease_owner=? AND lease_generation=?", (code, summary[:500], timestamp, job["job_id"], job["lease_owner"], job["lease_generation"]))
+            if result.rowcount == 1:
+                event_id = new_id("evt")
+                payload = {"event_id": event_id, "status": "awaiting-unlock", "job_id": job["job_id"], "intake_id": job["intake_id"], "source_id": job["source_id"], "version_id": job.get("version_id"), "error_code": code, "continuation": job.get("continuation", {}), "action": "Select or configure a document unlock profile, then retry the intake."}
+                db.execute("INSERT INTO events (event_id, job_id, event_type, payload, delivery_state, next_attempt_at, created_at, updated_at) VALUES (?, ?, 'ingestion.awaiting-unlock', ?, 'pending', ?, ?, ?)", (event_id, job["job_id"], json.dumps(payload, sort_keys=True), timestamp, timestamp, timestamp))
+            db.execute("COMMIT")
+        return result.rowcount == 1
+
+    def due_events(self) -> list[dict]:
+        timestamp = now()
+        with self._database() as db:
+            rows = db.execute(
+                "SELECT * FROM events WHERE delivery_state IN ('pending', 'awaiting_ack') AND next_attempt_at <= ? ORDER BY created_at LIMIT 20",
+                (timestamp,),
+            ).fetchall()
+        return [self._decode_event(dict(row)) for row in rows]
+
+    def mark_event(self, event_id: str, delivered: bool, error: str | None = None) -> None:
+        timestamp = now()
+        if delivered:
+            state, delay, delivered_at = "awaiting_ack", 900, timestamp
+        else:
+            state, delivered_at = "pending", None
+        with self._database() as db:
+            current = db.execute("SELECT attempts FROM events WHERE event_id=?", (event_id,)).fetchone()
+            attempts = int(current[0]) if current else 0
+            delay = min(900, 2 ** min(8, attempts)) if not delivered else 900
+            db.execute(
+                """UPDATE events SET delivery_state=?, attempts=attempts+1, next_attempt_at=?,
+                   last_error=?, delivered_at=COALESCE(delivered_at, ?), updated_at=? WHERE event_id=?""",
+                (state, timestamp + delay, error[:500] if error else None, delivered_at, timestamp, event_id),
+            )
+
+    def acknowledge(self, event_id: str) -> bool:
+        timestamp = now()
+        with self._database() as db:
+            result = db.execute("UPDATE events SET delivery_state='acknowledged', acknowledged_at=?, updated_at=? WHERE event_id=? AND delivery_state != 'acknowledged'", (timestamp, timestamp, event_id))
+        return result.rowcount == 1
+
+    def begin_action(self, action_id: str, event_id: str, intake_id: str) -> dict:
+        timestamp = now()
+        with self._database() as db:
+            db.execute("INSERT OR IGNORE INTO actions (action_id, event_id, intake_id, status, created_at, updated_at) VALUES (?, ?, ?, 'started', ?, ?)", (action_id, event_id, intake_id, timestamp, timestamp))
+            row = db.execute("SELECT action_id, status, record_refs FROM actions WHERE action_id=?", (action_id,)).fetchone()
+        decoded = dict(row)
+        try:
+            decoded["record_refs"] = json.loads(decoded["record_refs"])
+        except (TypeError, json.JSONDecodeError):
+            decoded["record_refs"] = []
+        return decoded
+
+    def complete_action(self, action_id: str, record_refs: list[str]) -> bool:
+        with self._database() as db:
+            result = db.execute("UPDATE actions SET status='completed', record_refs=?, updated_at=? WHERE action_id=? AND status != 'completed'", (json.dumps(record_refs, sort_keys=True), now(), action_id))
+        return result.rowcount == 1
+
+    def create_event(self, job_id: str, event_type: str, payload: dict) -> str:
+        event_id = new_id("evt")
+        timestamp = now()
+        payload = {**payload, "event_id": event_id, "job_id": job_id}
+        with self._database() as db:
+            db.execute("INSERT INTO events (event_id, job_id, event_type, payload, delivery_state, next_attempt_at, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)", (event_id, job_id, event_type, json.dumps(payload, sort_keys=True), timestamp, timestamp, timestamp))
+        return event_id
+
+    def event_exists(self, event_id: str) -> bool:
+        with self._database() as db:
+            row = db.execute("SELECT 1 FROM events WHERE event_id=?", (event_id,)).fetchone()
+        return row is not None
+
+    def recover(self) -> int:
+        with self._database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            count = self._reclaim_locked(db, now())
+            db.execute("COMMIT")
+        return count
+
+    def _reclaim_locked(self, db: sqlite3.Connection, timestamp: float) -> int:
+        result = db.execute(
+            """UPDATE jobs SET state='queued', lease_owner=NULL, lease_expires_at=NULL,
+               next_attempt_at=?, error_code='worker_lost', error_summary='worker lease expired', updated_at=?
+               WHERE state='running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?""",
+            (timestamp, timestamp, timestamp),
+        )
+        return result.rowcount
+
+    @staticmethod
+    def _decode_job(job: dict) -> dict:
+        for key in ("requested_outputs", "continuation", "result"):
+            if job.get(key):
+                try:
+                    job[key] = json.loads(job[key])
+                except (TypeError, json.JSONDecodeError):
+                    job[key] = {} if key != "requested_outputs" else []
+        return job
+
+    @staticmethod
+    def _decode_event(event: dict) -> dict:
+        try:
+            event["payload"] = json.loads(event["payload"])
+        except (KeyError, TypeError, json.JSONDecodeError):
+            event["payload"] = {}
+        return event

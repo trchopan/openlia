@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"openlia/internal/toolcatalog"
 )
 
 type DeployOptions struct {
@@ -324,10 +322,7 @@ func deploymentReady(ctx context.Context, config Config, compose Compose, compon
 		}
 	}
 	if component == "all" || component == "hermes" || component == "locho" {
-		command := "command -v hermes >/dev/null && hermes config check"
-		if tools := configuredToolCommand(config.EnabledTools); tools != "" {
-			command += " && " + tools
-		}
+		command := "command -v hermes >/dev/null && hermes config check && command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null && command -v pdfinfo >/dev/null && command -v pdftoppm >/dev/null && command -v pdftotext >/dev/null && command -v yt-dlp >/dev/null && /opt/hermes/.venv/bin/python -c 'import PIL, openpyxl, xlrd, pypdfium2, jsonschema, msoffcrypto'"
 		if _, err := compose.Run(ctx, "exec", "-T", "hermes", "sh", "-c", command); err != nil {
 			return false
 		}
@@ -532,12 +527,10 @@ func Healthcheck(ctx context.Context, config Config, compose Compose, allowStopp
 		} else {
 			add("hermes_runtimes", true, "hermes_bun_uv_git_available")
 		}
-		if tools := configuredToolCommand(config.EnabledTools); tools != "" {
-			if _, err := compose.Run(ctx, "exec", "-T", "hermes", "sh", "-c", tools); err != nil {
-				add("hermes_tools", false, "configured_tool_missing")
-			} else {
-				add("hermes_tools", true, "configured_tools_available")
-			}
+		if _, err := compose.Run(ctx, "exec", "-T", "hermes", "sh", "-c", "command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null && command -v pdfinfo >/dev/null && command -v pdftoppm >/dev/null && command -v pdftotext >/dev/null && command -v yt-dlp >/dev/null && /opt/hermes/.venv/bin/python -c 'import PIL, openpyxl, xlrd, pypdfium2, jsonschema, msoffcrypto'"); err != nil {
+			add("hermes_ingestion", false, "required_dependency_missing")
+		} else {
+			add("hermes_ingestion", true, "required_dependencies_available")
 		}
 		if _, err := compose.Run(ctx, "exec", "-T", "hermes", "hermes", "config", "check"); err != nil {
 			add("hermes_config", false, "invalid")
@@ -652,24 +645,4 @@ func Healthcheck(ctx context.Context, config Config, compose Compose, allowStopp
 		}
 	}
 	return result, nil
-}
-
-func configuredToolCommand(tools []string) string {
-	canonical, err := toolcatalog.Canonical(tools)
-	if err != nil || len(canonical) == 0 {
-		return ""
-	}
-	commands := map[string][]string{
-		"media-transcripts": {"ffmpeg", "yt-dlp"},
-		"ocr":               {"tesseract"},
-		"office":            {"libreoffice"},
-		"pdf":               {"pdftotext", "pdfinfo"},
-	}
-	checks := make([]string, 0)
-	for _, tool := range canonical {
-		for _, command := range commands[tool] {
-			checks = append(checks, "command -v "+command+" >/dev/null")
-		}
-	}
-	return strings.Join(checks, " && ")
 }

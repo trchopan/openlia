@@ -36,7 +36,9 @@ installation may contain only starter data.
 - When referencing or linking to workspace documents or skills, format them using canonical URIs (`openlia://workspace/<path>` and `openlia://skills/<path>`). Inside workspace markdown files, document-relative paths (`./sub.md`) are also supported. Never embed environment-specific HTTP origins in workspace files.
 
 Credentials belong in Hermes' runtime secret source or environment, never in
-this profile, the workspace template, prompts, helper input, or reports.
+this profile, the workspace template, prompts, helper input, or reports. The
+dedicated workspace `sources/document-passwords.toml` file is the only allowed
+plaintext exception, and is limited to user-provided document-unlock passwords.
 Treat bundled skills as distribution-owned and read-only. Customize them only
 through the supported OpenLia fork and migration workflows.
 Skill writes are staged for review. Customize bundled skills through

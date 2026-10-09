@@ -589,6 +589,18 @@ class PolicyEnforcer:
 
         if tool_name in {"write_file", "patch"}:
             return self._workspace_tool_decision(authority, tool_name, args, scheduled)
+        if tool_name in {
+            "ingestion_capture",
+            "save_document_password",
+            "ingestion_retry",
+            "retry_ingestion_with_password_profile",
+            "ingestion_acknowledge",
+            "ingestion_complete_action",
+            "ingestion_recover",
+        }:
+            action = "capture" if tool_name in {"ingestion_capture", "save_document_password"} else "update_records"
+            relative_path = "sources/document-passwords.toml" if tool_name == "save_document_password" else "sources"
+            return self._workspace_action(authority, action, relative_path, scheduled)
         if tool_name == "terminal":
             return self._terminal_decision(authority, args, scheduled)
         if tool_name in _BROWSER_MUTATING_TOOLS:

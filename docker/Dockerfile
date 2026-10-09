@@ -76,11 +76,15 @@ COPY docker/openlia_link_rewriter.pth /opt/hermes/.venv/lib/python3.13/site-pack
 COPY profile/plugins/openlia-policy /opt/hermes/plugins/openlia-policy
 
 ARG OPENLIA_PROJECT_NAME="openlia"
-ARG OPENLIA_ENABLED_TOOLS=""
 COPY docker/yt-dlp-requirements.txt /usr/local/share/openlia/yt-dlp-requirements.txt
 COPY --chmod=0755 docker/install-tools.sh /usr/local/bin/openlia-install-tools
-RUN OPENLIA_PROJECT_NAME="${OPENLIA_PROJECT_NAME}" OPENLIA_ENABLED_TOOLS="${OPENLIA_ENABLED_TOOLS}" /usr/local/bin/openlia-install-tools
-LABEL org.openlia.project="${OPENLIA_PROJECT_NAME}" org.openlia.enabled-tools="${OPENLIA_ENABLED_TOOLS}" org.openlia.debian-snapshot="${DEBIAN_SNAPSHOT}"
+COPY profile/plugins/openlia-ingestion/requirements.txt /tmp/openlia-ingestion-requirements.txt
+RUN /usr/local/bin/openlia-install-tools \
+    && uv pip install --python /opt/hermes/.venv/bin/python --no-cache \
+        --requirement /tmp/openlia-ingestion-requirements.txt \
+    && rm -f /tmp/openlia-ingestion-requirements.txt
+COPY profile/plugins/openlia-ingestion /opt/hermes/plugins/openlia-ingestion
+LABEL org.openlia.project="${OPENLIA_PROJECT_NAME}" org.openlia.ingestion="required" org.openlia.debian-snapshot="${DEBIAN_SNAPSHOT}"
 
 # Keep the upstream default USER and ENTRYPOINT unchanged. s6 must start as
 # root so the upstream volume setup can drop supervised processes to hermes.

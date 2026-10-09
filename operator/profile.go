@@ -520,13 +520,14 @@ func renderOpenLiaConfig(data []byte, config Config) []byte {
 	rendered := strings.NewReplacer(
 		"${OPENLIA_PROVIDER}", config.Provider,
 		"${OPENLIA_MODEL}", config.Model,
+		"${OPENLIA_INGESTION_MAX_CONCURRENT_JOBS}", strconv.Itoa(config.IngestionMaxConcurrentJobs),
 	).Replace(string(data))
 	return []byte(rendered)
 }
 
 func hasOpenLiaConfigPlaceholders(data []byte) bool {
 	text := string(data)
-	return strings.Contains(text, "${OPENLIA_PROVIDER}") || strings.Contains(text, "${OPENLIA_MODEL}")
+	return strings.Contains(text, "${OPENLIA_PROVIDER}") || strings.Contains(text, "${OPENLIA_MODEL}") || strings.Contains(text, "${OPENLIA_INGESTION_MAX_CONCURRENT_JOBS}")
 }
 
 func hashConfigWithoutFallback(data []byte) string {

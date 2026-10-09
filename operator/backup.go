@@ -343,7 +343,7 @@ func createBackupWithRestart(ctx context.Context, config Config, reason string, 
 		SecretValues: "excluded",
 		Capabilities: "excluded",
 		Components:   []string{"hermes", "meta"},
-		Exclusions:   []string{"open-webui", "secrets", "caches", "bundled-skills", "logs"},
+		Exclusions:   []string{"open-webui", "secrets", "caches", "bundled-skills", "logs", "ingestion-runtime"},
 	}
 	manifestData, err := json.Marshal(manifest)
 	if err != nil {
@@ -1178,6 +1178,9 @@ func durableHermesPath(relative string, entry fs.DirEntry, bundledGroups map[str
 		return false
 	}
 	parts := strings.Split(relative, "/")
+	if len(parts) > 0 && parts[0] == "ingestion" {
+		return false
+	}
 	base := parts[len(parts)-1]
 	for _, part := range parts {
 		switch part {

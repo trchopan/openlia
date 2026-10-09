@@ -111,12 +111,13 @@ func TestProfileSyncRendersRuntimeProviderAndModel(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(repo, "profile", "skills"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(configPath, []byte("model:\n  provider: ${OPENLIA_PROVIDER}\n  default: ${OPENLIA_MODEL}\n"), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte("model:\n  provider: ${OPENLIA_PROVIDER}\n  default: ${OPENLIA_MODEL}\nplugins:\n  entries:\n    openlia-ingestion:\n      settings:\n        max_concurrent_jobs: ${OPENLIA_INGESTION_MAX_CONCURRENT_JOBS}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	config := testConfig(repo, runtime)
 	config.Provider = "copilot"
 	config.Model = "gpt-5.6-luna"
+	config.IngestionMaxConcurrentJobs = 3
 	if _, err := NewProfileOperator(config).Sync(); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +126,7 @@ func TestProfileSyncRendersRuntimeProviderAndModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if strings.Contains(text, "${OPENLIA_") || !strings.Contains(text, "provider: copilot") || !strings.Contains(text, "default: gpt-5.6-luna") {
+	if strings.Contains(text, "${OPENLIA_") || !strings.Contains(text, "provider: copilot") || !strings.Contains(text, "default: gpt-5.6-luna") || !strings.Contains(text, "max_concurrent_jobs: 3") {
 		t.Fatalf("runtime config placeholders were not rendered:\n%s", data)
 	}
 }

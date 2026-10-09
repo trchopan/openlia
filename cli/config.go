@@ -65,53 +65,53 @@ func ValidateServiceRole(role string) error {
 }
 
 type Config struct {
-	Schema                  int
-	Version                 string
-	Mode                    string
-	Target                  string
-	InstallRoot             string
-	Project                 string
-	Model                   string
-	OutputLanguage          string
-	FallbackProviders       []FallbackProviderConfig
-	Timezone                string
-	Provider                string
-	ExternalNetwork         string
-	HermesImage             string
-	HermesTag               string
-	HermesDigest            string
-	LochoImage              string
-	LochoVersion            string
-	LochoX8664SHA256        string
-	LochoARM64SHA256        string
-	APIEnabled              bool
-	APIHost                 string
-	WorkspaceUIHost         string
-	WorkspaceUIPort         int
-	WorkspaceUIPublicOrigin string
-	WorkspaceUIPasswordHash string
-	OpenWebUIHost           string
-	OpenWebUIPort           int
-	OpenWebUIImage          string
-	OpenWebUIAuth           bool
-	LochoHostEnabled        bool
-	LochoRelayConfigSource  string
-	LochoRelaySecretsSource string
-	SecretSource            string
-	ReleaseSource           string
-	EnabledSkills           []string
-	EnabledTools            []string
-	BackupIdentityFile      string
-	BackupKnownHosts        string
-	BackupRecipient         string
-	BackupSchedule          string
-	BackupScheduleEnabled   bool
-	BackupRemoteRetention   int
-	BackupDestinations      []BackupDestinationConfig
-	WorkspaceGitSchedule    string
-	WorkspaceGitEnabled     bool
-	Services                []ServiceHostConfig
-	OpenLiaBrowser          OpenLiaBrowserConfig
+	Schema                     int
+	Version                    string
+	Mode                       string
+	Target                     string
+	InstallRoot                string
+	Project                    string
+	Model                      string
+	OutputLanguage             string
+	FallbackProviders          []FallbackProviderConfig
+	Timezone                   string
+	Provider                   string
+	ExternalNetwork            string
+	HermesImage                string
+	HermesTag                  string
+	HermesDigest               string
+	LochoImage                 string
+	LochoVersion               string
+	LochoX8664SHA256           string
+	LochoARM64SHA256           string
+	APIEnabled                 bool
+	APIHost                    string
+	WorkspaceUIHost            string
+	WorkspaceUIPort            int
+	WorkspaceUIPublicOrigin    string
+	WorkspaceUIPasswordHash    string
+	OpenWebUIHost              string
+	OpenWebUIPort              int
+	OpenWebUIImage             string
+	OpenWebUIAuth              bool
+	LochoHostEnabled           bool
+	LochoRelayConfigSource     string
+	LochoRelaySecretsSource    string
+	SecretSource               string
+	ReleaseSource              string
+	EnabledSkills              []string
+	IngestionMaxConcurrentJobs int
+	BackupIdentityFile         string
+	BackupKnownHosts           string
+	BackupRecipient            string
+	BackupSchedule             string
+	BackupScheduleEnabled      bool
+	BackupRemoteRetention      int
+	BackupDestinations         []BackupDestinationConfig
+	WorkspaceGitSchedule       string
+	WorkspaceGitEnabled        bool
+	Services                   []ServiceHostConfig
+	OpenLiaBrowser             OpenLiaBrowserConfig
 }
 
 type BackupDestinationConfig struct {
@@ -151,39 +151,40 @@ type OpenLiaBrowserConfig struct {
 
 func defaultConfig() Config {
 	return Config{
-		Schema:                configSchema,
-		Version:               defaultVersion,
-		Mode:                  "ssh",
-		InstallRoot:           defaultRemoteRoot,
-		Project:               defaultProject,
-		Model:                 "gpt-5.6-luna",
-		OutputLanguage:        defaultOutputLanguage,
-		Timezone:              defaultTimezone,
-		Provider:              "copilot",
-		HermesImage:           defaultHermesImage,
-		HermesTag:             defaultHermesTag,
-		HermesDigest:          "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294",
-		LochoImage:            "openlia-locho:v" + defaultLochoVersion,
-		LochoVersion:          defaultLochoVersion,
-		LochoX8664SHA256:      "7687311a3fe9671ac6f75427712dc556b15517493e892d9f81be7d0355bdd5f1",
-		LochoARM64SHA256:      "80d089b3fdabe063b4c89fc6685e9bd0f297190d1af86d0f54624ba63d217b97",
-		APIHost:               "127.0.0.1",
-		WorkspaceUIHost:       "",
-		WorkspaceUIPort:       defaultWorkspaceUIPort,
-		OpenWebUIHost:         "",
-		OpenWebUIPort:         defaultOpenWebUIPort,
-		OpenWebUIImage:        defaultOpenWebUIImage,
-		OpenWebUIAuth:         true,
-		LochoHostEnabled:      false,
-		EnabledSkills:         append([]string(nil), defaultSkills...),
-		BackupSchedule:        "20 4 * * *",
-		BackupScheduleEnabled: true,
-		BackupRemoteRetention: 30,
-		BackupDestinations:    []BackupDestinationConfig{},
-		WorkspaceGitSchedule:  "0 4 * * *",
-		WorkspaceGitEnabled:   true,
-		OpenLiaBrowser:        OpenLiaBrowserConfig{Mode: "local", SSHPort: 22},
-		Services:              nil,
+		Schema:                     configSchema,
+		Version:                    defaultVersion,
+		Mode:                       "ssh",
+		InstallRoot:                defaultRemoteRoot,
+		Project:                    defaultProject,
+		Model:                      "gpt-5.6-luna",
+		OutputLanguage:             defaultOutputLanguage,
+		Timezone:                   defaultTimezone,
+		Provider:                   "copilot",
+		HermesImage:                defaultHermesImage,
+		HermesTag:                  defaultHermesTag,
+		HermesDigest:               "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294",
+		LochoImage:                 "openlia-locho:v" + defaultLochoVersion,
+		LochoVersion:               defaultLochoVersion,
+		LochoX8664SHA256:           "7687311a3fe9671ac6f75427712dc556b15517493e892d9f81be7d0355bdd5f1",
+		LochoARM64SHA256:           "80d089b3fdabe063b4c89fc6685e9bd0f297190d1af86d0f54624ba63d217b97",
+		APIHost:                    "127.0.0.1",
+		WorkspaceUIHost:            "",
+		WorkspaceUIPort:            defaultWorkspaceUIPort,
+		OpenWebUIHost:              "",
+		OpenWebUIPort:              defaultOpenWebUIPort,
+		OpenWebUIImage:             defaultOpenWebUIImage,
+		OpenWebUIAuth:              true,
+		LochoHostEnabled:           false,
+		EnabledSkills:              append([]string(nil), defaultSkills...),
+		BackupSchedule:             "20 4 * * *",
+		BackupScheduleEnabled:      true,
+		BackupRemoteRetention:      30,
+		BackupDestinations:         []BackupDestinationConfig{},
+		WorkspaceGitSchedule:       "0 4 * * *",
+		WorkspaceGitEnabled:        true,
+		IngestionMaxConcurrentJobs: 1,
+		OpenLiaBrowser:             OpenLiaBrowserConfig{Mode: "local", SSHPort: 22},
+		Services:                   nil,
 	}
 }
 
@@ -191,7 +192,7 @@ func hermesImage(config Config) string {
 	if config.HermesImage != defaultHermesImage {
 		return config.HermesImage
 	}
-	return toolcatalog.ManagedHermesImage(config.Project, config.EnabledTools, config.HermesTag, config.HermesDigest, toolcatalog.DefaultDebianSnapshot)
+	return toolcatalog.ManagedHermesImage(config.Project, config.HermesTag, config.HermesDigest, toolcatalog.DefaultDebianSnapshot)
 }
 
 func defaultLocalInstallRoot() string {
@@ -462,8 +463,8 @@ func parseConfigUnchecked(data string) (Config, error) {
 				config.SecretSource, err = parseString(value)
 			case "skills.enabled":
 				config.EnabledSkills, err = parseStringArray(value)
-			case "tools.enabled":
-				config.EnabledTools, err = parseStringArray(value)
+			case "ingestion.max_concurrent_jobs":
+				config.IngestionMaxConcurrentJobs, err = parseInt(value)
 			case "backup.identity_file":
 				config.BackupIdentityFile, err = parseString(value)
 				if err == nil {
@@ -698,8 +699,8 @@ func validateConfig(config Config) error {
 			return fmt.Errorf("invalid skill name %q", skill)
 		}
 	}
-	if err := toolcatalog.Validate(config.EnabledTools); err != nil {
-		return err
+	if config.IngestionMaxConcurrentJobs <= 0 {
+		return errors.New("ingestion.max_concurrent_jobs must be a positive integer")
 	}
 	hostNames := make(map[string]bool)
 	for i, host := range config.Services {
@@ -1104,14 +1105,7 @@ func renderConfig(config Config) string {
 		fmt.Fprintf(&builder, "%q", skill)
 	}
 	builder.WriteString("]\n")
-	builder.WriteString("\n[tools]\nenabled = [")
-	for index, tool := range config.EnabledTools {
-		if index > 0 {
-			builder.WriteString(", ")
-		}
-		fmt.Fprintf(&builder, "%q", tool)
-	}
-	builder.WriteString("]\n")
+	fmt.Fprintf(&builder, "\n[ingestion]\nmax_concurrent_jobs = %d\n", config.IngestionMaxConcurrentJobs)
 	fmt.Fprintf(&builder, "\n[workspace_git]\nenabled = %t\nschedule = %q\n", config.WorkspaceGitEnabled, config.WorkspaceGitSchedule)
 	fmt.Fprintf(&builder, "\n[backup]\nschedule = %q\nschedule_enabled = %t\nremote_retention = %d\n", config.BackupSchedule, config.BackupScheduleEnabled, config.BackupRemoteRetention)
 	if config.BackupKnownHosts != "" {

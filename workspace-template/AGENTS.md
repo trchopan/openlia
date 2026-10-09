@@ -65,9 +65,14 @@ user-owned delegation policy authorizes the scoped update.
   useful history.
 - Keep generated reports separate from source notes and label their source.
 - Never place credentials, OAuth files, private keys, or raw service exports here.
-- Financial source originals belong in an approved private location outside the
-  tracked workspace. Finance intake records may keep stable references, covered
-  dates, and extracted facts, but never credentials, account numbers, or raw exports.
+- Retained ingestion originals belong under the registered `sources/` library.
+  The only plaintext secret exception is the dedicated
+  `sources/document-passwords.toml` file for user-provided document-unlock
+  passwords. It is included in local Git history and backup; never print its
+  contents or put service credentials there.
+- Finance source originals may be retained under `sources/` when captured by
+  ingestion. Finance intake records must still avoid credentials, account
+  numbers, and unrelated raw authentication data.
 
 ## Workspace Extensions
 

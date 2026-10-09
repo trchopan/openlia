@@ -188,6 +188,21 @@ domains:
     label: Daily Briefings
     purpose: Dated briefing reports generated from registered workspace sources.
     lifecycle: generated report -> archive
+  - path: inbox/ingestion
+    kind: extension
+    label: Ingestion Intake
+    purpose: Durable capture and processing records for received source material.
+    lifecycle: captured -> queued -> processing -> complete, partial, failed, or archived
+    route: review
+    tags: [ingestion, review]
+    template: inbox/ingestion/ingestion-template.md
+  - path: sources
+    kind: extension
+    label: Source Library
+    purpose: Retained originals, source provenance, immutable extraction artifacts, and evidence manifests.
+    lifecycle: captured -> processing -> complete, partial, failed, or archived
+    tags: [source, ingestion]
+    template: sources/records/source-template.md
 
 # Add approved nested folders or top-level domains below. A routed extension
 # must include tags and a lifecycle so it cannot silently replace a core

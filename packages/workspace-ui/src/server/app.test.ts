@@ -408,6 +408,10 @@ describe("workspace HTTP handler", () => {
   test("rejects protected paths and cross-origin writes", async () => {
     const protectedResponse = await request("/api/workspace/file?path=.env");
     expect(protectedResponse.status).toBe(403);
+    const passwordProfilesResponse = await request(
+      "/api/workspace/file?path=sources/document-passwords.toml",
+    );
+    expect(passwordProfilesResponse.status).toBe(403);
 
     const body = JSON.stringify({
       content: "x",

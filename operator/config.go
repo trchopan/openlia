@@ -58,7 +58,7 @@ type Config struct {
 	LochoRelayConfig            string
 	LochoRelaySecrets           string
 	EnabledSkills               []string
-	EnabledTools                []string
+	IngestionMaxConcurrentJobs  int
 	SkillsConfigured            bool
 	ExternalNetwork             string
 	APIEnabled                  bool
@@ -169,50 +169,51 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		}
 	}
 	config := Config{
-		RepositoryRoot:          repositoryRoot,
-		RuntimeRoot:             runtimeRoot,
-		InstallRoot:             installRoot,
-		ProjectName:             project,
-		Timezone:                getOr(values, "HERMES_TIMEZONE", "Asia/Ho_Chi_Minh"),
-		NetworkName:             getOr(values, "OPENLIA_NETWORK_NAME", project+"-private"),
-		ComposeFile:             getOr(values, "OPENLIA_COMPOSE_FILE", filepath.Join(repositoryRoot, "docker", "compose.yaml")),
-		ComposeProjectDir:       getOr(values, "OPENLIA_COMPOSE_PROJECT_DIR", filepath.Join(repositoryRoot, "docker")),
-		GeneratedCompose:        getOr(values, "OPENLIA_GENERATED_COMPOSE", filepath.Join(repositoryRoot, "docker", "compose.generated.yaml")),
-		DataRoot:                getOr(values, "OPENLIA_DATA_ROOT", filepath.Join(runtimeRoot, "hermes")),
-		SystemSkillsRoot:        getOr(values, "OPENLIA_SYSTEM_SKILLS_ROOT", filepath.Join(runtimeRoot, "system-skills")),
-		LochoRoot:               getOr(values, "OPENLIA_LOCHO_ROOT", filepath.Join(runtimeRoot, "locho")),
-		SecretDir:               getOr(values, "OPENLIA_SECRET_DIR", filepath.Join(runtimeRoot, "secrets")),
-		SecretFile:              getOr(values, "OPENLIA_SECRET_FILE", filepath.Join(runtimeRoot, "secrets", "hermes.env")),
-		BackupRoot:              getOr(values, "OPENLIA_BACKUP_ROOT", filepath.Join(runtimeRoot, "backups")),
-		BackupRetention:         5,
-		BackupRecipient:         values["OPENLIA_BACKUP_RECIPIENT"],
-		BackupSchedule:          getOr(values, "OPENLIA_BACKUP_SCHEDULE", "20 4 * * *"),
-		BackupScheduleEnabled:   true,
-		WorkspaceGitSchedule:    getOr(values, "OPENLIA_WORKSPACE_GIT_SCHEDULE", "0 4 * * *"),
-		WorkspaceGitEnabled:     true,
-		BackupRemoteRetention:   30,
-		BackupDestinations:      []BackupDestination{},
-		OperatorConfigFile:      values["OPENLIA_CLI_CONFIG_FILE"],
-		MetaRoot:                getOr(values, "OPENLIA_META_ROOT", filepath.Join(runtimeRoot, "meta")),
-		StateFile:               getOr(values, "OPENLIA_STATE_FILE", filepath.Join(runtimeRoot, "meta", "stack-state")),
-		Provider:                getOr(values, "OPENLIA_PROVIDER", "copilot"),
-		Model:                   getOr(values, "OPENLIA_MODEL", "gpt-5.6-luna"),
-		OutputLanguage:          getOr(values, "OPENLIA_OUTPUT_LANGUAGE", "en"),
-		FallbackProviders:       fallbackProviders,
-		HermesImage:             getOr(values, "OPENLIA_HERMES_IMAGE", "openlia-hermes:v2026.9.14"),
-		LochoImage:              getOr(values, "OPENLIA_LOCHO_IMAGE", "openlia-locho:v1.2.0"),
-		LochoVersion:            getOr(values, "OPENLIA_LOCHO_VERSION", "1.2.0"),
-		LochoX8664SHA256:        getOr(values, "OPENLIA_LOCHO_X86_64_SHA256", "7687311a3fe9671ac6f75427712dc556b15517493e892d9f81be7d0355bdd5f1"),
-		LochoARM64SHA256:        getOr(values, "OPENLIA_LOCHO_ARM64_SHA256", "80d089b3fdabe063b4c89fc6685e9bd0f297190d1af86d0f54624ba63d217b97"),
-		LochoRelayConfig:        values["OPENLIA_LOCHO_RELAY_CONFIG"],
-		LochoRelaySecrets:       values["OPENLIA_LOCHO_RELAY_SECRETS"],
-		ExternalNetwork:         values["OPENLIA_EXTERNAL_NETWORK"],
-		APIHost:                 getOr(values, "OPENLIA_API_HOST", "127.0.0.1"),
-		WorkspaceUIPort:         8089,
-		WorkspaceUIPublicOrigin: values["OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN"],
-		RuntimeUID:              runtimeUID,
-		RuntimeGID:              runtimeGID,
-		LochoHostRoot:           filepath.Join(runtimeRoot, "locho-host"),
+		RepositoryRoot:             repositoryRoot,
+		RuntimeRoot:                runtimeRoot,
+		InstallRoot:                installRoot,
+		ProjectName:                project,
+		Timezone:                   getOr(values, "HERMES_TIMEZONE", "Asia/Ho_Chi_Minh"),
+		NetworkName:                getOr(values, "OPENLIA_NETWORK_NAME", project+"-private"),
+		ComposeFile:                getOr(values, "OPENLIA_COMPOSE_FILE", filepath.Join(repositoryRoot, "docker", "compose.yaml")),
+		ComposeProjectDir:          getOr(values, "OPENLIA_COMPOSE_PROJECT_DIR", filepath.Join(repositoryRoot, "docker")),
+		GeneratedCompose:           getOr(values, "OPENLIA_GENERATED_COMPOSE", filepath.Join(repositoryRoot, "docker", "compose.generated.yaml")),
+		DataRoot:                   getOr(values, "OPENLIA_DATA_ROOT", filepath.Join(runtimeRoot, "hermes")),
+		SystemSkillsRoot:           getOr(values, "OPENLIA_SYSTEM_SKILLS_ROOT", filepath.Join(runtimeRoot, "system-skills")),
+		LochoRoot:                  getOr(values, "OPENLIA_LOCHO_ROOT", filepath.Join(runtimeRoot, "locho")),
+		SecretDir:                  getOr(values, "OPENLIA_SECRET_DIR", filepath.Join(runtimeRoot, "secrets")),
+		SecretFile:                 getOr(values, "OPENLIA_SECRET_FILE", filepath.Join(runtimeRoot, "secrets", "hermes.env")),
+		BackupRoot:                 getOr(values, "OPENLIA_BACKUP_ROOT", filepath.Join(runtimeRoot, "backups")),
+		BackupRetention:            5,
+		BackupRecipient:            values["OPENLIA_BACKUP_RECIPIENT"],
+		BackupSchedule:             getOr(values, "OPENLIA_BACKUP_SCHEDULE", "20 4 * * *"),
+		BackupScheduleEnabled:      true,
+		WorkspaceGitSchedule:       getOr(values, "OPENLIA_WORKSPACE_GIT_SCHEDULE", "0 4 * * *"),
+		WorkspaceGitEnabled:        true,
+		IngestionMaxConcurrentJobs: 1,
+		BackupRemoteRetention:      30,
+		BackupDestinations:         []BackupDestination{},
+		OperatorConfigFile:         values["OPENLIA_CLI_CONFIG_FILE"],
+		MetaRoot:                   getOr(values, "OPENLIA_META_ROOT", filepath.Join(runtimeRoot, "meta")),
+		StateFile:                  getOr(values, "OPENLIA_STATE_FILE", filepath.Join(runtimeRoot, "meta", "stack-state")),
+		Provider:                   getOr(values, "OPENLIA_PROVIDER", "copilot"),
+		Model:                      getOr(values, "OPENLIA_MODEL", "gpt-5.6-luna"),
+		OutputLanguage:             getOr(values, "OPENLIA_OUTPUT_LANGUAGE", "en"),
+		FallbackProviders:          fallbackProviders,
+		HermesImage:                getOr(values, "OPENLIA_HERMES_IMAGE", "openlia-hermes:v2026.9.14"),
+		LochoImage:                 getOr(values, "OPENLIA_LOCHO_IMAGE", "openlia-locho:v1.2.0"),
+		LochoVersion:               getOr(values, "OPENLIA_LOCHO_VERSION", "1.2.0"),
+		LochoX8664SHA256:           getOr(values, "OPENLIA_LOCHO_X86_64_SHA256", "7687311a3fe9671ac6f75427712dc556b15517493e892d9f81be7d0355bdd5f1"),
+		LochoARM64SHA256:           getOr(values, "OPENLIA_LOCHO_ARM64_SHA256", "80d089b3fdabe063b4c89fc6685e9bd0f297190d1af86d0f54624ba63d217b97"),
+		LochoRelayConfig:           values["OPENLIA_LOCHO_RELAY_CONFIG"],
+		LochoRelaySecrets:          values["OPENLIA_LOCHO_RELAY_SECRETS"],
+		ExternalNetwork:            values["OPENLIA_EXTERNAL_NETWORK"],
+		APIHost:                    getOr(values, "OPENLIA_API_HOST", "127.0.0.1"),
+		WorkspaceUIPort:            8089,
+		WorkspaceUIPublicOrigin:    values["OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN"],
+		RuntimeUID:                 runtimeUID,
+		RuntimeGID:                 runtimeGID,
+		LochoHostRoot:              filepath.Join(runtimeRoot, "locho-host"),
 	}
 	if raw := values["OPENLIA_BACKUP_DESTINATIONS"]; raw != "" {
 		if err := json.Unmarshal([]byte(raw), &config.BackupDestinations); err != nil {
@@ -307,16 +308,16 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 			config.EnabledSkills = append(config.EnabledSkills, skill)
 		}
 	}
-	if raw := values["OPENLIA_ENABLED_TOOLS"]; raw != "" {
-		config.EnabledTools = strings.Split(raw, ",")
-	}
-	if err := toolcatalog.Validate(config.EnabledTools); err != nil {
-		return Config{}, fmt.Errorf("OPENLIA_ENABLED_TOOLS: %w", err)
+	if raw := values["OPENLIA_INGESTION_MAX_CONCURRENT_JOBS"]; raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || parsed <= 0 {
+			return Config{}, fmt.Errorf("OPENLIA_INGESTION_MAX_CONCURRENT_JOBS must be a positive integer")
+		}
+		config.IngestionMaxConcurrentJobs = parsed
 	}
 	if strings.TrimSpace(values["OPENLIA_HERMES_IMAGE"]) == "" {
 		config.HermesImage = toolcatalog.ManagedHermesImage(
 			config.ProjectName,
-			config.EnabledTools,
 			getOr(values, "HERMES_BASE_TAG", "v2026.9.14"),
 			getOr(values, "HERMES_BASE_DIGEST", "sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294"),
 			getOr(values, "DEBIAN_SNAPSHOT", toolcatalog.DefaultDebianSnapshot),
