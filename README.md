@@ -2,11 +2,60 @@
 
 > A personal operating system running on Hermes Agent.
 
-OpenLia is a thin operations and setup layer for deploying
-[Hermes Agent](https://hermes-agent.nousresearch.com/) as a persistent personal
-operating system. The repository defines the workspace model, agent behavior,
-skills, service attachments, credentials workflow, and deployment conventions;
-Hermes remains the upstream agent runtime.
+OpenLia is an opinionated personal operating system and operations layer built on top of [Hermes Agent](https://hermes-agent.nousresearch.com/). It provides a structured, file-based personal workspace, verifiable memory with provenance, and proactive workflows to help you turn thoughts and goals into clear decisions and deliberate actions—while keeping you in complete control.
+
+---
+
+## The Two Roles: Operator vs. End User
+
+To use and understand OpenLia, it is essential to distinguish between **two distinct roles** (even though one person often fulfills both):
+
+```
++-------------------------------------------------------------------------------+
+|                                YOU (The Human)                                |
+|                                                                               |
+|  ┌───────────────────────────────────┐     ┌───────────────────────────────┐  |
+|  │          THE END USER             │     │         THE OPERATOR          │  |
+|  │        (Daily Companion)          │     │    (System Administrator)     │  |
+|  ├───────────────────────────────────┤     ├───────────────────────────────┤  |
+|  │ • Telegram (Bot DM / Home Channel)│     │ • Workstation `openlia` CLI   │  |
+|  │ • Open WebUI (Browser Chat)       │     │ • Deployment (Local / SSH VM) │  |
+|  │ • Workspace UI (Document Editor)  │     │ • Secret rotation & API keys  │  |
+|  │ • Morning briefings & quick-notes │     │ • Encrypted backups & restore │  |
+|  │ • Project, goal & finance reviews │     │ • System health & updates     │  |
+|  │ • Policy boundaries & approvals   │     │ • Skill customizations & sync │  |
+|  └─────────────────▲─────────────────┘     └───────────────┬───────────────┘  |
++--------------------┼───────────────────────────────────────┼------------------+
+                     │ interacts daily                       │ manages & provisions
+                     │                                       │
+        ┌────────────┴───────────────────────────────────────▼───────────┐
+        │                     OPENLIA RUNTIME PLANE                      │
+        │   (Hermes Gateway + Docker Compose + Durable Git Workspace)    │
+        └────────────────────────────────────────────────────────────────┘
+```
+
+| Dimension            | The End User                                                                    | The Operator                                                                       |
+| :------------------- | :------------------------------------------------------------------------------ | :--------------------------------------------------------------------------------- |
+| **Primary Tool**     | Telegram, Open WebUI, Workspace Editor                                          | `openlia` CLI (terminal on workstation)                                            |
+| **Responsibilities** | Daily goals, quick capture, meeting prep, financial ledger, decision trade-offs | Deployment, VM setup, API keys, rotation, backups, updates, system health          |
+| **Data Handled**     | Personal journal, projects, health records, knowledge claims, calendar notes    | SSH credentials, LLM API keys, Docker containers, disk mounts, Age encryption keys |
+| **Policy Control**   | `assistant-policy.yaml` (delegated autonomy vs. explicit user confirmations)    | System resource limits, tool allowlists (`tools.enabled`), network topology        |
+| **Cadence**          | Multiple times daily                                                            | Setup once; periodic updates, secret rotation, and backup monitoring               |
+
+> [!TIP]
+> **Are you self-hosting OpenLia for yourself?**
+> You are both! You wear the **Operator** hat once to deploy and maintain the stack with the `openlia` CLI, and wear the **End User** hat every day when chatting with Lia on Telegram or reviewing your morning briefing.
+
+---
+
+## Documentation Map
+
+- 📖 **[End User Guide](docs/USER_GUIDE.md)**: The complete guide for daily life with Lia—user interfaces (Telegram, Open WebUI, Workspace UI), personal workspace structure, review loops, claim ledger, and delegation policies.
+- 🛠️ **[Operator Guide](docs/OPERATOR_GUIDE.md)**: The operational handbook for administrators—`openlia` CLI reference, local vs. remote SSH deployments, secret rotation, encrypted backups, and system maintenance.
+- 🧪 **[End-to-End Drills](docs/E2E_DRILLS.md)**: Operational runbook for executing verification drills against disposable or remote environments.
+- 🧠 **[Skill Development](docs/SKILL_DEVELOPMENT.md)**: Guide for creating, testing, and customizing bundled workflow skills.
+
+---
 
 ## Repository Purpose
 
@@ -73,11 +122,11 @@ small target-side operator artifact, and starts the runtime there. The remote
 agent machine does not need an OpenLia checkout or the user-facing `openlia`
 CLI.
 
-| Machine | Responsibility |
-| --- | --- |
-| Operator machine | Runs `openlia`, stores the operator config, and supplies protected source files. |
-| Agent machine | Runs Hermes Agent, Docker Compose, Locho, the workspace, and persistent runtime state. |
-| Browser machine | Runs `openlia-browser`, Playwright MCP, the browser, and its browser profile when browser tools use a separate host. |
+| Machine          | Responsibility                                                                                                       |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Operator machine | Runs `openlia`, stores the operator config, and supplies protected source files.                                     |
+| Agent machine    | Runs Hermes Agent, Docker Compose, Locho, the workspace, and persistent runtime state.                               |
+| Browser machine  | Runs `openlia-browser`, Playwright MCP, the browser, and its browser profile when browser tools use a separate host. |
 
 Local mode means the agent or browser service runs on the operator machine.
 Remote mode means the operator CLI uses SSH to manage that component on the
@@ -165,7 +214,7 @@ committed to this repository.
 
 ## Why Lia?
 
-**Lia** is a classic Italian form of **Leah**. In Dante's *Purgatorio*, Leah
+**Lia** is a classic Italian form of **Leah**. In Dante's _Purgatorio_, Leah
 represents the active life: she gathers flowers and makes a garland, while her
 sister Rachel represents the contemplative life.
 
@@ -311,8 +360,8 @@ agent proposes a purpose, lifecycle, and template/schema plan. The protected
 
 ## Cross-Domain Capabilities
 
-Domains describe *what* matters in a person's life. Capabilities describe
-*how* OpenLia can work with it.
+Domains describe _what_ matters in a person's life. Capabilities describe
+_how_ OpenLia can work with it.
 
 ### Observe
 
@@ -372,14 +421,14 @@ Quarterly  Goals, career, finance, learning, projects, long-term direction
 OpenLia should be able to do low-risk observation and analysis automatically,
 while preserving human control over consequential changes.
 
-| Operation | Default |
-| --- | --- |
-| Read email or research a product | Automatic |
-| Analyze spending or check a portfolio | Automatic |
-| Add a calendar event or update a task | Ask |
-| Send an email or buy a product | Ask |
-| Place a trade or transfer money | Always ask |
-| Delete important data | Always ask |
+| Operation                             | Default    |
+| ------------------------------------- | ---------- |
+| Read email or research a product      | Automatic  |
+| Analyze spending or check a portfolio | Automatic  |
+| Add a calendar event or update a task | Ask        |
+| Send an email or buy a product        | Ask        |
+| Place a trade or transfer money       | Always ask |
+| Delete important data                 | Always ask |
 
 The assistant should explain what it found, what it recommends, and what will
 happen before it crosses an approval boundary.
@@ -466,12 +515,12 @@ Personal OS structure or its durable state.
 
 ## Prerequisites
 
-| Use case | Required runtime |
-| --- | --- |
-| CLI/static smoke | Go 1.26+, Python 3 with `requirements-dev.txt`, Bash, Docker CLI for Compose validation |
-| Local deployment on Linux | Go 1.26+, Docker Engine with Compose v2 |
-| Local deployment on macOS | Go 1.26+, Docker Desktop with a Linux engine |
-| Remote deployment | Go 1.26+ locally; SSH, Linux, Docker, and Compose v2 on the target |
+| Use case                  | Required runtime                                                                        |
+| ------------------------- | --------------------------------------------------------------------------------------- |
+| CLI/static smoke          | Go 1.26+, Python 3 with `requirements-dev.txt`, Bash, Docker CLI for Compose validation |
+| Local deployment on Linux | Go 1.26+, Docker Engine with Compose v2                                                 |
+| Local deployment on macOS | Go 1.26+, Docker Desktop with a Linux engine                                            |
+| Remote deployment         | Go 1.26+ locally; SSH, Linux, Docker, and Compose v2 on the target                      |
 
 New deployments use the Go operator and do not require host-target Bash or
 Python. Bash and Python remain development and test requirements for the
@@ -518,20 +567,20 @@ must run after this generation step because the runtime Dockerfiles consume the
 generated files rather than compiling package source.
 
 Clean-checkout builds and CI must use this release build path. A direct
-`go build .`, `go test ./...`, or `go install` is not a supported installation
-path until the package distributions have been generated.
 
 ## Quick Start
 
-Build the Bun artifacts, host CLI, and Linux target operators with Bun and Go
-1.26 or newer:
+Setting up OpenLia as a self-hoster involves two steps: **the Operator step** (provisioning the runtime) followed by **the End User step** (connecting and interacting with Lia).
 
-```sh
-make build
-```
+### Step 1: Operator Setup (Provisioning the Runtime)
 
-Configure the primary provider and ordered fallback list in the OpenLia operator
-config on the operator machine before initializing the deployment:
+1. Build the Bun artifacts, host CLI, and Linux target operators with Bun and Go 1.26 or newer:
+
+   ```sh
+   make build
+   ```
+
+2. Configure your primary LLM provider and fallback chain in `~/.config/openlia/config.toml`:
 
 ```toml
 [openlia]
@@ -567,12 +616,12 @@ only the bundles the deployment needs:
 enabled = ["pdf", "office", "ocr", "media-transcripts"]
 ```
 
-| Capability | Installed commands and scope |
-| --- | --- |
-| `pdf` | Poppler utilities including `pdftotext` and `pdfinfo` |
-| `office` | Headless LibreOffice Writer and Calc for Word and Excel files, including legacy `.doc` and `.xls` formats |
-| `ocr` | Tesseract OCR with English language data |
-| `media-transcripts` | Pinned `yt-dlp` 2026.8.19 and `ffmpeg` for captions and media from supported public URLs |
+| Capability          | Installed commands and scope                                                                              |
+| ------------------- | --------------------------------------------------------------------------------------------------------- |
+| `pdf`               | Poppler utilities including `pdftotext` and `pdfinfo`                                                     |
+| `office`            | Headless LibreOffice Writer and Calc for Word and Excel files, including legacy `.doc` and `.xls` formats |
+| `ocr`               | Tesseract OCR with English language data                                                                  |
+| `media-transcripts` | Pinned `yt-dlp` 2026.8.19 and `ffmpeg` for captions and media from supported public URLs                  |
 
 The list is an allowlist of capability names, not operating-system package
 names. Unknown and duplicate values are rejected. The default is an empty list
@@ -649,11 +698,13 @@ Or enable it directly during initialization:
 ```
 
 Optional flags:
+
 - `--open-webui`: Enable the Open WebUI service.
 - `--open-webui-host <host>`: Bind host (default: `127.0.0.1`). Use `0.0.0.0` to expose on all interfaces.
 - `--open-webui-port <port>`: Host port mapping (default: `8090`).
 
 Key integration details:
+
 - **Hermes API Server**: Enabling Open WebUI automatically activates Hermes Agent's OpenAI-compatible API server (`API_SERVER_ENABLED=true`, `API_SERVER_HOST=0.0.0.0`) on container port `8642`.
 - **Zero-Config Secret Synchronization**: Secure random API keys (`API_SERVER_KEY` for Hermes and `OPENAI_API_KEY` / `WEBUI_SECRET_KEY` for Open WebUI) are automatically generated and synchronized into mode-`0600` secret files (`hermes.env` and `open-webui.env`). Secrets are never written to `compose.generated.yaml`.
 - **Internal Network**: Open WebUI communicates with Hermes over the private Docker network at `http://hermes:8642/v1`.
@@ -668,12 +719,33 @@ Key integration details:
   openlia update open-webui
   ```
 
-Then initialize:
+Then initialize and deploy the runtime:
 
 ```sh
 # Run on the operator machine. Hermes runs on this same machine.
-./openlia init --local --root "$HOME/.openlia"
+./openlia init --local --root "$HOME/.openlia" --open-webui
+./openlia deploy
 ```
+
+### Step 2: End User Connection (Interacting with Lia)
+
+Once the deployment is running:
+
+1. **Via Open WebUI (Web Chat)**:
+   Open [http://localhost:8090](http://localhost:8090) in your browser. Create your administrator account on first login and begin chatting with Lia.
+   - Try: `"Good morning! Run /daily-briefing."`
+   - Try: `"Capture this idea: research local community solar options."`
+
+2. **Via Telegram (Mobile & Messaging)**:
+   If configured with your `TELEGRAM_BOT_TOKEN`, open Telegram on your phone or desktop, search for your bot, and send `/start`.
+   - Send quick notes, links, or voice messages on the go.
+   - Lia will notify you in your Home Channel with morning briefings and monitor alerts.
+
+3. **Via Workspace UI (Document Explorer & Editor)**:
+   Open [http://localhost:8089](http://localhost:8089) to inspect, view diffs, and edit your personal Markdown files, goals, projects, and structured claim records.
+
+👉 For detailed day-to-day routines, see the **[End User Guide](docs/USER_GUIDE.md)**.  
+👉 For operational commands, backups, and maintenance, see the **[Operator Guide](docs/OPERATOR_GUIDE.md)**.
 
 ### Locho Host Bundle
 

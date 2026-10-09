@@ -1,0 +1,246 @@
+# OpenLia Operator Guide
+
+> A complete handbook for provisioning, configuring, updating, and securing OpenLia with the `openlia` CLI.
+
+The **Operator** is responsible for the infrastructure control plane: deploying the Hermes Agent runtime, injecting credentials, configuring model failover chains, managing encrypted backups, and keeping the system healthy.
+
+---
+
+## 1. Architecture & Machine Roles
+
+OpenLia uses a decoupled control-plane architecture:
+
+```text
+Operator Machine (Local Laptop / Workstation)
+  openlia CLI
+  ~/.config/openlia/config.toml
+  Protected Secrets (.env, mode 0600)
+       |
+       +--- [Local Mode] ---> Docker Engine on same machine
+       |
+       +--- [Remote Mode] --> SSH -> Remote Linux VM (Agent Machine)
+       |                             Docker Compose + Hermes + Locho
+       |
+       `--- (Optional) ------> SSH -> Browser Machine (Playwright MCP)
+```
+
+| Machine | Responsibility | Requirements |
+| :--- | :--- | :--- |
+| **Operator Machine** | Runs the `openlia` CLI, stores master configs, holds encryption keys and protected source `.env` files. | Go 1.24+, Bun, Python 3 (for local builds) or published `openlia` release binary. |
+| **Agent Machine** | Runs Hermes Gateway, Locho attachment sidecars, Docker Compose, and holds persistent workspace data (`/opt/data`). | Linux (`x86_64` or `aarch64`), Docker Engine with Compose v2, SSH access with sudo or docker group. **Does NOT need Go, Bun, or `openlia` CLI.** |
+| **Browser Machine** *(Optional)* | Runs `openlia-browser` and Playwright for headless browser automation. | Can be the Agent machine, Operator machine, or an independent host. |
+
+---
+
+## 2. Configuration & Secret Management
+
+The default operator configuration file lives at `~/.config/openlia/config.toml`. You can manage multiple environments (e.g. dev and production) by setting the `OPENLIA_CONFIG` environment variable:
+```bash
+export OPENLIA_CONFIG="$HOME/.config/openlia/prod/config.toml"
+```
+
+### Example `config.toml`
+
+```toml
+[openlia]
+# Target host: empty for local Docker, or user@remote-host for SSH
+target = "root@my-vps.example.com"
+root = "/opt/openlia"
+provider = "copilot"
+model = "gpt-5.6-luna"
+output_language = "en"
+timezone = "America/New_York"
+
+# Allowlist optional command-line tools in the Hermes container
+[tools]
+enabled = ["pdf", "office", "ocr", "media-transcripts"]
+
+# Web chat interface
+[open-webui]
+host = "127.0.0.1"
+port = 8090
+
+# Personal workspace web editor
+[workspace-ui]
+host = "127.0.0.1"
+port = 8089
+
+# Path to protected dotenv file on the operator machine
+[secrets]
+source = "/Users/username/.config/openlia/prod/secrets.env"
+
+# Primary LLM fallback chain
+[[fallback_providers]]
+provider = "openai-api"
+model = "gpt-4o"
+
+[[fallback_providers]]
+provider = "custom"
+model = "local-llama"
+base_url = "http://locho-laptop:11434/v1"
+key_env = "OPENAI_GATEWAY_API_KEY"
+```
+
+### Protected Secrets (`secrets.env`)
+Secrets are **never** committed to Git or stored in `config.toml`. The operator maintains a protected file on the operator machine:
+
+```bash
+chmod 600 ~/.config/openlia/prod/secrets.env
+```
+
+Contents of `secrets.env`:
+```dotenv
+COPILOT_GITHUB_TOKEN=ghu_xxxxxxxxxxxxxxxxxxxx
+OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxx
+TELEGRAM_BOT_TOKEN=123456789:ABCDEFxxxxxxxxxxxxxxxxxxxx
+TELEGRAM_ALLOWED_USERS=987654321
+TELEGRAM_HOME_CHANNEL=-1001234567890
+```
+
+### Rotating Secrets
+Whenever you modify `secrets.env`, safely rotate credentials into the running deployment:
+```bash
+openlia auth rotate
+```
+*Note: Credential rotation backs up the previous runtime secret before applying changes. If container recreation fails, it rolls back safely.*
+
+---
+
+## 3. Telegram Integration Setup
+
+To connect Lia to Telegram:
+1. Message [@BotFather](https://t.me/BotFather) on Telegram and create a new bot to receive your `TELEGRAM_BOT_TOKEN`.
+2. Send a `/start` message to your new bot on Telegram.
+3. If you want a dedicated **Home Channel** or group, create one, add your bot as an administrator, and send a message into the channel.
+4. On your operator workstation, run the `openlia telegram id` helper:
+   ```bash
+   openlia telegram id --token 123456789:ABCDEFxxxxxxxxxxxxxxxxxxxx
+   ```
+   This displays your discovered **Telegram User ID** and **Channel / Chat IDs**.
+5. Add these values to your protected `secrets.env`:
+   ```dotenv
+   TELEGRAM_BOT_TOKEN=123456789:ABCDEFxxxxxxxxxxxxxxxxxxxx
+   TELEGRAM_ALLOWED_USERS=123456789
+   TELEGRAM_HOME_CHANNEL=-1001234567890
+   TELEGRAM_HOME_CHANNEL_NAME="OpenLia Home"
+   ```
+6. Apply the secrets:
+   ```bash
+   openlia auth rotate
+   ```
+
+---
+
+## 4. Deployment Lifecycle
+
+### Initialization (`openlia init`)
+
+**Local Deployment (Docker on same machine):**
+```bash
+openlia init --local --open-webui
+```
+
+**Remote VPS Deployment (over SSH):**
+```bash
+openlia init --target user@server-ip --timezone America/New_York --open-webui
+```
+
+Key flags for `openlia init`:
+- `--target <user@host>`: Remote SSH destination (omit or use `--local` for local Docker).
+- `--root <path>`: Runtime directory on the target (default `/opt/openlia`).
+- `--timezone <tz>`: IANA timezone (e.g. `UTC`, `America/New_York`, `Asia/Ho_Chi_Minh`).
+- `--open-webui`: Automatically configure Open WebUI chat container.
+- `--non-interactive`: Scriptable mode without terminal prompts.
+
+### Deploying & Starting
+```bash
+# Build/sync and start all services
+openlia deploy
+
+# Lifecycle control
+openlia stop
+openlia start
+openlia restart
+```
+
+### Health Diagnostics & Logs
+```bash
+# Quick health summary
+openlia status
+
+# Strict system validation (Docker daemon, disk space, network, permissions)
+openlia doctor
+
+# Stream live container logs
+openlia logs -f
+```
+
+---
+
+## 5. Updates and Upgrades
+
+OpenLia is designed to be upgraded cleanly without risking workspace data:
+
+```bash
+# Update runtime containers and target operators
+openlia update
+
+# Update Open WebUI container independently
+openlia update open-webui
+
+# Sync bundled Hermes skills
+openlia skills sync
+
+# Check and apply schema migrations to the personal workspace
+openlia skills migrate
+```
+
+---
+
+## 6. Backups and Disaster Recovery
+
+OpenLia features an end-to-end encrypted backup system using [Age](https://age-encryption.org/) cryptography.
+
+### Creating an Encrypted Backup
+```bash
+# Create an encrypted snapshot of the persistent workspace and state
+openlia backup create
+```
+
+### Scheduling Automated Backups
+You can enable the automated backup scheduler sidecar:
+```bash
+openlia backup schedule --cron "0 2 * * *" --retention 14
+```
+
+### Remote Backup Storage (S3 / SSH)
+In `config.toml`, configure a remote storage destination:
+```toml
+[backup.remote]
+type = "s3"
+bucket = "my-openlia-backups"
+region = "us-east-1"
+prefix = "backups/"
+```
+When configured, encrypted backups are automatically synchronized to offsite storage.
+
+### Restoring from Backup
+To restore a deployment after machine failure:
+```bash
+openlia backup restore --file /path/to/backup-2026-10-09.tar.gz.age
+```
+
+---
+
+## 7. Accessing Web Interfaces Remotely
+
+If OpenLia is running on a remote VPS with `host = "127.0.0.1"`, access the Web UIs securely through an SSH tunnel:
+
+```bash
+# Forward Open WebUI (8090) and Workspace Editor (8089)
+ssh -L 8090:127.0.0.1:8090 -L 8089:127.0.0.1:8089 user@server-ip
+```
+
+Then visit:
+- **Open WebUI**: [http://localhost:8090](http://localhost:8090)
+- **Workspace UI**: [http://localhost:8089](http://localhost:8089)
