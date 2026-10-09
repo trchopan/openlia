@@ -16,6 +16,8 @@ import type {
   WorkspaceGitStatus,
   WorkspaceMoveResponse,
   WorkspaceRenameResponse,
+  WorkspaceSettings,
+  WorkspaceSystemInfo,
   WorkspaceTreeEntry,
   WorkspaceTreeResponse,
   WorkspaceWriteResponse,
@@ -60,6 +62,9 @@ export interface WorkspaceApi {
     expectedRevision: string,
   ): Promise<WorkspaceMoveResponse>;
   loadDiagnostics(): Promise<WorkspaceDiagnosticsResponse>;
+  loadSettings(): Promise<WorkspaceSettings>;
+  updateSettings(settings: WorkspaceSettings): Promise<WorkspaceSettings>;
+  loadSystemInfo(): Promise<WorkspaceSystemInfo>;
   loadGitStatus(): Promise<WorkspaceGitStatus>;
   loadActivity(): Promise<WorkspaceActivityResponse>;
   downloadUrl(path: string): string;
@@ -278,6 +283,26 @@ function isWorkspaceActivityResponse(
   );
 }
 
+function isWorkspaceSettings(value: unknown): value is WorkspaceSettings {
+  return (
+    isObject(value) &&
+    value.schema === 1 &&
+    typeof value.hide_template_schema_files === "boolean" &&
+    typeof value.hide_configuration_files === "boolean"
+  );
+}
+
+function isWorkspaceSystemInfo(value: unknown): value is WorkspaceSystemInfo {
+  return (
+    isObject(value) &&
+    value.schema === 1 &&
+    typeof value.openlia_version === "string" &&
+    typeof value.openlia_hash === "string" &&
+    typeof value.hermes_version === "string" &&
+    typeof value.locho_version === "string"
+  );
+}
+
 function isSkillsListResponse(value: unknown): value is SkillsListResponse {
   return (
     isObject(value) &&
@@ -415,6 +440,23 @@ export const httpWorkspaceApi: WorkspaceApi = {
       "/api/workspace/diagnostics",
       isWorkspaceDiagnosticsResponse,
     ),
+  loadSettings: () =>
+    requestJson<WorkspaceSettings>(
+      "/api/workspace/settings",
+      isWorkspaceSettings,
+    ),
+  updateSettings: (settings) =>
+    requestJson<WorkspaceSettings>(
+      "/api/workspace/settings",
+      isWorkspaceSettings,
+      {
+        body: JSON.stringify(settings),
+        headers: { "Content-Type": "application/json" },
+        method: "PUT",
+      },
+    ),
+  loadSystemInfo: () =>
+    requestJson<WorkspaceSystemInfo>("/api/system/info", isWorkspaceSystemInfo),
   loadGitStatus: () =>
     requestJson<WorkspaceGitStatus>(
       "/api/workspace/git/status",

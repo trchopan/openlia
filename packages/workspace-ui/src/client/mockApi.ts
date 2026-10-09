@@ -11,6 +11,8 @@ import type {
   WorkspaceGitStatus,
   WorkspaceMoveResponse,
   WorkspaceRenameResponse,
+  WorkspaceSettings,
+  WorkspaceSystemInfo,
   WorkspaceTreeEntry,
   WorkspaceTreeResponse,
   WorkspaceWriteResponse,
@@ -63,6 +65,11 @@ export function createMockWorkspaceApi({
   let saveCount = 0;
   let authenticated = scenario !== "auth";
   let conflictPending = scenario === "conflict";
+  let settings: WorkspaceSettings = {
+    hide_configuration_files: true,
+    hide_template_schema_files: true,
+    schema: 1,
+  };
   let entries: WorkspaceTreeEntry[] = [
     { kind: "directory", path: "calendar" },
     {
@@ -512,6 +519,25 @@ export function createMockWorkspaceApi({
         issues: [],
         schema: 1,
         valid: true,
+      };
+    },
+    async loadSettings(): Promise<WorkspaceSettings> {
+      requireAuthentication();
+      return { ...settings };
+    },
+    async updateSettings(nextSettings): Promise<WorkspaceSettings> {
+      requireAuthentication();
+      settings = { ...nextSettings, schema: 1 };
+      return { ...settings };
+    },
+    async loadSystemInfo(): Promise<WorkspaceSystemInfo> {
+      requireAuthentication();
+      return {
+        hermes_version: "v2026.9.14",
+        locho_version: "1.2.0",
+        openlia_hash: "471234288494f25aca1bce5c2b8355a308",
+        openlia_version: "0.1.0",
+        schema: 1,
       };
     },
     async loadGitStatus(): Promise<WorkspaceGitStatus> {

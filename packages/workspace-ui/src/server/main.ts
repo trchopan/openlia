@@ -30,6 +30,13 @@ const handler = createWorkspaceHandler({
     "/var/lib/openlia/sessions.sqlite",
   skillsRoot,
   staticRoot: join(import.meta.dir, "public"),
+  systemInfo: {
+    hermes_version:
+      process.env.OPENLIA_HERMES_VERSION ?? process.env.HERMES_BASE_TAG,
+    locho_version: process.env.OPENLIA_LOCHO_VERSION,
+    openlia_hash: process.env.OPENLIA_REVISION,
+    openlia_version: process.env.OPENLIA_VERSION,
+  },
   workspaceRoot,
 });
 const server = Bun.serve({

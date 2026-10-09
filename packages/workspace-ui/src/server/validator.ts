@@ -14,15 +14,13 @@ import type {
   WorkspaceDiagnosticsResponse,
   WorkspaceFileValidation,
 } from "../shared/api";
-import { hiddenFromNavigator, protectedPath } from "./workspace";
+import { isConfigurationPath, protectedPath } from "./workspace";
 
 const ajv = new Ajv2020({
   allErrors: true,
   strict: false,
 });
 addFormats(ajv);
-
-const validatorCache = new Map<string, ValidateFunction | null>();
 
 export function parseRecordFrontmatter(content: string): {
   metadata: Record<string, unknown> | null;
@@ -122,20 +120,82 @@ export function findDomainTemplate(
 }
 
 function getCompiledValidator(schemaPath: string): ValidateFunction | null {
-  if (validatorCache.has(schemaPath)) {
-    return validatorCache.get(schemaPath) ?? null;
-  }
-
   try {
     const raw = readFileSync(schemaPath, "utf-8");
     const jsonSchema = JSON.parse(raw);
     const validate = ajv.compile(jsonSchema);
-    validatorCache.set(schemaPath, validate);
     return validate;
   } catch (_err) {
-    validatorCache.set(schemaPath, null);
     return null;
   }
+}
+
+function configurationSchemaPath(
+  workspaceRoot: string,
+  relativePath: string,
+): string | null {
+  const normalized = relativePath.replaceAll("\\", "/");
+  const lower = normalized.toLowerCase();
+  if (lower.endsWith("/workspace-ui.yaml") || lower === "workspace-ui.yaml")
+    return null;
+  if (lower.endsWith(".schema.json")) return resolve(workspaceRoot, normalized);
+  if (!isConfigurationPath(normalized)) return null;
+  if (!lower.endsWith(".yaml") && !lower.endsWith(".yml")) return null;
+  return resolve(
+    workspaceRoot,
+    normalized.replace(/\.(yaml|yml)$/i, ".schema.json"),
+  );
+}
+
+function schemaValidation(
+  workspaceRoot: string,
+  data: unknown,
+  schemaPath: string,
+  location: string,
+): WorkspaceFileValidation {
+  const validator = getCompiledValidator(schemaPath);
+  const schemaRelativePath = relative(
+    resolve(workspaceRoot),
+    schemaPath,
+  ).replaceAll("\\", "/");
+  if (!validator) {
+    return {
+      errors: [`Failed to load schema from ${schemaRelativePath}`],
+      schema_path: schemaRelativePath,
+      valid: false,
+    };
+  }
+  if (validator(data)) {
+    return { errors: [], schema_path: schemaRelativePath, valid: true };
+  }
+  const errors = (validator.errors ?? []).map((error) => {
+    const path = error.instancePath
+      ? `${location}${error.instancePath}`
+      : location;
+    return `${path}: ${error.message ?? "validation error"}`;
+  });
+  return {
+    errors: errors.length > 0 ? errors : [`${location} does not match schema`],
+    schema_path: schemaRelativePath,
+    valid: false,
+  };
+}
+
+function schemaDocumentValidation(
+  workspaceRoot: string,
+  schemaPath: string,
+): WorkspaceFileValidation {
+  const schemaRelativePath = relative(
+    resolve(workspaceRoot),
+    schemaPath,
+  ).replaceAll("\\", "/");
+  return getCompiledValidator(schemaPath)
+    ? { errors: [], schema_path: schemaRelativePath, valid: true }
+    : {
+        errors: [`File is not a valid JSON Schema`],
+        schema_path: schemaRelativePath,
+        valid: false,
+      };
 }
 
 export function validateRecordContent(
@@ -144,10 +204,52 @@ export function validateRecordContent(
   content: string,
 ): WorkspaceFileValidation {
   const normalized = recordRelativePath.replaceAll("\\", "/");
-  if (!normalized.toLowerCase().endsWith(".md")) {
+  if (protectedPath(normalized)) {
     return { errors: [], valid: true };
   }
-  if (hiddenFromNavigator(normalized) || protectedPath(normalized)) {
+
+  const configurationSchema = configurationSchemaPath(
+    workspaceRoot,
+    normalized,
+  );
+  if (
+    configurationSchema &&
+    normalized.toLowerCase().endsWith(".schema.json")
+  ) {
+    try {
+      JSON.parse(content);
+      return schemaDocumentValidation(workspaceRoot, configurationSchema);
+    } catch {
+      return {
+        errors: ["File is not valid JSON"],
+        schema_path: normalized,
+        valid: false,
+      };
+    }
+  }
+  if (configurationSchema) {
+    let parsed: unknown;
+    try {
+      parsed = YAML.parse(content);
+    } catch {
+      return {
+        errors: ["File is not valid YAML"],
+        schema_path: relative(
+          resolve(workspaceRoot),
+          configurationSchema,
+        ).replaceAll("\\", "/"),
+        valid: false,
+      };
+    }
+    return schemaValidation(
+      workspaceRoot,
+      parsed,
+      configurationSchema,
+      "document",
+    );
+  }
+
+  if (!normalized.toLowerCase().endsWith(".md")) {
     return { errors: [], valid: true };
   }
 
@@ -263,8 +365,10 @@ export function validateEntireWorkspace(
 
       if (entry.isDirectory()) {
         visit(absolute);
-      } else if (entry.isFile() && relPath.toLowerCase().endsWith(".md")) {
-        if (hiddenFromNavigator(relPath)) continue;
+      } else if (
+        entry.isFile() &&
+        (relPath.toLowerCase().endsWith(".md") || isConfigurationPath(relPath))
+      ) {
         try {
           const content = readFileSync(absolute, "utf-8");
           const validation = validateRecordContent(root, relPath, content);

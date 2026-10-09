@@ -135,6 +135,20 @@ export interface WorkspaceDiagnosticsResponse {
   issues: WorkspaceDiagnosticIssue[];
 }
 
+export interface WorkspaceSettings {
+  schema: 1;
+  hide_template_schema_files: boolean;
+  hide_configuration_files: boolean;
+}
+
+export interface WorkspaceSystemInfo {
+  schema: 1;
+  openlia_version: string;
+  openlia_hash: string;
+  hermes_version: string;
+  locho_version: string;
+}
+
 export interface AuthSessionResponse {
   schema: 1;
   auth_required: boolean;
