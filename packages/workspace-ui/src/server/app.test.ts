@@ -146,6 +146,37 @@ describe("workspace HTTP handler", () => {
     });
   });
 
+  test("exposes hledger journal files as editable documents", async () => {
+    const finPath = join(root, "finance");
+    const content =
+      "2026-07-01 Payslip\n    assets:cash  1000 VND\n    income:salary -1000 VND\n";
+    mkdirSync(finPath, { recursive: true });
+    writeFileSync(join(finPath, "journal.hledger"), content);
+
+    const treeResponse = await request("/api/workspace/tree");
+    const tree = (await treeResponse.json()) as {
+      entries: Array<{ editable?: boolean; kind: string; path: string }>;
+    };
+    expect(tree.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          editable: true,
+          kind: "file",
+          path: "finance/journal.hledger",
+        }),
+      ]),
+    );
+
+    const readResponse = await request(
+      "/api/workspace/file?path=finance%2Fjournal.hledger",
+    );
+    const document = (await readResponse.json()) as {
+      editable: boolean;
+      content: string;
+    };
+    expect(document).toMatchObject({ content, editable: true });
+  });
+
   test("reads, writes, and rejects stale revisions", async () => {
     writeFileSync(join(root, "note.md"), "before");
     const readResponse = await request("/api/workspace/file?path=note.md");

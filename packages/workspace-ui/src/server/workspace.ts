@@ -45,6 +45,8 @@ const editableExtensions = new Set([
   ".json",
   ".toml",
   ".csv",
+  ".journal",
+  ".hledger",
 ]);
 
 const protectedDirectoryNames = new Set([

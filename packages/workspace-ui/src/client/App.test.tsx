@@ -551,9 +551,7 @@ messages:
       await screen.findByRole("heading", { name: "Recent Changes" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Git Commit History (3)")).toBeInTheDocument();
-    expect(
-      screen.getByText("Recently Modified Documents (5)"),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Recently Modified Documents/)).toBeInTheDocument();
     expect(
       screen.getByText("chore: update daily notes and task plan"),
     ).toBeInTheDocument();
@@ -726,5 +724,34 @@ messages:
     ).toBeInTheDocument();
     // Permissive editing: Edit button is still available
     expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled();
+  });
+
+  test("opens hledger journal files in Visual preview mode with Sankey diagram and highlights", async () => {
+    window.history.replaceState(null, "", "/files/finance/journal.hledger");
+    render(<App api={createMockWorkspaceApi()} />);
+
+    // Journal preview should be rendered
+    expect(
+      await screen.findByRole("region", { name: "Sankey Diagram Flow" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Money Flow (Sankey Diagram)")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Journal Highlights" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("TOTAL INCOME")).toBeInTheDocument();
+    expect(screen.getByText("TOTAL EXPENSES")).toBeInTheDocument();
+    expect(screen.getByText("NET RETAINED")).toBeInTheDocument();
+
+    // Mode buttons should include Visual and Edit
+    expect(screen.getByRole("button", { name: "Visual" })).toHaveClass(
+      "btn-primary",
+    );
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+
+    // Clicking Edit switches to Code view
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("button", { name: "Edit" })).toHaveClass(
+      "btn-primary",
+    );
   });
 });

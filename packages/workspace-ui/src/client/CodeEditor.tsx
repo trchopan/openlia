@@ -49,6 +49,11 @@ export function isMarkdownPath(path: string): boolean {
   return lower.endsWith(".md") || lower.endsWith(".markdown");
 }
 
+export function isJournalPath(path: string): boolean {
+  const lower = path.toLowerCase();
+  return lower.endsWith(".journal") || lower.endsWith(".hledger");
+}
+
 export function detectLanguage(path: string): { id: string; name: string } {
   const ext = path.toLowerCase().split(".").pop() ?? "";
   switch (ext) {
@@ -74,6 +79,9 @@ export function detectLanguage(path: string): { id: string; name: string } {
       return { id: "javascript", name: "JavaScript" };
     case "toml":
       return { id: "toml", name: "TOML" };
+    case "journal":
+    case "hledger":
+      return { id: "ledger", name: "Ledger" };
     default:
       return { id: "text", name: "Plain Text" };
   }

@@ -17,6 +17,8 @@ const editableExtensions = new Set([
   ".json",
   ".toml",
   ".csv",
+  ".journal",
+  ".hledger",
 ]);
 
 function getExtension(name: string): string {

@@ -18,7 +18,7 @@ import type {
   WorkspaceTreeEntry,
 } from "../shared/api";
 import { ApiError, httpWorkspaceApi, type WorkspaceApi } from "./api";
-import { isMarkdownPath } from "./CodeEditor";
+import { isJournalPath, isMarkdownPath } from "./CodeEditor";
 import { CreateSkillModal } from "./CreateSkillModal";
 import {
   DeleteFileDialog,
@@ -51,7 +51,9 @@ type PendingAction =
   | null;
 
 function defaultView(path?: string): WorkspaceView {
-  return path && !isMarkdownPath(path) ? "edit" : "preview";
+  return path && !isMarkdownPath(path) && !isJournalPath(path)
+    ? "edit"
+    : "preview";
 }
 
 function viewForPath(
@@ -59,7 +61,7 @@ function viewForPath(
   requested: WorkspaceView | undefined,
 ): WorkspaceView {
   if (requested === "info") return "info";
-  if (path && !isMarkdownPath(path)) return "edit";
+  if (path && !isMarkdownPath(path) && !isJournalPath(path)) return "edit";
   return requested ?? defaultView(path);
 }
 

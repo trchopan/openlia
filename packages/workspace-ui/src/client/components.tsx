@@ -10,8 +10,9 @@ import type {
   WorkspaceTreeEntry,
 } from "../shared/api";
 import { ActivitySection } from "./ActivitySection";
-import { CodeEditor, isMarkdownPath } from "./CodeEditor";
+import { CodeEditor, isJournalPath, isMarkdownPath } from "./CodeEditor";
 import { FrontmatterBlock } from "./FrontmatterBlock";
+import { JournalPreviewPane } from "./journal/JournalPreviewPane";
 import { parseMarkdownFrontmatter } from "./frontmatter";
 import { extractOriginalMessage } from "./markdown";
 import {
@@ -22,6 +23,7 @@ import {
 
 export { MoveFileDialog } from "./MoveFileDialog";
 export { RenameFileDialog } from "./RenameFileDialog";
+export { isJournalPath, isMarkdownPath } from "./CodeEditor";
 
 export type WorkspaceView = "edit" | "preview" | "info";
 
@@ -1215,6 +1217,7 @@ export function DocumentPane({
   const dirty = file !== null && file.content !== draft;
   const canEdit = Boolean(file?.editable);
   const isMarkdown = file !== null && isMarkdownPath(file.path);
+  const isJournal = file !== null && isJournalPath(file.path);
 
   return (
     <section aria-label="Document workspace" className="workspace-document">
@@ -1245,6 +1248,23 @@ export function DocumentPane({
                     value="preview"
                   >
                     Preview
+                  </ModeButton>
+                  <ModeButton
+                    active={view === "edit"}
+                    onClick={() => onViewChange("edit")}
+                    value="edit"
+                  >
+                    Edit
+                  </ModeButton>
+                </>
+              ) : isJournal ? (
+                <>
+                  <ModeButton
+                    active={view === "preview"}
+                    onClick={() => onViewChange("preview")}
+                    value="preview"
+                  >
+                    Visual
                   </ModeButton>
                   <ModeButton
                     active={view === "edit"}
@@ -1532,6 +1552,26 @@ export function DocumentPane({
           )}
           {view === "info" ? (
             <DocumentInspector diff={diff} draft={draft} file={file} />
+          ) : isJournal ? (
+            view === "preview" ? (
+              <section
+                aria-label="Visual Journal View"
+                className="workspace-preview-pane flex-1 overflow-hidden p-0"
+              >
+                <JournalPreviewPane
+                  content={draft}
+                  filePath={file.path}
+                  onSwitchToEdit={() => onViewChange("edit")}
+                />
+              </section>
+            ) : (
+              <EditorPane
+                draft={draft}
+                file={file}
+                fileLoading={fileLoading}
+                onDraftChange={onDraftChange}
+              />
+            )
           ) : !isMarkdown ? (
             <EditorPane
               draft={draft}
