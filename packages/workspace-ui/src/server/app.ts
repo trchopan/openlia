@@ -262,7 +262,9 @@ export function createWorkspaceHandler(
           url.pathname.startsWith("/file/") ||
           url.pathname === "/file" ||
           url.pathname.startsWith("/skills/") ||
-          url.pathname === "/skills")
+          url.pathname === "/skills" ||
+          url.pathname.startsWith("/git-activity/") ||
+          url.pathname === "/git-activity")
       ) {
         return (
           (await staticFile(staticRoot, "/")) ??

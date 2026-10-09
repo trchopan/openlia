@@ -11,6 +11,7 @@ export interface GoToModalProps {
   onClose: () => void;
   onNavigateWorkspace: (path: string) => void;
   onNavigateSkill: (skillId: string, skillFile?: string) => void;
+  onNavigateGitActivity?: (() => void) | undefined;
   skills?: SkillSummary[] | undefined;
   tree?: WorkspaceTreeEntry[] | undefined;
 }
@@ -20,6 +21,7 @@ export function GoToModal({
   onClose,
   onNavigateWorkspace,
   onNavigateSkill,
+  onNavigateGitActivity,
   skills = [],
   tree = [],
 }: GoToModalProps) {
@@ -56,8 +58,10 @@ export function GoToModal({
     if (item) {
       if (item.kind === "workspace") {
         onNavigateWorkspace(item.id);
-      } else {
+      } else if (item.kind === "skill") {
         onNavigateSkill(item.id, item.skillFile);
+      } else if (item.kind === "git-activity") {
+        onNavigateGitActivity?.();
       }
       onClose();
       return;
@@ -66,8 +70,10 @@ export function GoToModal({
     if (target) {
       if (target.kind === "workspace") {
         onNavigateWorkspace(target.path);
-      } else {
+      } else if (target.kind === "skill") {
         onNavigateSkill(target.skillId, target.skillFile);
+      } else if (target.kind === "git-activity") {
+        onNavigateGitActivity?.();
       }
       onClose();
     }

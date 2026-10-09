@@ -22,6 +22,8 @@ import {
   copyToClipboard,
 } from "./openliaLinks";
 
+export { ActivitySection } from "./ActivitySection";
+export { GitActivitySection } from "./GitActivitySection";
 export { MoveFileDialog } from "./MoveFileDialog";
 export { RenameFileDialog } from "./RenameFileDialog";
 export { isJournalPath, isMarkdownPath } from "./CodeEditor";
@@ -222,11 +224,12 @@ export function WorkspaceHeader({
   git,
   onExport,
   onOpenFiles,
+  onOpenGitActivity,
   onOpenGoTo,
   onSignOut,
   onTabChange,
 }: {
-  activeTab?: "documents" | "skills" | undefined;
+  activeTab?: "documents" | "skills" | "git-activity" | undefined;
   authRequired: boolean;
   currentLink?: string | undefined;
   dirty: boolean;
@@ -236,9 +239,12 @@ export function WorkspaceHeader({
   git: WorkspaceGitStatus | null;
   onExport?: (() => void) | undefined;
   onOpenFiles: () => void;
+  onOpenGitActivity?: (() => void) | undefined;
   onOpenGoTo?: (() => void) | undefined;
   onSignOut: () => void;
-  onTabChange?: ((tab: "documents" | "skills") => void) | undefined;
+  onTabChange?:
+    | ((tab: "documents" | "skills" | "git-activity") => void)
+    | undefined;
 }) {
   const hasDocumentContent = file !== null && "content" in file;
   const gitText = git?.configured
@@ -280,18 +286,39 @@ export function WorkspaceHeader({
           >
             Skills
           </button>
+          <button
+            className={`btn btn-xs join-item ${
+              activeTab === "git-activity"
+                ? "btn-primary shadow-xs"
+                : "btn-ghost text-base-content/70"
+            }`}
+            onClick={() => onTabChange("git-activity")}
+            type="button"
+          >
+            Git Activity
+          </button>
         </div>
       )}
 
       <div className="min-w-0 flex-1">
         <p className="workspace-eyebrow">
           OPENLIA /{" "}
-          {activeTab === "skills" ? "SKILLS" : file ? "WORKSPACE" : "ACTIVITY"}
+          {activeTab === "skills"
+            ? "SKILLS"
+            : activeTab === "git-activity"
+              ? "GIT ACTIVITY"
+              : file
+                ? "WORKSPACE"
+                : "ACTIVITY"}
         </p>
         <div className="flex items-center gap-1.5">
           <h1 className="workspace-title" title={file?.path}>
             {file?.path.split("/").at(-1) ??
-              (activeTab === "skills" ? "Skills" : "Activity")}
+              (activeTab === "skills"
+                ? "Skills"
+                : activeTab === "git-activity"
+                  ? "Git Activity"
+                  : "Activity")}
           </h1>
           {currentLink && (
             <CopyLinkButton
@@ -373,9 +400,24 @@ export function WorkspaceHeader({
         <StatusBadge tone={dirty ? "warning" : "success"}>
           {dirty ? "Unsaved" : hasDocumentContent ? "Saved" : "Ready"}
         </StatusBadge>
-        <span className="workspace-git-status">
-          <StatusBadge>{gitText}</StatusBadge>
-        </span>
+        {onTabChange || onOpenGitActivity ? (
+          <button
+            aria-label="View Git activity"
+            className="workspace-git-status btn btn-ghost btn-xs normal-case font-normal p-0 h-auto hover:bg-transparent"
+            onClick={() => {
+              if (onOpenGitActivity) onOpenGitActivity();
+              else if (onTabChange) onTabChange("git-activity");
+            }}
+            title="Open Git activity"
+            type="button"
+          >
+            <StatusBadge>{gitText}</StatusBadge>
+          </button>
+        ) : (
+          <span className="workspace-git-status">
+            <StatusBadge>{gitText}</StatusBadge>
+          </span>
+        )}
         {authRequired && (
           <button
             className="btn btn-ghost btn-sm text-primary"
@@ -1409,9 +1451,11 @@ export function DocumentPane({
   diagnostics,
   diagnosticsLoading,
   onOpenFile,
+  onOpenGitActivity,
   onRefreshActivity,
   rawUrl,
   downloadUrl,
+  totalDocuments,
 }: {
   conflict: string;
   detailsOpen?: boolean;
@@ -1441,9 +1485,11 @@ export function DocumentPane({
   diagnostics?: WorkspaceDiagnosticsResponse | null | undefined;
   diagnosticsLoading?: boolean | undefined;
   onOpenFile?: ((path: string) => void) | undefined;
+  onOpenGitActivity?: (() => void) | undefined;
   onRefreshActivity?: (() => void) | undefined;
   rawUrl?: ((path: string) => string) | undefined;
   downloadUrl?: ((path: string) => string) | undefined;
+  totalDocuments?: number | undefined;
 }) {
   const dirty = file !== null && file.content !== draft;
   const canEdit = Boolean(file?.editable);
@@ -1857,7 +1903,9 @@ export function DocumentPane({
           diagnosticsLoading={diagnosticsLoading ?? false}
           loading={activityLoading ?? false}
           onOpenFile={onOpenFile ?? (() => {})}
+          onOpenGitActivity={onOpenGitActivity}
           onRefresh={onRefreshActivity}
+          totalDocuments={totalDocuments}
         />
       )}
     </section>

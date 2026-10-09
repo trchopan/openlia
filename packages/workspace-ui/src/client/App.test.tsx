@@ -605,17 +605,20 @@ messages:
     expect(editor).toHaveTextContent("My unsaved user edits");
   });
 
-  test("renders the Activity section on initial page and allows opening files", async () => {
+  test("renders the file changes Activity section on initial page and allows opening files", async () => {
     render(<App api={createMockWorkspaceApi()} />);
 
     expect(
       await screen.findByRole("heading", { name: "Recent Changes" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Git Commit History (3)")).toBeInTheDocument();
     expect(screen.getByText(/Recently Modified Documents/)).toBeInTheDocument();
+    expect(screen.getByText(/Git History:/)).toBeInTheDocument();
     expect(
-      screen.getByText("chore: update daily notes and task plan"),
+      screen.getByRole("button", { name: "View Git Activity →" }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Git Commit History (3)"),
+    ).not.toBeInTheDocument();
 
     // Click on Open for tasks/task.md in the recently modified files list
     const openButtons = screen.getAllByRole("button", { name: "Open" });
@@ -636,6 +639,39 @@ messages:
 
     expect(
       await screen.findByRole("heading", { name: "Recent Changes" }),
+    ).toBeInTheDocument();
+  });
+
+  test("navigates to Git Activity tab and displays commit history", async () => {
+    render(<App api={createMockWorkspaceApi()} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Recent Changes" }),
+    ).toBeInTheDocument();
+
+    // Click the Git Activity tab button in header
+    const gitTabButton = screen.getByRole("button", { name: "Git Activity" });
+    fireEvent.click(gitTabButton);
+
+    expect(
+      await screen.findByRole("heading", { name: "Git History & Activity" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Git Commit History (3)")).toBeInTheDocument();
+    expect(
+      screen.getByText("chore: update daily notes and task plan"),
+    ).toBeInTheDocument();
+
+    // Expand the first commit
+    const expandBtn = screen.getByRole("button", { name: "1 file ▾" });
+    fireEvent.click(expandBtn);
+
+    // Click View on the file in the commit
+    const viewBtn = screen.getByRole("button", { name: "View" });
+    fireEvent.click(viewBtn);
+
+    // Should switch to documents tab and open markdown preview
+    expect(
+      await screen.findByRole("article", { name: "Markdown preview" }),
     ).toBeInTheDocument();
   });
 

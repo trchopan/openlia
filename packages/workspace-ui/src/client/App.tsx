@@ -27,6 +27,7 @@ import {
   DocumentInspector,
   DocumentPane,
   FileNavigator,
+  GitActivitySection,
   MoveFileDialog,
   RenameFileDialog,
   WorkspaceHeader,
@@ -684,6 +685,11 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             kind: "openSkill",
             skillFile: route.skillFile,
           });
+        } else if (route.tab === "git-activity") {
+          setPendingAction({
+            kind: "switchTab",
+            tab: "git-activity",
+          });
         } else {
           setPendingAction({
             kind: "open",
@@ -711,6 +717,13 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         if (route.skill) {
           void openSkill(route.skill, route.skillFile);
         }
+      } else if (route.tab === "git-activity") {
+        setActiveTab("git-activity");
+        setFile(null);
+        setArtifact(null);
+        setDraft("");
+        setConflict("");
+        setDocumentError("");
       } else if (route.path) {
         if (route.path !== file?.path && route.path !== artifact?.path) {
           void openFile(route.path, {
@@ -719,6 +732,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           });
         }
       } else {
+        setActiveTab("documents");
         setFile(null);
         setArtifact(null);
         setDraft("");
@@ -737,6 +751,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       document.title = selectedSkillDetail
         ? `${selectedSkillDetail.name} - OpenLia Skills`
         : "Skills - OpenLia Workspace";
+    } else if (activeTab === "git-activity") {
+      document.title = "Git Activity - OpenLia Workspace";
     } else {
       const selectedPath = file?.path ?? artifact?.path;
       if (selectedPath) {
@@ -905,11 +921,13 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     },
   ) {
     const requestSequence = ++fileRequestSequence.current;
+    setActiveTab("documents");
     setFileLoading(true);
     setDocumentError("");
     setConflict("");
     const selectArtifact = (metadata: WorkspaceFileMetadata) => {
       if (requestSequence !== fileRequestSequence.current) return;
+      setActiveTab("documents");
       setFile(null);
       setArtifact(metadata);
       setDraft("");
@@ -985,13 +1003,14 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
   function requestOpenFile(path: string) {
     if (!path) {
-      if (!file && !artifact) {
+      if (activeTab === "documents" && !file && !artifact) {
         setFilesOpen(false);
         return;
       }
       if (dirty) {
         setPendingAction({ kind: "open", path: "" });
       } else {
+        setActiveTab("documents");
         setFile(null);
         setArtifact(null);
         setDraft("");
@@ -1077,8 +1096,10 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     if (!target) return;
     if (target.kind === "workspace") {
       requestOpenFile(target.path);
-    } else {
+    } else if (target.kind === "skill") {
       requestOpenSkill(target.skillId, target.skillFile);
+    } else if (target.kind === "git-activity") {
+      requestTabChange("git-activity");
     }
   }
 
@@ -1611,11 +1632,12 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         currentLink={currentLink}
         dirty={dirty}
         exporting={exporting}
-        file={activeTab === "skills" ? null : (file ?? artifact)}
+        file={activeTab === "documents" ? (file ?? artifact) : null}
         filesButtonRef={filesButtonRef}
         git={git}
         onExport={handleExport}
         onOpenFiles={() => setFilesOpen(true)}
+        onOpenGitActivity={() => requestTabChange("git-activity")}
         onOpenGoTo={() => setIsGoToOpen(true)}
         onSignOut={requestSignOut}
         onTabChange={requestTabChange}
@@ -1684,6 +1706,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             onNavigateLink={handleNavigateLink}
             onOpenDetails={openHeaderDetails}
             onOpenFile={requestOpenFile}
+            onOpenGitActivity={() => requestTabChange("git-activity")}
             onRename={() => requestRename()}
             onRefreshActivity={() => {
               setActivityLoading(true);
@@ -1714,6 +1737,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
                 void openFile(pathToRetry, { requestedView: view });
             }}
             onSave={() => void save()}
+            totalDocuments={tree.filter((e) => e.kind === "file").length}
             onViewChange={handleViewChange}
             rawUrl={api.rawUrl}
             downloadUrl={api.downloadUrl}
@@ -1726,7 +1750,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             </div>
           )}
         </div>
-      ) : (
+      ) : activeTab === "skills" ? (
         <div className="workspace-layout xl:grid-cols-[clamp(18rem,22vw,22rem)_minmax(0,1fr)]">
           <div
             className={`fixed inset-y-0 left-0 z-30 w-72 transform bg-base-100 transition-transform xl:static xl:w-full xl:translate-x-0 ${
@@ -1817,6 +1841,23 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             </div>
           )}
         </div>
+      ) : (
+        <div className="workspace-layout xl:grid-cols-1">
+          <GitActivitySection
+            activity={activity}
+            git={git}
+            loading={activityLoading}
+            onOpenFile={requestOpenFile}
+            onRefresh={() => {
+              setActivityLoading(true);
+              api
+                .loadActivity()
+                .then((res) => setActivity(res))
+                .catch(() => {})
+                .finally(() => setActivityLoading(false));
+            }}
+          />
+        </div>
       )}
 
       {pendingAction && (
@@ -1884,6 +1925,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       <GoToModal
         isOpen={isGoToOpen}
         onClose={() => setIsGoToOpen(false)}
+        onNavigateGitActivity={() => requestTabChange("git-activity")}
         onNavigateSkill={(id, skillFile) => requestOpenSkill(id, skillFile)}
         onNavigateWorkspace={(path) => requestOpenFile(path)}
         skills={skills}

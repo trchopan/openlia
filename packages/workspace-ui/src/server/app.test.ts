@@ -805,6 +805,8 @@ describe("workspace HTTP handler", () => {
         "/files/notes.md",
         "/files/calendar/event.md",
         "/file/tasks/todo.md",
+        "/skills",
+        "/git-activity",
       ]) {
         const response = await spaHandler(
           new Request(`http://localhost${spaPath}`),
