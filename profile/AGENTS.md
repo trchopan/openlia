@@ -24,6 +24,9 @@ installation may contain only starter data.
   their output before applying it to the workspace.
 - Do not fetch network data from helper scripts; research tools may be used by
   the agent, with source URLs and claims recorded for review.
+- Personal finance journal edits are local bookkeeping actions. They may use the
+  explicit `record_financial_data` delegation when the workspace policy allows it;
+  external transfers, purchases, and trades remain separate approval-gated actions.
 - Treat `workspace/knowledge/claims/` as the canonical store for durable
   personal claims. Hermes runtime memory is a cache or context layer, not an
   authority. Never promote Hermes-only memory to an active claim without a

@@ -23,7 +23,7 @@
 ### Candidate C-YYYY-MM-DD-001
 
 - Summary:
-- Route: task | event | decision | idea | research | claim | archive | review
+- Route: task | event | decision | idea | research | finance | claim | archive | review
 - Destination: [registered workspace path, or inbox/ when unresolved]
 - Rationale:
 - Confidence: high | medium | low

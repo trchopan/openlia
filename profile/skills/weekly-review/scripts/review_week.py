@@ -32,6 +32,8 @@ def build_review(data: dict[str, Any]) -> dict[str, Any]:
     tasks = _list(data, "tasks")
     decisions = _list(data, "decisions")
     claims = _list(data, "claims")
+    finance = _list(data, "finance")
+    health = _list(data, "health")
     completed = [task for task in tasks if str(task.get("status", "")).lower() in {"done", "completed"}]
     closed_tasks = [
         task
@@ -56,6 +58,24 @@ def build_review(data: dict[str, Any]) -> dict[str, Any]:
         or str(decision.get("status") or "").lower() in {"proposed", "pending", ""}
     ]
     claim_review = [claim for claim in claims if claim.get("needs_review") is True or str(claim.get("status", "")).lower() in {"candidate", "stale", "contested"}]
+    finance_open = [
+        record
+        for record in finance
+        if str(record.get("status", "")).lower()
+        in {"blocked", "needs-attention", "pending-review", "ready-to-post", "draft", "in-progress"}
+        or str(record.get("reconciliation_status", "")).lower() == "discrepancy"
+        or str(record.get("price_status", "")).lower() in {"partial", "missing"}
+        or str(record.get("cost_basis_status", "")).lower() in {"partial", "missing"}
+    ]
+    health_open = [
+        record
+        for record in health
+        if record.get("needs_review") is True
+        or str(record.get("status", "")).lower() in {"draft", "unknown"}
+        or str(record.get("verification_status", "")).lower() in {"unconfirmed", "provisional", "unknown"}
+        or record.get("review_due") is True
+        or record.get("next_review_due") is True
+    ]
 
     return {
         "week": str(data.get("week") or "unspecified"),
@@ -65,6 +85,8 @@ def build_review(data: dict[str, Any]) -> dict[str, Any]:
         "open_tasks": _ordered(open_tasks),
         "decisions_to_revisit": _ordered(revisit),
         "claims_to_review": _ordered(claim_review),
+        "finance_open": _ordered(finance_open),
+        "health_open": _ordered(health_open),
     }
 
 
@@ -87,6 +109,14 @@ def self_test() -> None:
                 {"title": "Abandoned decision", "status": "abandoned"},
             ],
             "claims": [{"claim": "A stale preference", "status": "stale", "needs_review": True}],
+            "finance": [
+                {"title": "Unreconciled card", "status": "needs-attention"},
+                {"title": "Complete review", "status": "final", "price_status": "complete"},
+            ],
+            "health": [
+                {"title": "Unconfirmed diagnosis", "verification_status": "provisional"},
+                {"title": "Final summary", "status": "final"},
+            ],
         }
     )
     assert review["completed"][0]["title"] == "Finished task"
@@ -94,6 +124,8 @@ def self_test() -> None:
     assert review["open_tasks"][0]["title"] == "Open task"
     assert review["decisions_to_revisit"][0]["title"] == "Unresolved choice"
     assert review["claims_to_review"][0]["claim"] == "A stale preference"
+    assert review["finance_open"][0]["title"] == "Unreconciled card"
+    assert review["health_open"][0]["title"] == "Unconfirmed diagnosis"
     assert {project["title"] for project in review["active_projects"]} == {
         "Active project",
         "Unspecified project",

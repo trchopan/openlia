@@ -40,6 +40,7 @@ CANONICAL_DOMAINS = {
     "shopping",
     "travel",
     "finance",
+    "health",
     "archive",
 }
 

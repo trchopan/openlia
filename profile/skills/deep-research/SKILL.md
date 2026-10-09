@@ -33,6 +33,10 @@ present and use a registered research extension only when its context matches.
 - **Decision analysis:** Use this skill before scoring options when important
   external evidence is missing. Return source IDs, limitations, and confidence;
   do not turn a research ranking into a decision.
+- **Personal finance:** Use this skill for bounded investment questions after
+  a finance review supplies the relevant horizon, liquidity need, currency,
+  portfolio exposure, and constraints. Do not request or expose the complete
+  finance journal when a scoped summary is sufficient.
 - **Weekly review:** Revisit a linked brief only when its evidence is stale, a
   next-check trigger has arrived, the decision context changed, or the open loop
   still lacks a supported answer.
@@ -53,6 +57,10 @@ decision or project action -> later review**.
   it was not actually read.
 - Research does not authorize sending messages, purchases, financial actions,
   calendar changes, or promotion of a claim into `knowledge/claims/`.
+- Investment research does not authorize a trade or purchase. Return fees,
+  liquidity, concentration, custody, counterparty, currency, tax, and downside
+  evidence when those risks are in scope, and keep suitability assumptions
+  explicit.
 
 ## Procedure
 

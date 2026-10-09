@@ -37,6 +37,10 @@ matrix.
 - **Weekly review:** revisit proposed decisions and decided records whose
   review date has arrived. Reopen analysis only when new evidence or changed
   priorities justify it.
+- **Personal finance:** use current finance review and portfolio records as
+  read-only context for affordability, liquidity, allocation, and risk
+  constraints. Use [Deep Research](openlia://skills/deep-research) first when
+  investment evidence is missing. A recommendation never authorizes a trade.
 
 ## Procedure
 

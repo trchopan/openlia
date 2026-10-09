@@ -22,6 +22,7 @@ DOMAIN_MESSAGES: dict[str, str] = {
     "people": "docs(people): update relationships and context",
     "shopping": "docs(shopping): update purchase targets",
     "finance": "docs(finance): update financial records",
+    "health": "docs(health): update medical history",
     "calendar": "docs(calendar): update event notes",
     "ideas": "docs(ideas): update ideas and exploration",
     "archive": "chore(archive): archive stale records",

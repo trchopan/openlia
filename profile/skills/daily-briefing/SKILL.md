@@ -51,6 +51,12 @@ briefing, or since the previous day when there is no earlier report. Pass
 `--since YYYY-MM-DD` to override that baseline. It performs no network access
 and does not write to the workspace.
 
+When the registry opts finance sources into briefings, include only those
+registered finance records. Finance intake items are signals for blocked,
+pending-review, or unreconciled work; finance reviews are signals for due,
+recently changed, or attention-needed periodic reviews. A briefing does not
+post journal entries, reconcile accounts, or make investment recommendations.
+
 Use the packet to decide which full source records need reading. Read those
 records directly before making a consequential claim; the packet excerpts are
 discovery aids, not substitutes for evidence. Do not treat missing or
@@ -68,8 +74,9 @@ when it does not exist. The template headings are the report contract. Replace
 the starter prompts with report content while preserving the template's
 heading structure:
 
-1. **Today**: focus, evidenced calendar events, tasks, follow-ups, and active
-   monitors. If no calendar or task records are available, say so explicitly;
+1. **Today**: focus, evidenced calendar events, tasks, follow-ups, active
+   monitors, and due finance work. If no calendar or task records are
+   available, say so explicitly;
    do not imply that the day is empty.
 2. **What Changed**: separate verified **Facts**, possible **Signal**, and
    **Missing evidence**. Keep inferences labeled and cite their supporting

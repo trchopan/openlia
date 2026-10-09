@@ -18,3 +18,23 @@ browser-profile/
 mcp-tokens/
 pairing/
 .DS_Store
+
+# Python development artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
