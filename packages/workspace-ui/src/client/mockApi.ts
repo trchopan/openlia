@@ -76,6 +76,60 @@ export function createMockWorkspaceApi({
       ...metadata("workspace.yaml", "domains:\n  - inbox\n"),
       kind: "file",
     },
+    { kind: "directory", path: "finance" },
+    {
+      ...metadata(
+        "finance/journal.hledger",
+        `; Personal Finance Journal
+; Currency: VND
+
+2026-07-01 Payslip 2026-07
+    assets:cash                                  63710000 VND
+    expenses:tax:pit                              4500000 VND
+    expenses:payroll:insurance                    3500000 VND
+    income:salary:talentnet                     -71710000 VND
+
+2026-07-05 * Phone installment
+    expenses:electronics:phone                    4970000 VND
+    assets:cash                                 -4970000 VND
+
+2026-07-10 * Household support
+    expenses:household:family                    25000000 VND
+    assets:cash                                -25000000 VND
+
+2026-07-15 * Ride-hailing & Transport
+    expenses:transport:ride_hailing               2010000 VND
+    assets:cash                                 -2010000 VND
+
+2026-07-20 * Groceries & Dining
+    expenses:food:dining                          3850000 VND
+    assets:cash                                 -3850000 VND
+
+2026-08-01 Payslip 2026-08
+    assets:cash                                  63710000 VND
+    expenses:tax:pit                              4500000 VND
+    expenses:payroll:insurance                    3500000 VND
+    income:salary:talentnet                     -71710000 VND
+
+2026-08-05 * Phone installment
+    expenses:electronics:phone                    4970000 VND
+    assets:cash                                 -4970000 VND
+
+2026-08-10 * Household support
+    expenses:household:family                    30000000 VND
+    assets:cash                                -30000000 VND
+
+2026-08-18 * Ride-hailing & Transport
+    expenses:transport:ride_hailing               1990000 VND
+    assets:cash                                 -1990000 VND
+
+2026-08-25 * Dining & Utilities
+    expenses:food:dining                          4200000 VND
+    assets:cash                                 -4200000 VND
+`,
+      ),
+      kind: "file",
+    },
     { kind: "directory", path: "projects" },
     {
       ...metadata("projects/project.md", "# Project\n\nA sample project.\n"),
@@ -93,6 +147,53 @@ export function createMockWorkspaceApi({
     "calendar/event.md":
       "# Calendar event\n\nA sample event for UI development.\n",
     "workspace.yaml": "domains:\n  - inbox\n",
+    "finance/journal.hledger": `; Personal Finance Journal
+; Currency: VND
+
+2026-07-01 Payslip 2026-07
+    assets:cash                                  63710000 VND
+    expenses:tax:pit                              4500000 VND
+    expenses:payroll:insurance                    3500000 VND
+    income:salary:talentnet                     -71710000 VND
+
+2026-07-05 * Phone installment
+    expenses:electronics:phone                    4970000 VND
+    assets:cash                                 -4970000 VND
+
+2026-07-10 * Household support
+    expenses:household:family                    25000000 VND
+    assets:cash                                -25000000 VND
+
+2026-07-15 * Ride-hailing & Transport
+    expenses:transport:ride_hailing               2010000 VND
+    assets:cash                                 -2010000 VND
+
+2026-07-20 * Groceries & Dining
+    expenses:food:dining                          3850000 VND
+    assets:cash                                 -3850000 VND
+
+2026-08-01 Payslip 2026-08
+    assets:cash                                  63710000 VND
+    expenses:tax:pit                              4500000 VND
+    expenses:payroll:insurance                    3500000 VND
+    income:salary:talentnet                     -71710000 VND
+
+2026-08-05 * Phone installment
+    expenses:electronics:phone                    4970000 VND
+    assets:cash                                 -4970000 VND
+
+2026-08-10 * Household support
+    expenses:household:family                    30000000 VND
+    assets:cash                                -30000000 VND
+
+2026-08-18 * Ride-hailing & Transport
+    expenses:transport:ride_hailing               1990000 VND
+    assets:cash                                 -1990000 VND
+
+2026-08-25 * Dining & Utilities
+    expenses:food:dining                          4200000 VND
+    assets:cash                                 -4200000 VND
+`,
     "projects/project.md": "# Project\n\nA sample project.\n",
     "tasks/task.md": "# Task\n\nA sample task.\n",
     [path]: content,
@@ -100,6 +201,7 @@ export function createMockWorkspaceApi({
   const fileRevisions: Record<string, string> = {
     "calendar/event.md": "sha256:mock-calendar",
     "workspace.yaml": "sha256:mock-workspace",
+    "finance/journal.hledger": "sha256:mock-journal",
     "projects/project.md": "sha256:mock-project",
     "tasks/task.md": "sha256:mock-task",
     [path]: revision,
