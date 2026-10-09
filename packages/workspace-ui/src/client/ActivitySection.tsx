@@ -6,14 +6,14 @@ import type {
 
 export interface ActivitySectionProps {
   activity: WorkspaceActivityResponse | null;
-  loading: boolean;
   diagnostics?: WorkspaceDiagnosticsResponse | null;
   diagnosticsLoading?: boolean;
+  loading: boolean;
   onOpenFile: (path: string) => void;
+  onOpenGitActivity?: (() => void) | undefined;
   onRefresh?: (() => void) | undefined;
+  totalDocuments?: number | undefined;
 }
-
-type ActivityFilter = "all" | "uncommitted" | "commits" | "files";
 
 function formatRelativeTime(dateString: string): string {
   try {
@@ -42,81 +42,19 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function statusBadge(status: string) {
-  switch (status) {
-    case "added":
-      return (
-        <span className="badge badge-success badge-xs font-mono">Added</span>
-      );
-    case "modified":
-      return (
-        <span className="badge badge-warning badge-xs font-mono">Modified</span>
-      );
-    case "deleted":
-      return (
-        <span className="badge badge-error badge-xs font-mono">Deleted</span>
-      );
-    case "renamed":
-      return (
-        <span className="badge badge-info badge-xs font-mono">Renamed</span>
-      );
-    case "untracked":
-      return (
-        <span className="badge badge-neutral badge-xs font-mono">
-          Untracked
-        </span>
-      );
-    default:
-      return (
-        <span className="badge badge-ghost badge-xs font-mono">{status}</span>
-      );
-  }
-}
-
 export function ActivitySection({
   activity,
   diagnostics,
   diagnosticsLoading: _diagnosticsLoading,
   loading,
   onOpenFile,
+  onOpenGitActivity,
   onRefresh,
+  totalDocuments,
 }: ActivitySectionProps) {
-  const [filter, setFilter] = useState<ActivityFilter>("all");
   const [search, setSearch] = useState("");
-  const [expandedCommits, setExpandedCommits] = useState<Set<string>>(
-    () => new Set(),
-  );
 
-  const toggleCommit = (hash: string) => {
-    setExpandedCommits((prev) => {
-      const next = new Set(prev);
-      if (next.has(hash)) next.delete(hash);
-      else next.add(hash);
-      return next;
-    });
-  };
-
-  const uncommitted = activity?.uncommitted ?? [];
-  const commits = activity?.commits ?? [];
   const recentFiles = activity?.recentFiles ?? [];
-
-  const filteredUncommitted = useMemo(() => {
-    if (!search.trim()) return uncommitted;
-    const q = search.toLowerCase();
-    return uncommitted.filter((u) => u.path.toLowerCase().includes(q));
-  }, [uncommitted, search]);
-
-  const filteredCommits = useMemo(() => {
-    if (!search.trim()) return commits;
-    const q = search.toLowerCase();
-    return commits.filter(
-      (c) =>
-        c.message.toLowerCase().includes(q) ||
-        c.author.toLowerCase().includes(q) ||
-        c.shortHash.toLowerCase().includes(q) ||
-        c.files.some((f) => f.path.toLowerCase().includes(q)),
-    );
-  }, [commits, search]);
 
   const filteredRecentFiles = useMemo(() => {
     if (!search.trim()) return recentFiles;
@@ -141,8 +79,7 @@ export function ActivitySection({
     );
   }
 
-  const hasAnyActivity =
-    uncommitted.length > 0 || commits.length > 0 || recentFiles.length > 0;
+  const docCount = totalDocuments ?? recentFiles.length;
 
   return (
     <div
@@ -152,35 +89,17 @@ export function ActivitySection({
       {/* Header */}
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="workspace-eyebrow">OPENLIA / WORKSPACE ACTIVITY</p>
+          <p className="workspace-eyebrow">OPENLIA / WORKSPACE</p>
           <h2 className="mt-1 text-2xl font-bold tracking-tight">
             Recent Changes
           </h2>
           <p className="mt-1 text-xs text-base-content/60">
-            Overview of working tree status, Git commits, and recently touched
-            workspace documents.
+            Overview of recently updated workspace documents and template schema
+            health.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {activity?.gitConfigured && (
-            <span
-              className={`badge gap-1.5 py-3 ${
-                activity.uncommitted.length > 0
-                  ? "badge-warning"
-                  : "badge-success"
-              }`}
-            >
-              <span className="font-mono text-xs">
-                {activity.branch || "main"}
-              </span>
-              <span className="opacity-75">
-                {activity.uncommitted.length > 0
-                  ? `(${activity.uncommitted.length} uncommitted)`
-                  : "(clean)"}
-              </span>
-            </span>
-          )}
           {onRefresh && (
             <button
               aria-label="Refresh activity"
@@ -207,6 +126,42 @@ export function ActivitySection({
           )}
         </div>
       </div>
+
+      {/* Background Git Audit Notice Banner */}
+      {activity?.gitConfigured && (
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-base-content/10 bg-base-200/30 p-3.5">
+          <div className="flex items-center gap-2.5">
+            <svg
+              className="h-4 w-4 text-primary shrink-0"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              viewBox="0 0 24 24"
+            >
+              <title>Git history indicator</title>
+              <path
+                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span className="text-xs text-base-content/80">
+              <strong>Git History:</strong> Version tracking records changes
+              automatically in the background ({activity.commits.length} commits
+              recorded on {activity.branch || "main"}).
+            </span>
+          </div>
+          {onOpenGitActivity && (
+            <button
+              className="btn btn-ghost btn-xs text-primary self-start sm:self-auto shrink-0"
+              onClick={onOpenGitActivity}
+              type="button"
+            >
+              View Git Activity →
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Template & Schema Diagnostics Panel */}
       {diagnostics && (
@@ -243,8 +198,8 @@ export function ActivitySection({
               <ul className="divide-y divide-base-content/5 rounded-lg border border-base-content/10 bg-base-200/40">
                 {diagnostics.issues.map((issue) => (
                   <li
-                    key={issue.path}
                     className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 p-3 hover:bg-base-200/80 transition-colors"
+                    key={issue.path}
                   >
                     <div className="min-w-0 flex-1">
                       <button
@@ -261,7 +216,7 @@ export function ActivitySection({
                       )}
                       <ul className="mt-1.5 list-disc list-inside text-xs text-warning space-y-0.5">
                         {issue.errors.map((err) => (
-                          <li key={err} className="break-words">
+                          <li className="break-words" key={err}>
                             {err}
                           </li>
                         ))}
@@ -307,82 +262,45 @@ export function ActivitySection({
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-base-content/10 bg-base-200/40 p-4">
           <span className="text-xs uppercase tracking-wider text-base-content/50">
-            Uncommitted
+            Recently Modified
           </span>
-          <p className="mt-1 text-2xl font-bold">{uncommitted.length}</p>
+          <p className="mt-1 text-2xl font-bold">{recentFiles.length}</p>
           <span className="text-xs text-base-content/60">
-            {uncommitted.length === 1
-              ? "file with changes"
-              : "files with changes"}
+            {recentFiles.length === 1 ? "file updated" : "files updated"}
           </span>
         </div>
 
         <div className="rounded-xl border border-base-content/10 bg-base-200/40 p-4">
           <span className="text-xs uppercase tracking-wider text-base-content/50">
-            Git Commits
+            Workspace Files
           </span>
-          <p className="mt-1 text-2xl font-bold">{commits.length}</p>
+          <p className="mt-1 text-2xl font-bold">{docCount}</p>
           <span className="text-xs text-base-content/60">
-            {commits.length === 1 ? "recent commit" : "recent commits"}
+            {docCount === 1 ? "tracked document" : "tracked documents"}
           </span>
         </div>
 
         <div className="col-span-2 sm:col-span-1 rounded-xl border border-base-content/10 bg-base-200/40 p-4">
           <span className="text-xs uppercase tracking-wider text-base-content/50">
-            Tracked Documents
+            Template Health
           </span>
-          <p className="mt-1 text-2xl font-bold">{recentFiles.length}</p>
-          <span className="text-xs text-base-content/60">recent documents</span>
+          <p className="mt-1 text-xl font-bold">
+            {diagnostics
+              ? diagnostics.valid
+                ? "Conforming"
+                : `${diagnostics.issues.length} Issues`
+              : "Healthy"}
+          </p>
+          <span className="text-xs text-base-content/60">
+            {diagnostics?.valid ? "All templates valid" : "Schema verification"}
+          </span>
         </div>
       </div>
 
-      {/* Toolbar: Filters and Search */}
+      {/* Search Toolbar */}
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="join border border-base-content/15 rounded-lg bg-base-200/60 p-0.5">
-          <button
-            className={`btn btn-xs join-item ${
-              filter === "all"
-                ? "btn-primary shadow-xs"
-                : "btn-ghost text-base-content/70"
-            }`}
-            onClick={() => setFilter("all")}
-            type="button"
-          >
-            All Changes
-          </button>
-          <button
-            className={`btn btn-xs join-item ${
-              filter === "uncommitted"
-                ? "btn-primary shadow-xs"
-                : "btn-ghost text-base-content/70"
-            }`}
-            onClick={() => setFilter("uncommitted")}
-            type="button"
-          >
-            Uncommitted {uncommitted.length > 0 && `(${uncommitted.length})`}
-          </button>
-          <button
-            className={`btn btn-xs join-item ${
-              filter === "commits"
-                ? "btn-primary shadow-xs"
-                : "btn-ghost text-base-content/70"
-            }`}
-            onClick={() => setFilter("commits")}
-            type="button"
-          >
-            Commits ({commits.length})
-          </button>
-          <button
-            className={`btn btn-xs join-item ${
-              filter === "files"
-                ? "btn-primary shadow-xs"
-                : "btn-ghost text-base-content/70"
-            }`}
-            onClick={() => setFilter("files")}
-            type="button"
-          >
-            Recent Files ({recentFiles.length})
-          </button>
+        <div className="text-sm font-semibold text-base-content/70">
+          Recently Modified Documents ({filteredRecentFiles.length})
         </div>
 
         <div className="w-full sm:w-64">
@@ -390,250 +308,87 @@ export function ActivitySection({
             aria-label="Filter activity"
             className="input input-bordered input-sm w-full bg-base-200/50"
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search changes or paths..."
+            placeholder="Search documents or paths..."
             type="search"
             value={search}
           />
         </div>
       </div>
 
-      {!hasAnyActivity ? (
+      {/* Recently Modified Files */}
+      {filteredRecentFiles.length > 0 ? (
+        <section aria-labelledby="files-heading" className="space-y-3">
+          <div className="overflow-hidden rounded-xl border border-base-content/10 bg-base-200/20">
+            <table className="table table-sm w-full">
+              <thead>
+                <tr className="border-b border-base-content/10 text-xs text-base-content/60">
+                  <th>Document</th>
+                  <th>Last Modified</th>
+                  <th className="hidden sm:table-cell">Size</th>
+                  <th className="text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRecentFiles.map((file) => (
+                  <tr
+                    className="hover:bg-base-200/60 cursor-pointer"
+                    key={file.path}
+                    onClick={() => onOpenFile(file.path)}
+                  >
+                    <td className="font-medium">
+                      <div className="flex items-center gap-2">
+                        <svg
+                          className="h-4 w-4 opacity-50 shrink-0"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={1.5}
+                          viewBox="0 0 24 24"
+                        >
+                          <title>Document</title>
+                          <path
+                            d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                        <span className="truncate" title={file.path}>
+                          {file.path}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="text-xs text-base-content/60 whitespace-nowrap">
+                      {formatRelativeTime(file.modified_at)}
+                    </td>
+                    <td className="hidden sm:table-cell text-xs text-base-content/60 font-mono whitespace-nowrap">
+                      {formatBytes(file.size)}
+                    </td>
+                    <td className="text-right">
+                      <button
+                        className="btn btn-ghost btn-xs text-primary"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenFile(file.path);
+                        }}
+                        type="button"
+                      >
+                        Open
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : (
         <div className="rounded-2xl border border-dashed border-base-content/20 bg-base-200/20 p-12 text-center">
-          <h3 className="text-lg font-bold">No workspace activity yet</h3>
+          <h3 className="text-lg font-bold">
+            No workspace documents modified yet
+          </h3>
           <p className="mt-2 text-sm text-base-content/60">
             Start creating or editing documents to see changes and history
             recorded here.
           </p>
-        </div>
-      ) : (
-        <div className="space-y-8">
-          {/* Uncommitted changes section */}
-          {(filter === "all" || filter === "uncommitted") &&
-            filteredUncommitted.length > 0 && (
-              <section
-                aria-labelledby="uncommitted-heading"
-                className="space-y-3"
-              >
-                <div className="flex items-center justify-between">
-                  <h3
-                    className="text-sm font-bold uppercase tracking-wider text-warning"
-                    id="uncommitted-heading"
-                  >
-                    Uncommitted Changes ({filteredUncommitted.length})
-                  </h3>
-                  <span className="text-xs text-base-content/50">
-                    Working tree modifications
-                  </span>
-                </div>
-
-                <div className="overflow-hidden rounded-xl border border-warning/30 bg-warning/5">
-                  <ul className="divide-y divide-base-content/10">
-                    {filteredUncommitted.map((item) => (
-                      <li key={item.path}>
-                        <button
-                          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-base-200/60"
-                          onClick={() => {
-                            if (item.status !== "deleted")
-                              onOpenFile(item.path);
-                          }}
-                          type="button"
-                        >
-                          <div className="flex min-w-0 items-center gap-2.5">
-                            {statusBadge(item.status)}
-                            <span
-                              className={`truncate text-sm font-medium ${item.status === "deleted" ? "line-through opacity-60" : ""}`}
-                            >
-                              {item.path}
-                            </span>
-                          </div>
-                          {item.status !== "deleted" && (
-                            <span className="btn btn-ghost btn-xs shrink-0 text-primary">
-                              Open →
-                            </span>
-                          )}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </section>
-            )}
-
-          {/* Commits Section */}
-          {(filter === "all" || filter === "commits") &&
-            filteredCommits.length > 0 && (
-              <section aria-labelledby="commits-heading" className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3
-                    className="text-sm font-bold uppercase tracking-wider text-base-content/70"
-                    id="commits-heading"
-                  >
-                    Git Commit History ({filteredCommits.length})
-                  </h3>
-                  <span className="text-xs text-base-content/50">
-                    Chronological history
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  {filteredCommits.map((commit) => {
-                    const isExpanded = expandedCommits.has(commit.hash);
-                    return (
-                      <div
-                        className="rounded-xl border border-base-content/10 bg-base-200/30 p-4 transition hover:border-base-content/20"
-                        key={commit.hash}
-                      >
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="min-w-0 flex-1">
-                            <p className="font-semibold text-base leading-snug">
-                              {commit.message}
-                            </p>
-                            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/60">
-                              <span className="badge badge-neutral badge-xs font-mono">
-                                {commit.shortHash}
-                              </span>
-                              <span>{commit.author}</span>
-                              <span>•</span>
-                              <time dateTime={commit.timestamp}>
-                                {formatRelativeTime(commit.timestamp)}
-                              </time>
-                              {commit.files.length > 0 && (
-                                <>
-                                  <span>•</span>
-                                  <button
-                                    className="text-primary hover:underline"
-                                    onClick={() => toggleCommit(commit.hash)}
-                                    type="button"
-                                  >
-                                    {commit.files.length}{" "}
-                                    {commit.files.length === 1
-                                      ? "file"
-                                      : "files"}{" "}
-                                    {isExpanded ? "▴" : "▾"}
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Changed files drawer */}
-                        {isExpanded && commit.files.length > 0 && (
-                          <div className="mt-3 rounded-lg border border-base-content/10 bg-base-100 p-2 text-xs">
-                            <ul className="space-y-1">
-                              {commit.files.map((file) => (
-                                <li
-                                  className="flex items-center justify-between gap-2 px-2 py-1 hover:bg-base-200/50 rounded"
-                                  key={file.path}
-                                >
-                                  <div className="flex min-w-0 items-center gap-2">
-                                    {statusBadge(file.status)}
-                                    <span
-                                      className={`truncate ${file.status === "deleted" ? "line-through opacity-60" : ""}`}
-                                    >
-                                      {file.path}
-                                    </span>
-                                  </div>
-                                  {file.status !== "deleted" && (
-                                    <button
-                                      className="text-primary hover:underline shrink-0"
-                                      onClick={() => onOpenFile(file.path)}
-                                      type="button"
-                                    >
-                                      View
-                                    </button>
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
-
-          {/* Recently Modified Files */}
-          {(filter === "all" || filter === "files") &&
-            filteredRecentFiles.length > 0 && (
-              <section aria-labelledby="files-heading" className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3
-                    className="text-sm font-bold uppercase tracking-wider text-base-content/70"
-                    id="files-heading"
-                  >
-                    Recently Modified Documents ({filteredRecentFiles.length})
-                  </h3>
-                  <span className="text-xs text-base-content/50">
-                    Sorted by last updated
-                  </span>
-                </div>
-
-                <div className="overflow-hidden rounded-xl border border-base-content/10 bg-base-200/20">
-                  <table className="table table-sm w-full">
-                    <thead>
-                      <tr className="border-b border-base-content/10 text-xs text-base-content/60">
-                        <th>Document</th>
-                        <th>Last Modified</th>
-                        <th className="hidden sm:table-cell">Size</th>
-                        <th className="text-right">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredRecentFiles.map((file) => (
-                        <tr
-                          className="hover:bg-base-200/60 cursor-pointer"
-                          key={file.path}
-                          onClick={() => onOpenFile(file.path)}
-                        >
-                          <td className="font-medium">
-                            <div className="flex items-center gap-2">
-                              <svg
-                                className="h-4 w-4 opacity-50 shrink-0"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth={1.5}
-                                viewBox="0 0 24 24"
-                              >
-                                <title>Document</title>
-                                <path
-                                  d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                              <span className="truncate" title={file.path}>
-                                {file.path}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="text-xs text-base-content/60 whitespace-nowrap">
-                            {formatRelativeTime(file.modified_at)}
-                          </td>
-                          <td className="hidden sm:table-cell text-xs text-base-content/60 font-mono whitespace-nowrap">
-                            {formatBytes(file.size)}
-                          </td>
-                          <td className="text-right">
-                            <button
-                              className="btn btn-ghost btn-xs text-primary"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onOpenFile(file.path);
-                              }}
-                              type="button"
-                            >
-                              Open
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
         </div>
       )}
     </div>

@@ -1,7 +1,7 @@
 import type { WorkspaceView } from "./components";
 import { parseSkillRemainder } from "./openliaLinks";
 
-export type MainTab = "documents" | "skills";
+export type MainTab = "documents" | "skills" | "git-activity";
 
 export interface WorkspaceRoute {
   tab?: MainTab | undefined;
@@ -59,6 +59,8 @@ export function parseRoute(
         parsedSkillFile = parsed.skillFile;
       }
       tab = "skills";
+    } else if (host === "git-activity") {
+      tab = "git-activity";
     }
   } else if (pathname.startsWith("/files/")) {
     const raw = pathname.slice("/files/".length);
@@ -81,10 +83,19 @@ export function parseRoute(
   } else if (pathname === "/skills") {
     skill = undefined;
     tab = "skills";
+  } else if (
+    pathname === "/git-activity" ||
+    pathname.startsWith("/git-activity/")
+  ) {
+    tab = "git-activity";
   }
 
   const tabParam = url.searchParams.get("tab");
-  if (tabParam === "skills" || tabParam === "documents") {
+  if (
+    tabParam === "skills" ||
+    tabParam === "documents" ||
+    tabParam === "git-activity"
+  ) {
     tab = tabParam;
   }
 
@@ -132,7 +143,9 @@ export function parseRoute(
 
 export function buildRouteUrl(route: WorkspaceRoute): string {
   let pathname = "/";
-  if (route.tab === "skills" || route.skill) {
+  if (route.tab === "git-activity") {
+    pathname = "/git-activity";
+  } else if (route.tab === "skills" || route.skill) {
     if (route.skill) {
       const segments = route.skill
         .replace(/^\/+/, "")

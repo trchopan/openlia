@@ -14,10 +14,15 @@ export type ResolvedTarget =
       label: string;
       exists?: boolean | undefined;
     }
+  | {
+      kind: "git-activity";
+      label: string;
+      exists?: boolean | undefined;
+    }
   | null;
 
 export interface GoToSuggestion {
-  kind: "workspace" | "skill";
+  kind: "workspace" | "skill" | "git-activity";
   id: string;
   title: string;
   subtitle?: string | undefined;
@@ -269,6 +274,14 @@ export function resolveLinkTarget(
           skillId,
         };
       }
+
+      if (host === "git-activity") {
+        return {
+          exists: true,
+          kind: "git-activity",
+          label: "Git Activity",
+        };
+      }
     } catch {
       // Continue to fallback parsing
     }
@@ -423,6 +436,19 @@ export function resolveLinkTarget(
     };
   }
 
+  // Direct match to git-activity
+  if (
+    candidate === "/git-activity" ||
+    candidate === "git-activity" ||
+    candidate === "/git-activity/"
+  ) {
+    return {
+      exists: true,
+      kind: "git-activity",
+      label: "Git Activity",
+    };
+  }
+
   // Generic fallback: if it has a file extension or looks like a file path
   if (hasFileExtension(candidate) || candidate.includes("/")) {
     const path = candidate.replace(/^\/+/, "");
@@ -512,6 +538,21 @@ export function filterGoToSuggestions(
       });
     }
     if (suggestions.length >= limit) break;
+  }
+
+  // Suggest Git Activity when query matches
+  if (
+    suggestions.length < limit &&
+    q &&
+    ("git-activity".includes(q) || "git".includes(q))
+  ) {
+    suggestions.push({
+      badge: "Version Control",
+      id: "git-activity",
+      kind: "git-activity",
+      subtitle: "Background Git history records and commits",
+      title: "Git Activity",
+    });
   }
 
   return suggestions.slice(0, limit);

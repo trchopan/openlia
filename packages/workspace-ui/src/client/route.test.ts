@@ -249,5 +249,42 @@ describe("route helpers", () => {
         tab: "skills",
       }),
     ).toBe("/skills/productivity/notion?skillFile=scripts%2Fsync.py");
+    expect(
+      buildRouteUrl({
+        tab: "git-activity",
+      }),
+    ).toBe("/git-activity");
+  });
+
+  test("parses git-activity routes and openlia URLs", () => {
+    expect(parseRoute("/git-activity")).toEqual({
+      filter: undefined,
+      path: undefined,
+      scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: "git-activity",
+      view: undefined,
+    });
+
+    expect(parseRoute("openlia://git-activity")).toEqual({
+      filter: undefined,
+      path: undefined,
+      scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: "git-activity",
+      view: undefined,
+    });
+
+    expect(parseRoute("/?tab=git-activity")).toEqual({
+      filter: undefined,
+      path: undefined,
+      scenario: undefined,
+      skill: undefined,
+      skillFile: undefined,
+      tab: "git-activity",
+      view: undefined,
+    });
   });
 });
