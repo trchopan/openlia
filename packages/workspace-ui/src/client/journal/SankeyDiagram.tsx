@@ -1,20 +1,16 @@
-import { useState } from "react";
+import {
+  type SankeyLink as D3SankeyLink,
+  type SankeyNode as D3SankeyNode,
+  sankey,
+  sankeyJustify,
+  sankeyLinkHorizontal,
+} from "d3-sankey";
+import { useMemo, useState } from "react";
 import type { SankeyLink, SankeyNode } from "./parser";
 import { formatCurrency } from "./parser";
 
-interface PositionedNode extends SankeyNode {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-interface PositionedLink extends SankeyLink {
-  path: string;
-  sourceNode: PositionedNode;
-  targetNode: PositionedNode;
-  gradientId: string;
-}
+export type LayoutNode = D3SankeyNode<SankeyNode, SankeyLink>;
+export type LayoutLink = D3SankeyLink<SankeyNode, SankeyLink>;
 
 interface HoverInfo {
   title: string;
@@ -33,108 +29,42 @@ export function SankeyDiagram({
   currency: string;
 }) {
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
-  const [hoveredLinkId, setHoveredLinkId] = useState<string | null>(null);
+  const [hoveredLinkId, setHoveredLinkId] = useState<number | null>(null);
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
 
   const svgWidth = 920;
   const svgHeight = 360;
-  const topPadding = 45;
-  const bottomPadding = 25;
-  const usableHeight = svgHeight - topPadding - bottomPadding;
 
-  const colWidths = [190, 160, 190];
-  const colXs = [40, 380, 690];
+  const { layoutNodes, layoutLinks } = useMemo(() => {
+    if (nodes.length === 0 || links.length === 0) {
+      return { layoutNodes: [], layoutLinks: [] };
+    }
 
-  // Group nodes by column
-  const col0Nodes = nodes.filter((n) => n.column === 0);
-  const col1Nodes = nodes.filter((n) => n.column === 1);
-  const col2Nodes = nodes.filter((n) => n.column === 2);
+    try {
+      const sankeyGenerator = sankey<SankeyNode, SankeyLink>()
+        .nodeId((d) => d.id)
+        .nodeWidth(170)
+        .nodePadding(14)
+        .extent([
+          [40, 45],
+          [svgWidth - 40, svgHeight - 30],
+        ])
+        .nodeAlign(sankeyJustify);
 
-  const positionedNodes = new Map<string, PositionedNode>();
-
-  function positionColumn(colNodes: SankeyNode[], colIndex: number) {
-    if (colNodes.length === 0) return;
-    const totalVal = colNodes.reduce((sum, n) => sum + n.value, 0) || 1;
-    const minHeight = 28;
-    const gap = 12;
-
-    const availableForHeights = Math.max(
-      100,
-      usableHeight - (colNodes.length - 1) * gap,
-    );
-    const heights = colNodes.map((n) =>
-      Math.max(minHeight, (n.value / totalVal) * availableForHeights),
-    );
-    const totalRenderedHeight =
-      heights.reduce((sum, h) => sum + h, 0) + (colNodes.length - 1) * gap;
-
-    let startY =
-      topPadding + Math.max(0, (usableHeight - totalRenderedHeight) / 2);
-
-    colNodes.forEach((node, idx) => {
-      const h = heights[idx] ?? minHeight;
-      const x = colXs[colIndex] ?? 40;
-      const w = colWidths[colIndex] ?? 160;
-      positionedNodes.set(node.id, {
-        ...node,
-        x,
-        y: startY,
-        width: w,
-        height: h,
+      const graph = sankeyGenerator({
+        nodes: nodes.map((n) => ({ ...n })),
+        links: links.map((l) => ({ ...l })),
       });
-      startY += h + gap;
-    });
-  }
 
-  positionColumn(col0Nodes, 0);
-  positionColumn(col1Nodes, 1);
-  positionColumn(col2Nodes, 2);
+      return { layoutNodes: graph.nodes, layoutLinks: graph.links };
+    } catch {
+      return { layoutNodes: [], layoutLinks: [] };
+    }
+  }, [nodes, links]);
 
-  // Layout links with smooth Bezier curves
-  const sourceOffsets = new Map<string, number>();
-  const targetOffsets = new Map<string, number>();
-
-  const positionedLinks: PositionedLink[] = [];
-
-  links.forEach((link, idx) => {
-    const sNode = positionedNodes.get(link.source);
-    const tNode = positionedNodes.get(link.target);
-    if (!sNode || !tNode) return;
-
-    const sOffset = sourceOffsets.get(link.source) ?? 0;
-    const tOffset = targetOffsets.get(link.target) ?? 0;
-
-    const sRatio = sNode.value > 0 ? link.value / sNode.value : 1;
-    const tRatio = tNode.value > 0 ? link.value / tNode.value : 1;
-
-    const sHeight = Math.max(3, sNode.height * sRatio);
-    const tHeight = Math.max(3, tNode.height * tRatio);
-
-    const x0 = sNode.x + sNode.width;
-    const y0Top = sNode.y + sOffset;
-    const y0Bottom = y0Top + sHeight;
-
-    const x1 = tNode.x;
-    const y1Top = tNode.y + tOffset;
-    const y1Bottom = y1Top + tHeight;
-
-    sourceOffsets.set(link.source, sOffset + sHeight);
-    targetOffsets.set(link.target, tOffset + tHeight);
-
-    const curvature = 0.5;
-    const cx0 = x0 + (x1 - x0) * curvature;
-    const cx1 = x1 - (x1 - x0) * curvature;
-
-    const path = `M ${x0} ${y0Top} C ${cx0} ${y0Top}, ${cx1} ${y1Top}, ${x1} ${y1Top} L ${x1} ${y1Bottom} C ${cx1} ${y1Bottom}, ${cx0} ${y0Bottom}, ${x0} ${y0Bottom} Z`;
-
-    positionedLinks.push({
-      ...link,
-      path,
-      sourceNode: sNode,
-      targetNode: tNode,
-      gradientId: `link-grad-${idx}`,
-    });
-  });
+  const pathGenerator = useMemo(() => {
+    return sankeyLinkHorizontal<SankeyNode, SankeyLink>();
+  }, []);
 
   const getNodeColor = (type: SankeyNode["type"]) => {
     switch (type) {
@@ -152,13 +82,13 @@ export function SankeyDiagram({
   };
 
   return (
-    <div className="relative w-full overflow-hidden rounded-xl border border-base-content/10 bg-base-200/50 p-4 shadow-sm">
+    <div className="relative w-full overflow-hidden rounded-xl border border-base-content/10 bg-base-200/50 p-4 shadow-xs">
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-base-content/70">
           Money Flow (Sankey Diagram)
         </h3>
         <span className="text-[11px] text-base-content/50">
-          Hover over nodes or flow lines for breakdown
+          Hover over nodes or flow ribbons for breakdown
         </span>
       </div>
 
@@ -173,13 +103,16 @@ export function SankeyDiagram({
         >
           <defs>
             {/* Gradients for links */}
-            {positionedLinks.map((link) => {
-              const sColor = getNodeColor(link.sourceNode.type).stroke;
-              const tColor = getNodeColor(link.targetNode.type).stroke;
+            {layoutLinks.map((link, idx) => {
+              const sNode = link.source as LayoutNode;
+              const tNode = link.target as LayoutNode;
+              const sColor = getNodeColor(sNode.type).stroke;
+              const tColor = getNodeColor(tNode.type).stroke;
+              const gradId = `d3-sankey-grad-${idx}`;
               return (
                 <linearGradient
-                  id={link.gradientId}
-                  key={link.gradientId}
+                  id={gradId}
+                  key={gradId}
                   x1="0%"
                   x2="100%"
                   y1="0%"
@@ -197,7 +130,7 @@ export function SankeyDiagram({
             className="fill-base-content/60 font-semibold"
             fontSize="11"
             letterSpacing="1"
-            x={colXs[0]}
+            x={40}
             y="24"
           >
             INFLOW (SOURCES)
@@ -206,7 +139,7 @@ export function SankeyDiagram({
             className="fill-base-content/60 font-semibold"
             fontSize="11"
             letterSpacing="1"
-            x={colXs[1]}
+            x={380}
             y="24"
           >
             ACCOUNT POOL / RAILS
@@ -215,34 +148,43 @@ export function SankeyDiagram({
             className="fill-base-content/60 font-semibold"
             fontSize="11"
             letterSpacing="1"
-            x={colXs[2]}
+            x={690}
             y="24"
           >
             OUTFLOW / ALLOCATIONS
           </text>
 
-          {/* Links / Flows */}
+          {/* Links / Flow Ribbons */}
           <g className="links">
-            {positionedLinks.map((link) => {
+            {layoutLinks.map((link, idx) => {
+              const sNode = link.source as LayoutNode;
+              const tNode = link.target as LayoutNode;
               const isNodeHovered =
-                hoveredNodeId === link.source || hoveredNodeId === link.target;
-              const isLinkHovered = hoveredLinkId === link.gradientId;
+                hoveredNodeId === sNode.id || hoveredNodeId === tNode.id;
+              const isLinkHovered = hoveredLinkId === idx;
               const isActive = isLinkHovered || isNodeHovered;
               const opacity =
-                hoveredLinkId || hoveredNodeId ? (isActive ? 0.75 : 0.15) : 0.4;
+                hoveredLinkId !== null || hoveredNodeId !== null
+                  ? isActive
+                    ? 0.75
+                    : 0.15
+                  : 0.45;
+              const gradId = `d3-sankey-grad-${idx}`;
+              const pathD = pathGenerator(link);
+
+              if (!pathD) return null;
 
               return (
                 // biome-ignore lint/a11y/noStaticElementInteractions: Interactive SVG flow element
                 <path
-                  key={link.gradientId}
+                  key={gradId}
                   className="transition-opacity duration-150 cursor-pointer"
-                  d={link.path}
-                  fill={`url(#${link.gradientId})`}
-                  fillOpacity={opacity}
+                  d={pathD}
+                  fill="none"
                   onMouseEnter={(e) => {
-                    setHoveredLinkId(link.gradientId);
+                    setHoveredLinkId(idx);
                     setHoverInfo({
-                      title: `${link.sourceNode.name} → ${link.targetNode.name}`,
+                      title: `${sNode.name} → ${tNode.name}`,
                       subtitle: formatCurrency(link.value, currency),
                       x: e.clientX,
                       y: e.clientY,
@@ -257,6 +199,9 @@ export function SankeyDiagram({
                     setHoveredLinkId(null);
                     setHoverInfo(null);
                   }}
+                  stroke={`url(#${gradId})`}
+                  strokeOpacity={opacity}
+                  strokeWidth={Math.max(3, link.width ?? 0)}
                 />
               );
             })}
@@ -264,9 +209,15 @@ export function SankeyDiagram({
 
           {/* Nodes */}
           <g className="nodes">
-            {Array.from(positionedNodes.values()).map((node) => {
+            {layoutNodes.map((node) => {
               const colors = getNodeColor(node.type);
               const isHovered = hoveredNodeId === node.id;
+              const x0 = node.x0 ?? 0;
+              const y0 = node.y0 ?? 0;
+              const x1 = node.x1 ?? 0;
+              const y1 = node.y1 ?? 0;
+              const width = Math.max(20, x1 - x0);
+              const height = Math.max(26, y1 - y0);
 
               return (
                 // biome-ignore lint/a11y/noStaticElementInteractions: Interactive SVG node element
@@ -277,7 +228,7 @@ export function SankeyDiagram({
                     setHoveredNodeId(node.id);
                     setHoverInfo({
                       title: node.name,
-                      subtitle: `${formatCurrency(node.value, currency)} (${node.type})`,
+                      subtitle: `${formatCurrency(node.value ?? 0, currency)} (${node.type})`,
                       x: e.clientX,
                       y: e.clientY,
                     });
@@ -299,23 +250,23 @@ export function SankeyDiagram({
                         ? "drop-shadow(0 2px 8px rgba(0,0,0,0.3))"
                         : undefined
                     }
-                    height={node.height}
+                    height={height}
                     rx="6"
                     ry="6"
                     stroke={colors.stroke}
                     strokeWidth={isHovered ? 2 : 1}
-                    width={node.width}
-                    x={node.x}
-                    y={node.y}
+                    width={width}
+                    x={x0}
+                    y={y0}
                   />
 
                   {/* Node label text */}
                   <text
                     className="font-medium"
                     fill={colors.text}
-                    fontSize={node.height > 38 ? "12" : "11"}
-                    x={node.x + 10}
-                    y={node.y + (node.height > 38 ? 16 : 14)}
+                    fontSize={height > 38 ? "12" : "11"}
+                    x={x0 + 10}
+                    y={y0 + (height > 38 ? 16 : 14)}
                   >
                     {node.name.length > 20
                       ? `${node.name.slice(0, 19)}…`
@@ -326,11 +277,11 @@ export function SankeyDiagram({
                   <text
                     className="font-bold opacity-90"
                     fill={colors.text}
-                    fontSize={node.height > 38 ? "11" : "10"}
-                    x={node.x + 10}
-                    y={node.y + (node.height > 38 ? 32 : node.height - 5)}
+                    fontSize={height > 38 ? "11" : "10"}
+                    x={x0 + 10}
+                    y={y0 + (height > 38 ? 32 : height - 5)}
                   >
-                    {formatCurrency(node.value, currency)}
+                    {formatCurrency(node.value ?? 0, currency)}
                   </text>
                 </g>
               );
