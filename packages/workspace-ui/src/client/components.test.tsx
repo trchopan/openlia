@@ -187,6 +187,9 @@ The **original** message.
       .getAllByRole("button")
       .map((button) => button.textContent?.replace(/[▾▸]/, ""));
     expect(treeButtons).toEqual(["Close", "Activity", "alpha", "root.md"]);
+    const activityBtn = within(navigator).getByRole("button", { name: "Activity" });
+    expect(activityBtn).toHaveClass("workspace-tree-activity");
+    expect(activityBtn).not.toHaveClass("workspace-tree-file");
     expect(screen.getByLabelText("zeta, empty folder")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "alpha" }));

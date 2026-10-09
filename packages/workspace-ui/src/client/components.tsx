@@ -830,7 +830,7 @@ export function FileNavigator({
                 <div className="mb-2 border-b border-base-content/10 pb-2">
                   <button
                     aria-current={!selectedPath ? "page" : undefined}
-                    className={`workspace-tree-row workspace-tree-file ${
+                    className={`workspace-tree-row workspace-tree-activity px-2.5 ${
                       !selectedPath ? "workspace-tree-file-selected" : ""
                     }`}
                     onClick={() => {

@@ -170,6 +170,12 @@ textarea {
   text-align: center;
 }
 
+.workspace-tree-activity {
+  justify-content: flex-start;
+  padding-inline: 0.625rem;
+  color: color-mix(in oklab, var(--color-base-content) 82%, transparent);
+}
+
 .workspace-tree-file {
   justify-content: space-between;
   color: color-mix(in oklab, var(--color-base-content) 82%, transparent);
