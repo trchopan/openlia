@@ -11,6 +11,7 @@ import type {
   WorkspaceErrorResponse,
   WorkspaceMoveRequest,
   WorkspaceRenameRequest,
+  WorkspaceSystemInfo,
   WorkspaceWriteRequest,
 } from "../shared/api";
 import { Authenticator } from "./auth";
@@ -31,6 +32,17 @@ export interface WorkspaceHandlerOptions {
   sessionDatabasePath?: string | undefined;
   publicOrigin?: string | undefined;
   secureCookies?: boolean | undefined;
+  systemInfo?:
+    | Partial<
+        Record<
+          | "openlia_version"
+          | "openlia_hash"
+          | "hermes_version"
+          | "locho_version",
+          string | undefined
+        >
+      >
+    | undefined;
 }
 
 const contentTypes: Record<string, string> = {
@@ -221,6 +233,13 @@ export function createWorkspaceHandler(
   options: WorkspaceHandlerOptions,
 ): (request: Request, clientKey?: string) => Promise<Response> {
   const service = new WorkspaceService(options);
+  const systemInfo: WorkspaceSystemInfo = {
+    hermes_version: options.systemInfo?.hermes_version ?? "Unavailable",
+    locho_version: options.systemInfo?.locho_version ?? "Unavailable",
+    openlia_hash: options.systemInfo?.openlia_hash ?? "Unavailable",
+    openlia_version: options.systemInfo?.openlia_version ?? "Unavailable",
+    schema: 1,
+  };
   const skillsRoot =
     options.skillsRoot ??
     process.env.OPENLIA_SKILLS_ROOT ??
@@ -264,7 +283,8 @@ export function createWorkspaceHandler(
           url.pathname.startsWith("/skills/") ||
           url.pathname === "/skills" ||
           url.pathname.startsWith("/git-activity/") ||
-          url.pathname === "/git-activity")
+          url.pathname === "/git-activity" ||
+          url.pathname === "/configuration")
       ) {
         return (
           (await staticFile(staticRoot, "/")) ??
@@ -320,13 +340,37 @@ export function createWorkspaceHandler(
       }
       if (
         (url.pathname.startsWith("/api/workspace/") ||
-          url.pathname.startsWith("/api/skills/")) &&
+          url.pathname.startsWith("/api/skills/") ||
+          url.pathname.startsWith("/api/system/")) &&
         !authenticator.isAuthenticated(request)
       ) {
         return json(
           { schema: 1, ok: false, error: "authentication_required" },
           401,
         );
+      }
+      if (
+        request.method === "GET" &&
+        url.pathname === "/api/workspace/settings"
+      ) {
+        return json(service.settings());
+      }
+      if (
+        request.method === "PUT" &&
+        url.pathname === "/api/workspace/settings"
+      ) {
+        if (!sameOrigin(request, url, publicOrigin))
+          return json(
+            { schema: 1, ok: false, error: "origin_not_allowed" },
+            403,
+          );
+        const body = await readJson(request, maxLoginRequestBytes);
+        if (body.tooLarge || !isObject(body.value))
+          return json({ schema: 1, ok: false, error: "invalid_settings" }, 400);
+        return json(service.updateSettings(body.value));
+      }
+      if (request.method === "GET" && url.pathname === "/api/system/info") {
+        return json(systemInfo);
       }
       if (request.method === "GET" && url.pathname === "/api/workspace/tree") {
         return json(service.tree());

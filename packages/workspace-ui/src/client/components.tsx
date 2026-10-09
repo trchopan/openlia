@@ -229,7 +229,12 @@ export function WorkspaceHeader({
   onSignOut,
   onTabChange,
 }: {
-  activeTab?: "documents" | "skills" | "git-activity" | undefined;
+  activeTab?:
+    | "documents"
+    | "skills"
+    | "git-activity"
+    | "configuration"
+    | undefined;
   authRequired: boolean;
   currentLink?: string | undefined;
   dirty: boolean;
@@ -243,7 +248,7 @@ export function WorkspaceHeader({
   onOpenGoTo?: (() => void) | undefined;
   onSignOut: () => void;
   onTabChange?:
-    | ((tab: "documents" | "skills" | "git-activity") => void)
+    | ((tab: "documents" | "skills" | "git-activity" | "configuration") => void)
     | undefined;
 }) {
   const hasDocumentContent = file !== null && "content" in file;
@@ -253,14 +258,16 @@ export function WorkspaceHeader({
 
   return (
     <header className="workspace-header">
-      <button
-        className="btn btn-ghost btn-sm xl:hidden"
-        ref={filesButtonRef}
-        onClick={onOpenFiles}
-        type="button"
-      >
-        {activeTab === "skills" ? "Skills" : "Files"}
-      </button>
+      {activeTab !== "configuration" && (
+        <button
+          className="btn btn-ghost btn-sm xl:hidden"
+          ref={filesButtonRef}
+          onClick={onOpenFiles}
+          type="button"
+        >
+          {activeTab === "skills" ? "Skills" : "Files"}
+        </button>
+      )}
 
       {onTabChange && (
         <div className="join border border-base-content/15 rounded-lg bg-base-200/60 p-0.5 mr-2">
@@ -297,6 +304,17 @@ export function WorkspaceHeader({
           >
             Git Activity
           </button>
+          <button
+            className={`btn btn-xs join-item ${
+              activeTab === "configuration"
+                ? "btn-primary shadow-xs"
+                : "btn-ghost text-base-content/70"
+            }`}
+            onClick={() => onTabChange("configuration")}
+            type="button"
+          >
+            Configuration
+          </button>
         </div>
       )}
 
@@ -307,9 +325,11 @@ export function WorkspaceHeader({
             ? "SKILLS"
             : activeTab === "git-activity"
               ? "GIT ACTIVITY"
-              : file
-                ? "WORKSPACE"
-                : "ACTIVITY"}
+              : activeTab === "configuration"
+                ? "CONFIGURATION"
+                : file
+                  ? "WORKSPACE"
+                  : "ACTIVITY"}
         </p>
         <div className="flex items-center gap-1.5">
           <h1 className="workspace-title" title={file?.path}>
@@ -318,7 +338,9 @@ export function WorkspaceHeader({
                 ? "Skills"
                 : activeTab === "git-activity"
                   ? "Git Activity"
-                  : "Activity")}
+                  : activeTab === "configuration"
+                    ? "Configuration"
+                    : "Activity")}
           </h1>
           {currentLink && (
             <CopyLinkButton

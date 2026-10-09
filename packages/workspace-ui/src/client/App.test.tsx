@@ -104,6 +104,27 @@ describe("workspace application", () => {
     expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
   });
 
+  test("opens configuration and saves workspace visibility settings", async () => {
+    render(<App api={createMockWorkspaceApi()} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Configuration" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Workspace configuration" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("0.1.0")).toBeInTheDocument();
+
+    const configurationToggle = screen.getByLabelText(
+      "Hide configuration files",
+    );
+    expect(configurationToggle).toBeChecked();
+    fireEvent.click(configurationToggle);
+
+    await waitFor(() => expect(configurationToggle).not.toBeChecked());
+    expect(window.location.pathname).toBe("/configuration");
+  });
+
   test("keeps the draft visible when saving encounters a revision conflict", async () => {
     render(<App api={createMockWorkspaceApi({ scenario: "conflict" })} />);
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));

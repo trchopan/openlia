@@ -147,6 +147,109 @@ describe("workspace HTTP handler", () => {
     }
   });
 
+  test("persists independent visibility settings and exposes hidden files when disabled", async () => {
+    writeFileSync(join(root, "workspace.yaml"), "value: 1\n");
+    writeFileSync(join(root, "workspace.schema.json"), '{"type":"object"}');
+    writeFileSync(join(root, "assistant-policy.yaml"), "value: 1\n");
+    writeFileSync(
+      join(root, "assistant-policy.schema.json"),
+      '{"type":"object"}',
+    );
+    mkdirSync(join(root, "tasks"), { recursive: true });
+    writeFileSync(join(root, "tasks", "task-template.md"), "# Task\n");
+
+    const initial = await request("/api/workspace/settings");
+    expect(await initial.json()).toEqual({
+      hide_configuration_files: true,
+      hide_template_schema_files: true,
+      schema: 1,
+    });
+    const hiddenTree = (await (
+      await request("/api/workspace/tree")
+    ).json()) as {
+      entries: Array<{ path: string }>;
+    };
+    expect(hiddenTree.entries.map((entry) => entry.path)).not.toContain(
+      "workspace.yaml",
+    );
+    expect(hiddenTree.entries.map((entry) => entry.path)).not.toContain(
+      "tasks/task-template.md",
+    );
+
+    const update = await request("/api/workspace/settings", {
+      body: JSON.stringify({
+        hide_configuration_files: false,
+        hide_template_schema_files: false,
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "PUT",
+    });
+    expect(update.status).toBe(200);
+
+    const visibleTree = (await (
+      await request("/api/workspace/tree")
+    ).json()) as {
+      entries: Array<{ path: string }>;
+    };
+    const visiblePaths = visibleTree.entries.map((entry) => entry.path);
+    expect(visiblePaths).toContain("workspace.yaml");
+    expect(visiblePaths).toContain("workspace.schema.json");
+    expect(visiblePaths).toContain("assistant-policy.yaml");
+    expect(visiblePaths).toContain("tasks/task-template.md");
+
+    const opened = await request("/api/workspace/file?path=workspace.yaml");
+    expect(opened.status).toBe(200);
+    expect(await opened.json()).toMatchObject({
+      content: "value: 1\n",
+      path: "workspace.yaml",
+    });
+  });
+
+  test("returns configured system information", async () => {
+    const configuredHandler = createWorkspaceHandler({
+      systemInfo: {
+        hermes_version: "v2026.9.14",
+        locho_version: "1.2.0",
+        openlia_hash: "abc123",
+        openlia_version: "0.1.0",
+      },
+      workspaceRoot: root,
+    });
+    const response = await configuredHandler(
+      new Request("http://localhost/api/system/info"),
+    );
+    expect(await response.json()).toEqual({
+      hermes_version: "v2026.9.14",
+      locho_version: "1.2.0",
+      openlia_hash: "abc123",
+      openlia_version: "0.1.0",
+      schema: 1,
+    });
+  });
+
+  test("returns validation warnings for invalid visible configuration files", async () => {
+    writeFileSync(
+      join(root, "workspace.schema.json"),
+      '{"type":"object","properties":{"value":{"type":"string"}},"required":["value"]}',
+    );
+    writeFileSync(join(root, "workspace.yaml"), "value: 1\n");
+    await request("/api/workspace/settings", {
+      body: JSON.stringify({
+        hide_configuration_files: false,
+        hide_template_schema_files: true,
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "PUT",
+    });
+
+    const response = await request("/api/workspace/file?path=workspace.yaml");
+    expect(await response.json()).toMatchObject({
+      validation: {
+        valid: false,
+      },
+    });
+  });
+
   test("exposes YAML files as editable documents", async () => {
     const chatPath = join(root, "knowledge", "chatgpt");
     const content = "schema: 1\nsession:\n  platform: chatgpt\n";

@@ -125,6 +125,7 @@ func (remote Remote) composeEnvironment() string {
 }
 
 func (remote Remote) operationCommandForRoot(operationRoot, operation string, args ...string) string {
+	version := currentVersionInfo()
 	knownHosts := remote.Config.BackupKnownHosts
 	if knownHosts == "" {
 		knownHosts = "/root/.ssh/known_hosts"
@@ -149,9 +150,12 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"OPENLIA_EXTERNAL_NETWORK=" + shellQuote(remote.Config.ExternalNetwork),
 		"OPENLIA_MODEL=" + shellQuote(remote.Config.Model),
 		"OPENLIA_OUTPUT_LANGUAGE=" + shellQuote(remote.Config.OutputLanguage),
+		"OPENLIA_VERSION=" + shellQuote(version.Version),
+		"OPENLIA_REVISION=" + shellQuote(version.Revision),
 		"OPENLIA_FALLBACK_PROVIDERS=" + shellQuote(renderFallbackProvidersJSON(remote.Config.FallbackProviders)),
 		"HERMES_TIMEZONE=" + shellQuote(remote.Config.Timezone),
 		"OPENLIA_HERMES_IMAGE=" + shellQuote(hermesImage(remote.Config)),
+		"OPENLIA_HERMES_VERSION=" + shellQuote(remote.Config.HermesTag),
 		"OPENLIA_LOCHO_IMAGE=" + shellQuote(remote.Config.LochoImage),
 		"OPENLIA_LOCHO_VERSION=" + shellQuote(remote.Config.LochoVersion),
 		"OPENLIA_LOCHO_X86_64_SHA256=" + shellQuote(remote.Config.LochoX8664SHA256),
@@ -562,6 +566,7 @@ func (local Local) rootPath(parts ...string) string {
 }
 
 func operationEnvironment(config Config, operationRoot string) []string {
+	version := currentVersionInfo()
 	operatorConfigFile := configPath()
 	if absolute, err := filepath.Abs(operatorConfigFile); err == nil {
 		operatorConfigFile = absolute
@@ -592,9 +597,12 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_EXTERNAL_NETWORK=" + config.ExternalNetwork,
 		"OPENLIA_MODEL=" + config.Model,
 		"OPENLIA_OUTPUT_LANGUAGE=" + config.OutputLanguage,
+		"OPENLIA_VERSION=" + version.Version,
+		"OPENLIA_REVISION=" + version.Revision,
 		"OPENLIA_FALLBACK_PROVIDERS=" + renderFallbackProvidersJSON(config.FallbackProviders),
 		"HERMES_TIMEZONE=" + config.Timezone,
 		"OPENLIA_HERMES_IMAGE=" + hermesImage(config),
+		"OPENLIA_HERMES_VERSION=" + config.HermesTag,
 		"OPENLIA_LOCHO_IMAGE=" + config.LochoImage,
 		"OPENLIA_LOCHO_VERSION=" + config.LochoVersion,
 		"OPENLIA_LOCHO_X86_64_SHA256=" + config.LochoX8664SHA256,

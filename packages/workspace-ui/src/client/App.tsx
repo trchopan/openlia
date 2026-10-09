@@ -16,11 +16,14 @@ import type {
   WorkspaceFile,
   WorkspaceFileMetadata,
   WorkspaceGitStatus,
+  WorkspaceSettings,
+  WorkspaceSystemInfo,
   WorkspaceTreeEntry,
 } from "../shared/api";
 import { ApiError, httpWorkspaceApi, type WorkspaceApi } from "./api";
 import { isJournalPath, isMarkdownPath } from "./CodeEditor";
 import { CreateSkillModal } from "./CreateSkillModal";
+import { ConfigurationPage } from "./ConfigurationPage";
 import {
   DeleteFileDialog,
   DirtyDraftDialog,
@@ -154,6 +157,13 @@ function areGitEqual(
     a.branch === b.branch &&
     a.dirty === b.dirty &&
     a.status === b.status
+  );
+}
+
+function areSettingsEqual(a: WorkspaceSettings, b: WorkspaceSettings): boolean {
+  return (
+    a.hide_configuration_files === b.hide_configuration_files &&
+    a.hide_template_schema_files === b.hide_template_schema_files
   );
 }
 
@@ -292,6 +302,16 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   );
   const [activityLoading, setActivityLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [settings, setSettings] = useState<WorkspaceSettings>({
+    hide_configuration_files: true,
+    hide_template_schema_files: true,
+    schema: 1,
+  });
+  const [systemInfo, setSystemInfo] = useState<WorkspaceSystemInfo | null>(
+    null,
+  );
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [configurationError, setConfigurationError] = useState("");
   const [diagnostics, setDiagnostics] =
     useState<WorkspaceDiagnosticsResponse | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
@@ -359,7 +379,12 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   const docDirty = file !== null && file.content !== draft;
   const skillDirty =
     selectedSkillFile !== null && selectedSkillFile.content !== skillDraft;
-  const dirty = activeTab === "skills" ? skillDirty : docDirty;
+  const dirty =
+    activeTab === "skills"
+      ? skillDirty
+      : activeTab === "documents"
+        ? docDirty
+        : false;
   const diff = docDirty && file ? diffLines(file.content, draft) : [];
 
   const currentLink =
@@ -370,11 +395,13 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             selectedSkillFile?.path ?? undefined,
           )
         : undefined
-      : file
-        ? buildWorkspaceLink(file.path)
-        : artifact
-          ? buildWorkspaceLink(artifact.path)
-          : undefined;
+      : activeTab === "documents"
+        ? file
+          ? buildWorkspaceLink(file.path)
+          : artifact
+            ? buildWorkspaceLink(artifact.path)
+            : undefined
+        : undefined;
 
   const directories = useMemo(() => {
     const set = new Set<string>();
@@ -403,6 +430,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     save,
     saveSkillFile,
     selectedSkillFile,
+    settings,
     skillDirty,
     view,
   });
@@ -418,6 +446,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     save,
     saveSkillFile,
     selectedSkillFile,
+    settings,
     skillDirty,
     view,
   };
@@ -444,6 +473,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           skillsResponse,
           activityResponse,
           diagnosticsResponse,
+          settingsResponse,
+          systemInfoResponse,
         ] = await Promise.all([
           api.loadTree(),
           api.loadGitStatus().catch(() => null),
@@ -454,6 +485,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           })),
           api.loadActivity().catch(() => null),
           api.loadDiagnostics().catch(() => null),
+          api.loadSettings().catch(() => null),
+          api.loadSystemInfo().catch(() => null),
         ]);
         if (isActive && !isActive()) return;
 
@@ -464,6 +497,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         setSkillCategories(skillsResponse.categories);
         setActivity(activityResponse);
         setDiagnostics(diagnosticsResponse);
+        if (settingsResponse) setSettings(settingsResponse);
+        setSystemInfo(systemInfoResponse);
         setNeedsLogin(false);
         setAuthReady(true);
 
@@ -479,6 +514,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             if (route.skill) {
               void appStateRef.current.openSkill(route.skill, route.skillFile);
             }
+          } else if (route.tab === "configuration") {
+            setActiveTab("configuration");
           } else if (route.path) {
             void appStateRef.current.openFile(route.path, {
               requestedView: route.view,
@@ -505,7 +542,19 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     if (typeof document !== "undefined" && document.hidden) return;
     isSyncingRef.current = true;
     try {
-      const { activeTab, docDirty, file } = appStateRef.current;
+      const {
+        activeTab,
+        docDirty,
+        file,
+        settings: currentSettings,
+      } = appStateRef.current;
+      const latestSettings = await api.loadSettings().catch(() => null);
+      if (
+        latestSettings &&
+        !areSettingsEqual(currentSettings, latestSettings)
+      ) {
+        setSettings(latestSettings);
+      }
       if (activeTab === "documents") {
         const [treeRes, gitRes, activityRes, diagRes] = await Promise.all([
           api.loadTree().catch(() => null),
@@ -690,6 +739,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             kind: "switchTab",
             tab: "git-activity",
           });
+        } else if (route.tab === "configuration") {
+          setPendingAction({ kind: "switchTab", tab: "configuration" });
         } else {
           setPendingAction({
             kind: "open",
@@ -724,6 +775,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         setDraft("");
         setConflict("");
         setDocumentError("");
+      } else if (route.tab === "configuration") {
+        setActiveTab("configuration");
       } else if (route.path) {
         if (route.path !== file?.path && route.path !== artifact?.path) {
           void openFile(route.path, {
@@ -753,6 +806,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         : "Skills - OpenLia Workspace";
     } else if (activeTab === "git-activity") {
       document.title = "Git Activity - OpenLia Workspace";
+    } else if (activeTab === "configuration") {
+      document.title = "Configuration - OpenLia Workspace";
     } else {
       const selectedPath = file?.path ?? artifact?.path;
       if (selectedPath) {
@@ -789,6 +844,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         skillsResponse,
         activityResponse,
         diagnosticsResponse,
+        settingsResponse,
+        systemInfoResponse,
       ] = await Promise.all([
         api.loadTree(),
         api.loadGitStatus().catch(() => null),
@@ -797,6 +854,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           .catch(() => ({ categories: [], schema: 1 as const, skills: [] })),
         api.loadActivity().catch(() => null),
         api.loadDiagnostics().catch(() => null),
+        api.loadSettings().catch(() => null),
+        api.loadSystemInfo().catch(() => null),
       ]);
       setTree(treeResponse.entries);
       setTreeTruncated(treeResponse.truncated);
@@ -805,6 +864,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       setSkillCategories(skillsResponse.categories);
       setActivity(activityResponse);
       setDiagnostics(diagnosticsResponse);
+      if (settingsResponse) setSettings(settingsResponse);
+      setSystemInfo(systemInfoResponse);
       setWorkspaceError("");
 
       if (!initialPathOpened.current) {
@@ -818,6 +879,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           if (route.skill) {
             void appStateRef.current.openSkill(route.skill, route.skillFile);
           }
+        } else if (route.tab === "configuration") {
+          setActiveTab("configuration");
         } else if (route.path) {
           void openFile(route.path, {
             requestedView: route.view,
@@ -1597,6 +1660,40 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     }
   }, [api, exporting]);
 
+  async function handleSettingsChange(
+    key: "hide_template_schema_files" | "hide_configuration_files",
+    value: boolean,
+  ) {
+    if (settingsSaving) return;
+    setConfigurationError("");
+    setSettingsSaving(true);
+    try {
+      const next = await api.updateSettings({ ...settings, [key]: value });
+      setSettings(next);
+      const [treeResponse, activityResponse] = await Promise.all([
+        api.loadTree().catch(() => null),
+        api.loadActivity().catch(() => null),
+      ]);
+      if (treeResponse) {
+        setTree(treeResponse.entries);
+        setTreeTruncated(treeResponse.truncated);
+      }
+      if (activityResponse) setActivity(activityResponse);
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        handleUnauthorized();
+      } else {
+        setConfigurationError(
+          caught instanceof Error
+            ? caught.message
+            : "Workspace settings could not be saved.",
+        );
+      }
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
+
   if (!authReady)
     return (
       <main className="grid min-h-dvh place-items-center bg-base-300 p-4 text-base-content">
@@ -1635,7 +1732,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         file={activeTab === "documents" ? (file ?? artifact) : null}
         filesButtonRef={filesButtonRef}
         git={git}
-        onExport={handleExport}
+        onExport={activeTab === "configuration" ? undefined : handleExport}
         onOpenFiles={() => setFilesOpen(true)}
         onOpenGitActivity={() => requestTabChange("git-activity")}
         onOpenGoTo={() => setIsGoToOpen(true)}
@@ -1650,7 +1747,19 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         />
       )}
 
-      {activeTab === "documents" ? (
+      {activeTab === "configuration" ? (
+        <ConfigurationPage
+          error={configurationError}
+          exporting={exporting}
+          onExport={() => void handleExport()}
+          onSettingsChange={(key, value) =>
+            void handleSettingsChange(key, value)
+          }
+          savingSettings={settingsSaving}
+          settings={settings}
+          systemInfo={systemInfo}
+        />
+      ) : activeTab === "documents" ? (
         <div
           className={`workspace-layout ${
             detailsOpen

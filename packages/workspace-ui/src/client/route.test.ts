@@ -287,4 +287,14 @@ describe("route helpers", () => {
       view: undefined,
     });
   });
+
+  test("parses and builds configuration routes", () => {
+    expect(parseRoute("/configuration")).toMatchObject({
+      tab: "configuration",
+    });
+    expect(parseRoute("openlia://configuration")).toMatchObject({
+      tab: "configuration",
+    });
+    expect(buildRouteUrl({ tab: "configuration" })).toBe("/configuration");
+  });
 });

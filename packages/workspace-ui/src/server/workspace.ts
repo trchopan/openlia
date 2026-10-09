@@ -12,6 +12,7 @@ import {
   renameSync,
   statSync,
   unlinkSync,
+  writeFileSync,
   writeSync,
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -26,15 +27,23 @@ import type {
   WorkspaceGitStatus,
   WorkspaceMoveResponse,
   WorkspaceRenameResponse,
+  WorkspaceSettings,
   WorkspaceTreeResponse,
   WorkspaceUncommittedChange,
   WorkspaceWriteResponse,
 } from "../shared/api";
 import { validateEntireWorkspace, validateRecordContent } from "./validator";
+import YAML from "yaml";
 
 export const DEFAULT_MAX_EDITABLE_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 export const DEFAULT_MAX_TREE_ENTRIES = 10_000;
+export const WORKSPACE_SETTINGS_FILE = "workspace-ui.yaml";
+export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
+  hide_configuration_files: true,
+  hide_template_schema_files: true,
+  schema: 1,
+};
 
 const editableExtensions = new Set([
   ".md",
@@ -78,6 +87,14 @@ const templatePaths = new Set([
   "shopping/item-template.md",
   "tasks/task-template.md",
   "travel/trip-template.md",
+]);
+
+const configurationBasenames = new Set([
+  "assistant-policy.schema.json",
+  "assistant-policy.yaml",
+  "workspace.schema.json",
+  "workspace.yaml",
+  WORKSPACE_SETTINGS_FILE,
 ]);
 
 export interface WorkspaceServiceOptions {
@@ -147,17 +164,30 @@ export function isTemplateOrSchemaPath(path: string): boolean {
   );
 }
 
-export function hiddenFromNavigator(path: string): boolean {
+export function isConfigurationPath(path: string): boolean {
+  const normalized = path.replaceAll("\\", "/").toLowerCase();
+  const basename = normalized.split("/").at(-1) ?? "";
+  return configurationBasenames.has(basename);
+}
+
+export function hiddenFromNavigator(
+  path: string,
+  settings: WorkspaceSettings = DEFAULT_WORKSPACE_SETTINGS,
+): boolean {
   const normalized = path.replaceAll("\\", "/").toLowerCase();
   const basename = normalized.split("/").at(-1) ?? "";
   return (
     navigationHiddenBasenames.has(basename) ||
     basename.startsWith("._") ||
-    isTemplateOrSchemaPath(path)
+    (settings.hide_template_schema_files && isTemplateOrSchemaPath(path)) ||
+    (settings.hide_configuration_files && isConfigurationPath(path))
   );
 }
 
-function validateRelativePath(value: unknown): string {
+function validateRelativePath(
+  value: unknown,
+  settings: WorkspaceSettings = DEFAULT_WORKSPACE_SETTINGS,
+): string {
   if (
     typeof value !== "string" ||
     value.length === 0 ||
@@ -181,7 +211,7 @@ function validateRelativePath(value: unknown): string {
       "protected_path",
     );
   }
-  if (hiddenFromNavigator(normalized)) {
+  if (hiddenFromNavigator(normalized, settings)) {
     throw new WorkspaceError(
       "workspace path is not available in the navigator",
       403,
@@ -217,7 +247,81 @@ export class WorkspaceService {
     mkdirSync(this.workspaceRoot, { recursive: true, mode: 0o700 });
   }
 
+  settings(): WorkspaceSettings {
+    const absolute = join(this.workspaceRoot, WORKSPACE_SETTINGS_FILE);
+    if (!existsSync(absolute)) return { ...DEFAULT_WORKSPACE_SETTINGS };
+    try {
+      const parsed: unknown = YAML.parse(readFileSync(absolute, "utf8"));
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        !Array.isArray(parsed) &&
+        (parsed as Record<string, unknown>).schema === 1 &&
+        typeof (parsed as Record<string, unknown>)
+          .hide_template_schema_files === "boolean" &&
+        typeof (parsed as Record<string, unknown>).hide_configuration_files ===
+          "boolean"
+      ) {
+        const values = parsed as Record<string, unknown>;
+        return {
+          hide_configuration_files: values.hide_configuration_files as boolean,
+          hide_template_schema_files:
+            values.hide_template_schema_files as boolean,
+          schema: 1,
+        };
+      }
+    } catch {}
+    return { ...DEFAULT_WORKSPACE_SETTINGS };
+  }
+
+  updateSettings(value: unknown): WorkspaceSettings {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new WorkspaceError(
+        "workspace settings must be an object",
+        400,
+        "invalid_settings",
+      );
+    }
+    const values = value as Record<string, unknown>;
+    if (
+      typeof values.hide_template_schema_files !== "boolean" ||
+      typeof values.hide_configuration_files !== "boolean"
+    ) {
+      throw new WorkspaceError(
+        "workspace visibility settings must be boolean values",
+        400,
+        "invalid_settings",
+      );
+    }
+
+    const next: WorkspaceSettings = {
+      hide_configuration_files: values.hide_configuration_files,
+      hide_template_schema_files: values.hide_template_schema_files,
+      schema: 1,
+    };
+    const absolute = join(this.workspaceRoot, WORKSPACE_SETTINGS_FILE);
+    const temporary = join(
+      this.workspaceRoot,
+      `.${WORKSPACE_SETTINGS_FILE}.openlia-${randomUUID()}.tmp`,
+    );
+    try {
+      writeFileSync(temporary, YAML.stringify(next), {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      renameSync(temporary, absolute);
+    } catch (error) {
+      if (existsSync(temporary)) unlinkSync(temporary);
+      throw this.mapFilesystemError(
+        error,
+        "workspace settings could not be saved",
+      );
+    }
+    return next;
+  }
+
   tree(): WorkspaceTreeResponse {
+    const settings = this.settings();
     const entries: WorkspaceTreeResponse["entries"] = [];
     let truncated = false;
     const visit = (directory: string): void => {
@@ -251,7 +355,7 @@ export class WorkspaceService {
           entries.push({ path, kind: "directory" });
           visit(absolute);
         } else if (entry.isFile()) {
-          if (hiddenFromNavigator(path)) continue;
+          if (hiddenFromNavigator(path, settings)) continue;
           try {
             entries.push({
               kind: "file",
@@ -272,7 +376,7 @@ export class WorkspaceService {
   }
 
   read(pathValue: unknown): WorkspaceFile {
-    const path = validateRelativePath(pathValue);
+    const path = validateRelativePath(pathValue, this.settings());
     const absolute = this.assertNoSymlink(path);
     let info: Stats | undefined;
     try {
@@ -327,7 +431,7 @@ export class WorkspaceService {
     contentValue: unknown,
     expectedValue: unknown,
   ): WorkspaceWriteResponse {
-    const path = validateRelativePath(pathValue);
+    const path = validateRelativePath(pathValue, this.settings());
     if (typeof contentValue !== "string") {
       throw new WorkspaceError(
         "content must be a string",
@@ -442,7 +546,7 @@ export class WorkspaceService {
   }
 
   delete(pathValue: unknown, expectedValue: unknown): WorkspaceDeleteResponse {
-    const path = validateRelativePath(pathValue);
+    const path = validateRelativePath(pathValue, this.settings());
     if (isTemplateOrSchemaPath(path)) {
       throw new WorkspaceError(
         "template and schema files are protected",
@@ -508,7 +612,8 @@ export class WorkspaceService {
     newNameValue: unknown,
     expectedValue: unknown,
   ): WorkspaceRenameResponse {
-    const sourcePath = validateRelativePath(pathValue);
+    const settings = this.settings();
+    const sourcePath = validateRelativePath(pathValue, settings);
     if (typeof newNameValue !== "string" || !newNameValue.trim()) {
       throw new WorkspaceError("invalid new file name", 400, "invalid_path");
     }
@@ -541,7 +646,7 @@ export class WorkspaceService {
         "protected_path",
       );
     }
-    validateRelativePath(destinationPath);
+    validateRelativePath(destinationPath, settings);
     if (!editableExtensions.has(fileExtension(destinationPath))) {
       throw new WorkspaceError(
         "file type is not editable",
@@ -557,8 +662,9 @@ export class WorkspaceService {
     destPathValue: unknown,
     expectedValue: unknown,
   ): WorkspaceMoveResponse {
-    const sourcePath = validateRelativePath(sourcePathValue);
-    const destinationPath = validateRelativePath(destPathValue);
+    const settings = this.settings();
+    const sourcePath = validateRelativePath(sourcePathValue, settings);
+    const destinationPath = validateRelativePath(destPathValue, settings);
     if (sourcePath === destinationPath) {
       throw new WorkspaceError(
         "source and destination paths are identical",
@@ -689,7 +795,7 @@ export class WorkspaceService {
     filename: string;
     size: number;
   } {
-    const path = validateRelativePath(pathValue);
+    const path = validateRelativePath(pathValue, this.settings());
     const absolute = this.assertNoSymlink(path);
     let info: Stats | undefined;
     try {
@@ -749,6 +855,7 @@ export class WorkspaceService {
   }
 
   async activity(limit = 20): Promise<WorkspaceActivityResponse> {
+    const settings = this.settings();
     const gitDir = join(this.workspaceRoot, ".git");
     const gitConfigured = existsSync(gitDir);
     let branch: string | undefined;
@@ -782,7 +889,10 @@ export class WorkspaceService {
             .slice(3)
             .trim()
             .replace(/^"(.*)"$/, "$1");
-          if (protectedPath(filePath) || hiddenFromNavigator(filePath))
+          if (
+            protectedPath(filePath) ||
+            hiddenFromNavigator(filePath, settings)
+          )
             continue;
           let status: WorkspaceUncommittedChange["status"] = "modified";
           if (statusChar === "??" || statusChar === "A") status = "added";
@@ -831,7 +941,10 @@ export class WorkspaceService {
             const statusType = parts[0]?.trim();
             const filePath = (parts[1] || "").replace(/^"(.*)"$/, "$1");
             if (!statusType || !filePath) continue;
-            if (protectedPath(filePath) || hiddenFromNavigator(filePath))
+            if (
+              protectedPath(filePath) ||
+              hiddenFromNavigator(filePath, settings)
+            )
               continue;
             let fileStatus: WorkspaceCommitChange["status"] = "modified";
             if (statusType.startsWith("A")) fileStatus = "added";

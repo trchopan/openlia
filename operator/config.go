@@ -49,8 +49,11 @@ type Config struct {
 	Provider                    string
 	Model                       string
 	OutputLanguage              string
+	OpenLiaVersion              string
+	OpenLiaRevision             string
 	FallbackProviders           []FallbackProviderConfig
 	HermesImage                 string
+	HermesVersion               string
 	LochoImage                  string
 	LochoVersion                string
 	LochoX8664SHA256            string
@@ -199,8 +202,11 @@ func LoadConfigFromEnv(values map[string]string) (Config, error) {
 		Provider:                   getOr(values, "OPENLIA_PROVIDER", "copilot"),
 		Model:                      getOr(values, "OPENLIA_MODEL", "gpt-5.6-luna"),
 		OutputLanguage:             getOr(values, "OPENLIA_OUTPUT_LANGUAGE", "en"),
+		OpenLiaVersion:             getOr(values, "OPENLIA_VERSION", "0.1.0"),
+		OpenLiaRevision:            values["OPENLIA_REVISION"],
 		FallbackProviders:          fallbackProviders,
 		HermesImage:                getOr(values, "OPENLIA_HERMES_IMAGE", "openlia-hermes:v2026.9.14"),
+		HermesVersion:              getOr(values, "OPENLIA_HERMES_VERSION", getOr(values, "HERMES_BASE_TAG", "v2026.9.14")),
 		LochoImage:                 getOr(values, "OPENLIA_LOCHO_IMAGE", "openlia-locho:v1.2.0"),
 		LochoVersion:               getOr(values, "OPENLIA_LOCHO_VERSION", "1.2.0"),
 		LochoX8664SHA256:           getOr(values, "OPENLIA_LOCHO_X86_64_SHA256", "7687311a3fe9671ac6f75427712dc556b15517493e892d9f81be7d0355bdd5f1"),
