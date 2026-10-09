@@ -137,4 +137,77 @@ describe("parseHledgerJournal", () => {
     expect(col2.length).toBeGreaterThan(0);
     expect(col2.some((n) => n.type === "savings")).toBe(true);
   });
+
+  it("keeps multi-currency totals, accounts, and flows separate", () => {
+    const journal = `2026-10-09 * Banh Mi Huynh Hoa
+    expenses:food:dining                  15,000 VND
+    assets:momo:wallet                   -15,000 VND
+
+2026-10-09 * Anthropic Claude Pro
+    expenses:technology:subscriptions      45.50 USD
+    liabilities:credit_cards:vietcombank  -45.50 USD
+
+2026-10-08 * JetBrains All Products Pack
+    expenses:technology:software           12.00 USD
+    liabilities:credit_cards:vietcombank  -12.00 USD
+
+2026-10-07 * Cloudflare Workers
+    expenses:technology:hosting             8.99 USD
+    liabilities:credit_cards:vietcombank   -8.99 USD
+`;
+
+    const result = parseHledgerJournal(journal);
+    const vndHighlights = result.highlightsByCurrency.get("VND");
+    const usdHighlights = result.highlightsByCurrency.get("USD");
+
+    expect(result.currencies).toEqual(["VND", "USD"]);
+    expect(vndHighlights?.totalExpenses).toBe(15000);
+    expect(usdHighlights?.totalExpenses).toBeCloseTo(66.49);
+    expect(vndHighlights?.currency).toBe("VND");
+    expect(usdHighlights?.currency).toBe("USD");
+
+    expect(
+      result.accounts.get("expenses:food:dining")?.balances.get("VND")?.outflow,
+    ).toBe(15000);
+    expect(
+      result.accounts
+        .get("expenses:technology:subscriptions")
+        ?.balances.get("USD")?.outflow,
+    ).toBe(45.5);
+
+    const usdExpenseValues = result.sankeyByCurrency
+      .get("USD")
+      ?.nodes.filter((node) => node.type === "expense")
+      .map((node) => node.value);
+    expect(usdExpenseValues).toContain(45.5);
+    expect(usdExpenseValues).not.toContain(15000);
+  });
+
+  it("balances an omitted posting in its only known currency", () => {
+    const result = parseHledgerJournal(`2026-10-09 * USD purchase
+    assets:cash                        -100 USD
+    expenses:shopping
+`);
+
+    const postings = result.transactions[0]?.postings;
+    expect(postings?.[1]).toMatchObject({
+      amount: 100,
+      currency: "USD",
+      hasAmount: true,
+    });
+    expect(result.highlightsByCurrency.get("USD")?.totalExpenses).toBe(100);
+  });
+
+  it("does not treat an explicit zero as an omitted amount", () => {
+    const result = parseHledgerJournal(`2026-10-09 * Zero expense
+    assets:cash                         100 USD
+    expenses:shopping                     0 USD
+`);
+
+    expect(result.transactions[0]?.postings[1]).toMatchObject({
+      amount: 0,
+      currency: "USD",
+      hasAmount: true,
+    });
+  });
 });
