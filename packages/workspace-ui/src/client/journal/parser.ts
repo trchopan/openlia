@@ -2,6 +2,7 @@ export interface JournalPosting {
   account: string;
   amount: number;
   currency: string;
+  hasAmount: boolean;
   rawText?: string | undefined;
 }
 
@@ -22,14 +23,18 @@ export type RootAccountType =
   | "equity"
   | "other";
 
-export interface AccountSummary {
-  name: string;
-  rootType: RootAccountType;
+export interface AccountBalance {
+  currency: string;
   inflow: number;
   outflow: number;
   net: number;
-  currency: string;
   count: number;
+}
+
+export interface AccountSummary {
+  name: string;
+  rootType: RootAccountType;
+  balances: Map<string, AccountBalance>;
 }
 
 export interface SankeyNode {
@@ -70,7 +75,9 @@ export interface JournalHighlightsData {
 export interface ParsedJournal {
   transactions: JournalTransaction[];
   accounts: Map<string, AccountSummary>;
+  highlightsByCurrency: Map<string, JournalHighlightsData>;
   highlights: JournalHighlightsData;
+  sankeyByCurrency: Map<string, { nodes: SankeyNode[]; links: SankeyLink[] }>;
   sankeyNodes: SankeyNode[];
   sankeyLinks: SankeyLink[];
   currencies: string[];
@@ -194,23 +201,22 @@ export function parseHledgerJournal(content: string): ParsedJournal {
       const accountName = parts[0]?.trim() ?? "";
 
       let parsedAmount = 0;
-      let parsedCurrency = "VND";
+      let parsedCurrency = "";
+      let hasAmount = false;
 
       if (parts.length > 1 && parts[1]?.trim()) {
         const amountPart = parts.slice(1).join(" ").trim();
         const res = parseAmountAndCurrency(amountPart);
         parsedAmount = res.amount;
         parsedCurrency = res.currency;
-        currencyCounts.set(
-          parsedCurrency,
-          (currencyCounts.get(parsedCurrency) ?? 0) + 1,
-        );
+        hasAmount = true;
       }
 
       currentTx.postings.push({
         account: accountName,
         amount: parsedAmount,
         currency: parsedCurrency,
+        hasAmount,
         rawText: postingText,
       });
     } else {
@@ -249,125 +255,212 @@ export function parseHledgerJournal(content: string): ParsedJournal {
     transactions.push(currentTx);
   }
 
-  // Determine primary currency
-  let primaryCurrency = "VND";
-  let maxCount = 0;
-  for (const [curr, count] of currencyCounts.entries()) {
-    if (count > maxCount) {
-      maxCount = count;
-      primaryCurrency = curr;
+  // Count currencies after balancing so inferred postings are included.
+  for (const tx of transactions) {
+    for (const post of tx.postings) {
+      if (post.hasAmount && post.currency) {
+        currencyCounts.set(
+          post.currency,
+          (currencyCounts.get(post.currency) ?? 0) + 1,
+        );
+      }
     }
   }
 
-  // Calculate accounts summary and highlights
+  const currencies = Array.from(currencyCounts.keys());
+  const primaryCurrency = currencies[0] ?? "VND";
+
+  // Calculate account summaries without combining different commodities.
   const accounts = new Map<string, AccountSummary>();
-  let totalIncome = 0;
-  let totalExpenses = 0;
-  let earliestDate: string | null = null;
-  let latestDate: string | null = null;
+  const currencyTotals = new Map<
+    string,
+    { totalIncome: number; totalExpenses: number; transactionIds: Set<string> }
+  >();
 
   for (const tx of transactions) {
-    if (!earliestDate || tx.date < earliestDate) earliestDate = tx.date;
-    if (!latestDate || tx.date > latestDate) latestDate = tx.date;
-
     for (const post of tx.postings) {
+      if (!post.hasAmount || !post.currency) continue;
+
+      let totals = currencyTotals.get(post.currency);
+      if (!totals) {
+        totals = {
+          totalIncome: 0,
+          totalExpenses: 0,
+          transactionIds: new Set<string>(),
+        };
+        currencyTotals.set(post.currency, totals);
+      }
+      totals.transactionIds.add(tx.id);
+
       const type = classifyAccount(post.account);
       let acc = accounts.get(post.account);
       if (!acc) {
         acc = {
           name: post.account,
           rootType: type,
-          inflow: 0,
-          outflow: 0,
-          net: 0,
-          currency: post.currency || primaryCurrency,
-          count: 0,
+          balances: new Map<string, AccountBalance>(),
         };
         accounts.set(post.account, acc);
       }
-      acc.count += 1;
-      acc.net += post.amount;
+
+      let balance = acc.balances.get(post.currency);
+      if (!balance) {
+        balance = {
+          currency: post.currency,
+          inflow: 0,
+          outflow: 0,
+          net: 0,
+          count: 0,
+        };
+        acc.balances.set(post.currency, balance);
+      }
+      balance.count += 1;
+      balance.net += post.amount;
 
       if (type === "income") {
         // In hledger, income balances are negative (-). Outflow from income account into asset
         const positiveVal = Math.abs(post.amount);
-        acc.inflow += positiveVal;
-        totalIncome += positiveVal;
+        balance.inflow += positiveVal;
+        totals.totalIncome += positiveVal;
       } else if (type === "expenses") {
         // Expenses are positive (+)
-        acc.outflow += Math.max(0, post.amount);
-        totalExpenses += Math.max(0, post.amount);
+        const positiveVal = Math.max(0, post.amount);
+        balance.outflow += positiveVal;
+        totals.totalExpenses += positiveVal;
       } else if (post.amount > 0) {
-        acc.inflow += post.amount;
+        balance.inflow += post.amount;
       } else {
-        acc.outflow += Math.abs(post.amount);
+        balance.outflow += Math.abs(post.amount);
       }
     }
   }
 
-  // Calculate top expense categories
-  const expenseCategories: { name: string; amount: number }[] = [];
-  for (const [name, acc] of accounts.entries()) {
-    if (acc.rootType === "expenses" && acc.outflow > 0) {
-      expenseCategories.push({ name, amount: acc.outflow });
+  const highlightsByCurrency = new Map<string, JournalHighlightsData>();
+  const sankeyByCurrency = new Map<
+    string,
+    { nodes: SankeyNode[]; links: SankeyLink[] }
+  >();
+
+  for (const currency of currencies) {
+    const totals = currencyTotals.get(currency) ?? {
+      totalIncome: 0,
+      totalExpenses: 0,
+      transactionIds: new Set<string>(),
+    };
+    const currencyDates = transactions
+      .filter((tx) => totals.transactionIds.has(tx.id))
+      .map((tx) => tx.date)
+      .sort();
+    const startDate = currencyDates[0] ?? null;
+    const endDate = currencyDates[currencyDates.length - 1] ?? null;
+
+    const expenseCategories: { name: string; amount: number }[] = [];
+    for (const [name, acc] of accounts.entries()) {
+      const balance = acc.balances.get(currency);
+      if (acc.rootType === "expenses" && balance && balance.outflow > 0) {
+        expenseCategories.push({ name, amount: balance.outflow });
+      }
     }
+    expenseCategories.sort((a, b) => b.amount - a.amount);
+
+    const topExpenseCategories: TopCategory[] = expenseCategories
+      .slice(0, 5)
+      .map((cat) => ({
+        name: cat.name,
+        amount: cat.amount,
+        percentage:
+          totals.totalExpenses > 0
+            ? (cat.amount / totals.totalExpenses) * 100
+            : 0,
+        currency,
+      }));
+
+    const netSavings = totals.totalIncome - totals.totalExpenses;
+    const savingsRate =
+      totals.totalIncome > 0
+        ? Math.max(0, (netSavings / totals.totalIncome) * 100)
+        : 0;
+
+    highlightsByCurrency.set(currency, {
+      totalIncome: totals.totalIncome,
+      totalExpenses: totals.totalExpenses,
+      netSavings,
+      savingsRate,
+      transactionCount: totals.transactionIds.size,
+      startDate,
+      endDate,
+      currency,
+      topExpenseCategories,
+    });
+
+    sankeyByCurrency.set(
+      currency,
+      buildSankeyData(
+        accounts,
+        totals.totalIncome,
+        totals.totalExpenses,
+        netSavings,
+        currency,
+      ),
+    );
   }
-  expenseCategories.sort((a, b) => b.amount - a.amount);
 
-  const topExpenseCategories: TopCategory[] = expenseCategories
-    .slice(0, 5)
-    .map((cat) => ({
-      name: cat.name,
-      amount: cat.amount,
-      percentage: totalExpenses > 0 ? (cat.amount / totalExpenses) * 100 : 0,
-      currency: primaryCurrency,
-    }));
-
-  const netSavings = totalIncome - totalExpenses;
-  const savingsRate =
-    totalIncome > 0 ? Math.max(0, (netSavings / totalIncome) * 100) : 0;
-
-  const highlights: JournalHighlightsData = {
-    totalIncome,
-    totalExpenses,
-    netSavings,
-    savingsRate,
-    transactionCount: transactions.length,
-    startDate: earliestDate,
-    endDate: latestDate,
-    currency: primaryCurrency,
-    topExpenseCategories,
+  const highlights =
+    highlightsByCurrency.get(primaryCurrency) ??
+    createEmptyHighlights(primaryCurrency);
+  const primarySankey = sankeyByCurrency.get(primaryCurrency) ?? {
+    nodes: [],
+    links: [],
   };
-
-  // Generate Sankey graph
-  const { nodes: sankeyNodes, links: sankeyLinks } = buildSankeyData(
-    accounts,
-    totalIncome,
-    totalExpenses,
-    netSavings,
-    primaryCurrency,
-  );
 
   return {
     transactions,
     accounts,
+    highlightsByCurrency,
     highlights,
-    sankeyNodes,
-    sankeyLinks,
-    currencies: Array.from(currencyCounts.keys()),
+    sankeyByCurrency,
+    sankeyNodes: primarySankey.nodes,
+    sankeyLinks: primarySankey.links,
+    currencies,
   };
 }
 
 function finalizeTransaction(tx: JournalTransaction): void {
-  // Check for auto-balancing posting (where amount is 0 or omitted)
-  const zeroPostings = tx.postings.filter((p) => p.amount === 0);
-  if (zeroPostings.length === 1 && tx.postings.length > 1) {
-    const sum = tx.postings.reduce((acc, p) => acc + p.amount, 0);
-    const zeroPost = zeroPostings[0];
-    if (zeroPost) {
-      zeroPost.amount = -sum;
-    }
+  // Infer one omitted posting only when its commodity is unambiguous. Explicit
+  // zero amounts must not be mistaken for omitted balancing postings.
+  const missingPostings = tx.postings.filter((p) => !p.hasAmount);
+  const knownCurrencies = Array.from(
+    new Set(
+      tx.postings
+        .filter((p) => p.hasAmount && p.currency)
+        .map((p) => p.currency),
+    ),
+  );
+  const missingPosting =
+    missingPostings.length === 1 ? missingPostings[0] : null;
+  if (missingPosting && knownCurrencies.length === 1) {
+    const currency = knownCurrencies[0] ?? "";
+    const sum = tx.postings
+      .filter((p) => p.hasAmount && p.currency === currency)
+      .reduce((total, p) => total + p.amount, 0);
+    missingPosting.amount = -sum;
+    missingPosting.currency = currency;
+    missingPosting.hasAmount = true;
   }
+}
+
+function createEmptyHighlights(currency: string): JournalHighlightsData {
+  return {
+    totalIncome: 0,
+    totalExpenses: 0,
+    netSavings: 0,
+    savingsRate: 0,
+    transactionCount: 0,
+    startDate: null,
+    endDate: null,
+    currency,
+    topExpenseCategories: [],
+  };
 }
 
 // Builds the 3-column Sankey flow:
@@ -397,11 +490,17 @@ function buildSankeyData(
 
   // Inflow (Column 0)
   const incomeAccounts = Array.from(accounts.values())
-    .filter((a) => a.rootType === "income" && a.inflow > 0)
-    .sort((a, b) => b.inflow - a.inflow);
+    .map((account) => ({ account, balance: account.balances.get(currency) }))
+    .filter(
+      (entry): entry is { account: AccountSummary; balance: AccountBalance } =>
+        entry.account.rootType === "income" &&
+        !!entry.balance &&
+        entry.balance.inflow > 0,
+    )
+    .sort((a, b) => b.balance.inflow - a.balance.inflow);
 
   if (incomeAccounts.length > 0) {
-    for (const acc of incomeAccounts) {
+    for (const { account: acc, balance } of incomeAccounts) {
       const nodeId = `node:${acc.name}`;
       // Display friendly shortened name, e.g. income:salary:payslip -> salary:payslip
       const displayName = acc.name.replace(/^income:/i, "");
@@ -409,7 +508,7 @@ function buildSankeyData(
         id: nodeId,
         name: displayName,
         column: 0,
-        value: acc.inflow,
+        value: balance.inflow,
         currency,
         type: "income",
       });
@@ -417,7 +516,7 @@ function buildSankeyData(
       links.push({
         source: nodeId,
         target: poolId,
-        value: acc.inflow,
+        value: balance.inflow,
         currency,
       });
     }
@@ -442,22 +541,29 @@ function buildSankeyData(
 
   // Outflow (Column 2)
   const expenseAccounts = Array.from(accounts.values())
-    .filter((a) => a.rootType === "expenses" && a.outflow > 0)
-    .sort((a, b) => b.outflow - a.outflow);
+    .map((account) => ({ account, balance: account.balances.get(currency) }))
+    .filter(
+      (entry): entry is { account: AccountSummary; balance: AccountBalance } =>
+        entry.account.rootType === "expenses" &&
+        !!entry.balance &&
+        entry.balance.outflow > 0,
+    )
+    .sort((a, b) => b.balance.outflow - a.balance.outflow);
 
   // Group smaller expenses if there are more than 7 to avoid clutter
   const maxExpenses = 6;
   const majorExpenses = expenseAccounts.slice(0, maxExpenses);
   const otherExpenses = expenseAccounts.slice(maxExpenses);
 
-  for (const acc of majorExpenses) {
+  for (const expenseAccount of majorExpenses) {
+    const { account: acc, balance } = expenseAccount;
     const nodeId = `node:${acc.name}`;
     const displayName = acc.name.replace(/^expenses:/i, "");
     nodes.push({
       id: nodeId,
       name: displayName,
       column: 2,
-      value: acc.outflow,
+      value: balance.outflow,
       currency,
       type: "expense",
     });
@@ -465,13 +571,16 @@ function buildSankeyData(
     links.push({
       source: poolId,
       target: nodeId,
-      value: acc.outflow,
+      value: balance.outflow,
       currency,
     });
   }
 
   if (otherExpenses.length > 0) {
-    const otherTotal = otherExpenses.reduce((sum, e) => sum + e.outflow, 0);
+    const otherTotal = otherExpenses.reduce(
+      (sum, e) => sum + e.balance.outflow,
+      0,
+    );
     const otherId = "node:expenses:other";
     nodes.push({
       id: otherId,

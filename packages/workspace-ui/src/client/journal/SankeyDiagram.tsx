@@ -87,12 +87,18 @@ export function SankeyDiagram({
         <h3 className="text-xs font-semibold uppercase tracking-wider text-base-content/70">
           Money Flow (Sankey Diagram)
         </h3>
-        <span className="text-[11px] text-base-content/50">
-          Hover over nodes or flow ribbons for breakdown
-        </span>
+        <div className="flex items-center gap-2 text-[11px] text-base-content/50">
+          <span className="badge badge-sm badge-neutral">{currency}</span>
+          <span>Hover over nodes or flow ribbons for breakdown</span>
+        </div>
       </div>
 
       <div className="relative w-full overflow-x-auto">
+        {layoutLinks.length === 0 && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-xs text-base-content/50">
+            No money flow recorded for {currency}.
+          </div>
+        )}
         <svg
           aria-label="Money Flow Sankey Diagram"
           className="mx-auto block select-none"

@@ -4,19 +4,48 @@ import { formatCurrency } from "./parser";
 export function JournalHighlights({
   highlights,
 }: {
-  highlights: JournalHighlightsData;
+  highlights: JournalHighlightsData | JournalHighlightsData[];
 }) {
-  const {
-    totalIncome,
-    totalExpenses,
-    netSavings,
-    savingsRate,
-    transactionCount,
-    startDate,
-    endDate,
-    currency,
-    topExpenseCategories,
-  } = highlights;
+  const entries = Array.isArray(highlights) ? highlights : [highlights];
+  const multipleCurrencies = entries.length > 1;
+  const startDate = entries
+    .map((entry) => entry.startDate)
+    .filter((date): date is string => date !== null)
+    .sort()[0];
+  const endDate = entries
+    .map((entry) => entry.endDate)
+    .filter((date): date is string => date !== null)
+    .sort()
+    .at(-1);
+
+  const values = (getValue: (entry: JournalHighlightsData) => string) => (
+    <div className={multipleCurrencies ? "flex flex-col gap-0.5" : undefined}>
+      {entries.map((entry) => (
+        <div
+          className={
+            multipleCurrencies
+              ? "flex items-center justify-between gap-2"
+              : undefined
+          }
+          key={entry.currency}
+        >
+          {multipleCurrencies && (
+            <span className="text-[10px] font-semibold uppercase text-base-content/50">
+              {entry.currency}
+            </span>
+          )}
+          <span>{getValue(entry)}</span>
+        </div>
+      ))}
+    </div>
+  );
+
+  const topExpenseCategories = entries.flatMap((entry) =>
+    entry.topExpenseCategories.map((category) => ({
+      ...category,
+      key: `${entry.currency}:${category.name}`,
+    })),
+  );
 
   return (
     <div className="flex flex-col gap-3">
@@ -29,7 +58,9 @@ export function JournalHighlights({
             <span className="text-base">↓</span>
           </div>
           <div className="mt-1 text-xl font-bold tracking-tight text-emerald-700 dark:text-emerald-300">
-            {formatCurrency(totalIncome, currency)}
+            {values((entry) =>
+              formatCurrency(entry.totalIncome, entry.currency),
+            )}
           </div>
           <div className="mt-1 text-[11px] text-base-content/60">
             Earned inflows & deposits
@@ -43,7 +74,9 @@ export function JournalHighlights({
             <span className="text-base">↑</span>
           </div>
           <div className="mt-1 text-xl font-bold tracking-tight text-rose-700 dark:text-rose-300">
-            {formatCurrency(totalExpenses, currency)}
+            {values((entry) =>
+              formatCurrency(entry.totalExpenses, entry.currency),
+            )}
           </div>
           <div className="mt-1 text-[11px] text-base-content/60">
             Recorded outflows
@@ -55,15 +88,24 @@ export function JournalHighlights({
           <div className="flex items-center justify-between text-xs font-medium text-violet-600 dark:text-violet-400">
             <span>NET RETAINED</span>
             <span className="text-xs font-semibold">
-              {savingsRate.toFixed(1)}%
+              {entries.map((entry) => (
+                <span className="ml-1" key={entry.currency}>
+                  {multipleCurrencies && `${entry.currency} `}
+                  {entry.savingsRate.toFixed(1)}%
+                </span>
+              ))}
             </span>
           </div>
           <div className="mt-1 text-xl font-bold tracking-tight text-violet-700 dark:text-violet-300">
-            {netSavings >= 0 ? "+" : ""}
-            {formatCurrency(netSavings, currency)}
+            {values(
+              (entry) =>
+                `${entry.netSavings >= 0 ? "+" : ""}${formatCurrency(entry.netSavings, entry.currency)}`,
+            )}
           </div>
           <div className="mt-1 text-[11px] text-base-content/60">
-            {netSavings >= 0 ? "Surplus saved / retained" : "Net deficit"}
+            {entries.every((entry) => entry.netSavings >= 0)
+              ? "Surplus saved / retained"
+              : "Net deficit in at least one currency"}
           </div>
         </div>
 
@@ -71,10 +113,14 @@ export function JournalHighlights({
         <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3.5 shadow-xs">
           <div className="flex items-center justify-between text-xs font-medium text-sky-600 dark:text-sky-400">
             <span>ACTIVITY</span>
-            <span className="text-xs font-semibold">{currency}</span>
+            <span className="text-xs font-semibold">
+              {multipleCurrencies
+                ? `${entries.length} currencies`
+                : entries[0]?.currency}
+            </span>
           </div>
           <div className="mt-1 text-xl font-bold tracking-tight text-sky-700 dark:text-sky-300">
-            {transactionCount} <span className="text-sm font-normal">txs</span>
+            {values((entry) => `${entry.transactionCount} txs`)}
           </div>
           <div
             className="mt-1 truncate text-[11px] text-base-content/60"
@@ -91,20 +137,27 @@ export function JournalHighlights({
           <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-base-content/70">
             <span>Top Outflow Categories</span>
             <span className="text-[11px] font-normal text-base-content/50">
-              Share of total expenses
+              {multipleCurrencies
+                ? "Share within each currency"
+                : "Share of total expenses"}
             </span>
           </div>
           <div className="flex flex-wrap gap-2">
             {topExpenseCategories.map((cat) => (
               <div
-                key={cat.name}
+                key={cat.key}
                 className="flex items-center gap-1.5 rounded-lg border border-base-content/10 bg-base-200/60 px-2.5 py-1 text-xs"
               >
+                {multipleCurrencies && (
+                  <span className="text-[10px] font-semibold uppercase text-base-content/50">
+                    {cat.currency}
+                  </span>
+                )}
                 <span className="font-medium text-base-content/80">
                   {cat.name.replace(/^expenses:/i, "")}
                 </span>
                 <span className="font-semibold text-rose-600 dark:text-rose-400">
-                  {formatCurrency(cat.amount, currency)}
+                  {formatCurrency(cat.amount, cat.currency)}
                 </span>
                 <span className="text-[10px] text-base-content/50">
                   ({cat.percentage.toFixed(1)}%)
