@@ -381,6 +381,14 @@ export function createMockWorkspaceApi({
       requireAuthentication();
       return fileResponse(requestedPath);
     },
+    async loadFileMetadata(requestedPath) {
+      requireAuthentication();
+      const entry = entries.find(
+        (item) => item.kind === "file" && item.path === requestedPath,
+      );
+      if (entry?.kind !== "file") throw error(404, "not_found");
+      return { ...entry };
+    },
     async saveFile(requestedPath, nextContent, expectedRevision) {
       requireAuthentication();
       if (!(requestedPath in fileContents)) throw error(404, "not_found");
@@ -589,6 +597,11 @@ export function createMockWorkspaceApi({
       const current = fileContents[requestedPath];
       if (current === undefined) return "#";
       return `data:text/plain;charset=utf-8,${encodeURIComponent(current)}`;
+    },
+    rawUrl(requestedPath) {
+      const current = fileContents[requestedPath];
+      if (current === undefined) return "#";
+      return `data:application/octet-stream,${encodeURIComponent(current)}`;
     },
     exportWorkspaceUrl() {
       return "#";

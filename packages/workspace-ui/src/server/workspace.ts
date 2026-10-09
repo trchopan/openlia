@@ -687,6 +687,7 @@ export class WorkspaceService {
     path: string;
     absolute: string;
     filename: string;
+    size: number;
   } {
     const path = validateRelativePath(pathValue);
     const absolute = this.assertNoSymlink(path);
@@ -716,7 +717,13 @@ export class WorkspaceService {
         /["\r\n]/g,
         "",
       ),
+      size: info.size,
     };
+  }
+
+  metadata(pathValue: unknown): WorkspaceFileMetadata {
+    const file = this.download(pathValue);
+    return this.fileMetadata(file.absolute, file.path);
   }
 
   async gitStatus(): Promise<WorkspaceGitStatus> {

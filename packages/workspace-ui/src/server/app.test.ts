@@ -66,6 +66,53 @@ describe("workspace HTTP handler", () => {
     ]);
   });
 
+  test("serves artifacts inline with MIME types and byte ranges", async () => {
+    const pdfBytes = new Uint8Array([37, 80, 68, 70, 45, 1, 2, 3]);
+    writeFileSync(join(root, "sample.pdf"), pdfBytes);
+    writeFileSync(join(root, "archive.bin"), new Uint8Array([0, 1, 2, 3]));
+
+    const pdf = await request("/api/workspace/raw?path=sample.pdf");
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers.get("content-type")).toBe("application/pdf");
+    expect(pdf.headers.get("content-disposition")).toBe(
+      'inline; filename="sample.pdf"',
+    );
+    expect(pdf.headers.get("accept-ranges")).toBe("bytes");
+    expect(new Uint8Array(await pdf.arrayBuffer())).toEqual(pdfBytes);
+
+    const range = await request("/api/workspace/raw?path=sample.pdf", {
+      headers: { Range: "bytes=2-5" },
+    });
+    expect(range.status).toBe(206);
+    expect(range.headers.get("content-range")).toBe("bytes 2-5/8");
+    expect(new Uint8Array(await range.arrayBuffer())).toEqual(
+      pdfBytes.slice(2, 6),
+    );
+
+    const binary = await request("/api/workspace/raw?path=archive.bin");
+    expect(binary.status).toBe(200);
+    expect(binary.headers.get("content-type")).toBe("application/octet-stream");
+    expect(binary.headers.get("content-disposition")).toBe(
+      'attachment; filename="archive.bin"',
+    );
+    expect(new Uint8Array(await binary.arrayBuffer())).toEqual(
+      new Uint8Array([0, 1, 2, 3]),
+    );
+  });
+
+  test("returns metadata for binary files without decoding them", async () => {
+    writeFileSync(join(root, "sample.png"), new Uint8Array([0, 1, 2]));
+
+    const response = await request("/api/workspace/metadata?path=sample.png");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      editable: false,
+      path: "sample.png",
+      size: 3,
+    });
+  });
+
   test("hides navigator scaffolding while keeping workspace folders visible", async () => {
     mkdirSync(join(root, "calendar"), { recursive: true });
     mkdirSync(join(root, "archive"), { recursive: true });

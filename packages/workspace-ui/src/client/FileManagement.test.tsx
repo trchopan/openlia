@@ -178,4 +178,41 @@ describe("FileNavigator Action Menu", () => {
     fireEvent.click(deleteBtn);
     expect(onDeleteFile).toHaveBeenCalledWith("sample.md");
   });
+
+  test("exposes external actions for non-editable files", () => {
+    render(
+      <FileNavigator
+        downloadUrl={(path) => `/download/${path}`}
+        entries={[
+          {
+            editable: false,
+            kind: "file",
+            modified_at: "2026-09-22T00:00:00.000Z",
+            path: "sample.pdf",
+            size: 10,
+          },
+        ]}
+        filter=""
+        loading={false}
+        mobileOpen={false}
+        onClose={() => {}}
+        onFilterChange={() => {}}
+        onOpenFile={() => {}}
+        onRetry={() => {}}
+        rawUrl={(path) => `/raw/${path}`}
+        selectedPath={undefined}
+        truncated={false}
+        workspaceError=""
+      />,
+    );
+
+    expect(screen.getByText("View only ↗")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Open in New Tab ↗" }),
+    ).toHaveAttribute("href", "/raw/sample.pdf");
+    expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute(
+      "href",
+      "/download/sample.pdf",
+    );
+  });
 });
