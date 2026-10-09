@@ -64,7 +64,8 @@ enabled = [
   "deep-research",
   "personal-finance",
   "calendar",
-  "workspace-organize"
+  "workspace-organize",
+  "personal-health"
 ]
 
 [tools]

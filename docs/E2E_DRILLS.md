@@ -93,7 +93,7 @@ Verify the compiled version:
 ---
 
 ### Drill 2: Pre-flight & Remote Deployment
-1. Verify the target directory is clean before initialization:
+1. Verify the target directory is clean before initialization (or inspect existing deployment):
    ```bash
    ssh user@test-host "test ! -e /opt/openlia_dev && echo 'Target directory is clean'"
    ```
@@ -102,28 +102,45 @@ Verify the compiled version:
    ```bash
    OPENLIA_CONFIG=~/.config/openlia/dev/config.toml ./openlia init --json
    ```
-   *This packages the current release, uploads it to the target, stages runtime secrets, and starts Compose containers.*
+   *(If the stack is already initialized and you are updating after code changes, use `./openlia deploy`)*:
+   ```bash
+   OPENLIA_CONFIG=~/.config/openlia/dev/config.toml ./openlia deploy
+   ```
 
-3. Inspect stack status:
+3. Inspect stack status and runtime components:
    ```bash
    OPENLIA_CONFIG=~/.config/openlia/dev/config.toml ./openlia status
    ```
+   **Pass Criteria**: Checks include `hermes_ingestion` reporting `required_dependencies_available` and `hermes_runtimes` reporting `hermes_bun_uv_git_available`.
 
-4. Run provider and runtime diagnostics:
+4. Run provider, ingestion, and runtime diagnostics:
    ```bash
    OPENLIA_CONFIG=~/.config/openlia/dev/config.toml ./openlia doctor --check-providers
    ```
    **Pass Criteria**: All checks report `ok: true`, `hermes_doctor` reports `healthy`, and `provider_request` reports `completed`.
 
+5. Verify bundled skills catalog including new health and calendar skills:
+   ```bash
+   OPENLIA_CONFIG=~/.config/openlia/dev/config.toml ./openlia skills list --json
+   ```
+   **Pass Criteria**: Lists `personal-health`, `calendar`, `personal-finance`, and all standard bundled skills as enabled.
+
 ---
 
-### Drill 3: Local Workspace Git Verification
-OpenLia maintains the workspace (`/opt/data/workspace`) as a local Git repository for history tracking without network remotes:
+### Drill 3: Local Workspace Git & Scheduled Batch Commits
+OpenLia maintains the workspace (`/opt/data/workspace`) as a local Git repository for history tracking without network remotes, with scheduled daily batch commits:
 
-```bash
-OPENLIA_CONFIG=~/.config/openlia/dev/config.toml ./openlia workspace git status
-```
-**Pass Criteria**: Returns `{"ok":true,"workspace":"/opt/data/workspace","branch":"main","status":"## main"}`.
+1. Check workspace git status:
+   ```bash
+   OPENLIA_CONFIG=~/.config/openlia/dev/config.toml ./openlia workspace git status
+   ```
+   **Pass Criteria**: Returns `{"ok":true,"workspace":"/opt/data/workspace","branch":"main","status":"## main"}`.
+
+2. Inspect the scheduled workspace git cron batch job:
+   ```bash
+   ssh user@test-host "docker exec openlia_dev-hermes-1 crontab -l 2>/dev/null || true"
+   ```
+   Look for the scheduled daily commit entry configured by `[workspace_git] schedule`.
 
 ---
 
@@ -138,9 +155,20 @@ OPENLIA_CONFIG=~/.config/openlia/dev/config.toml ./openlia workspace git status
    - **Persona & Language Check**:
      > `Xin chào, bạn là ai?`
      *Expected*: Agent responds in Vietnamese (or configured language), identifying as OpenLia.
-   - **Safe Personal Finance Workflow**:
+   - **Safe Personal Finance Workflow & Journal Creation**:
      > `I spent 15,000 VND on a Banh Mi today`
-     *Expected*: Agent invokes the `personal-finance` skill and asks for confirmation or journal category, rather than blindly writing to disk.
+     *Expected*: Agent invokes the `personal-finance` skill and asks for confirmation or journal category, rather than blindly writing to disk. Upon approval, it initializes/appends to the financial journal (`finance/journal.journal`).
+   - **Remind-backed Calendar Scheduling & Agenda Check**:
+     > `Lên lịch nhắc nhở lúc 9h sáng mai họp đội ngũ`
+     *Expected*: Agent uses the `calendar` skill and Remind syntax to record the event into `calendar/reminders.rem`.
+     > `Kiểm tra lịch hôm nay`
+     *Expected*: Agent queries today's agenda via `remind_calendar.py` and returns scheduled items.
+   - **Personal Health Record Workflow**:
+     > `Ghi nhận hồ sơ sức khỏe: cân nặng 65kg, huyết áp 120/80`
+     *Expected*: Agent recognizes the health workflow, validates against `health/` schemas, and safely logs or confirms the entry.
+   - **Durable Ingestion Runtime & Tool Check**:
+     > `Kiểm tra hàng đợi ingestion`
+     *Expected*: Agent calls the Hermes ingestion tool `ingestion_status` and reports queue length and status.
    - **Workspace Notes Check**:
      > `Kiểm tra các ghi chú trong workspace`
      *Expected*: Agent reads and summarizes workspace template files.
@@ -167,7 +195,15 @@ When `[locho-host] enabled = true` is configured, you can expose Workspace UI an
 3. Test endpoints locally:
    - **Workspace UI**: [http://127.0.0.1:8089](http://127.0.0.1:8089)
      - Test authentication with the configured password.
-     - Test workspace document zip export: `curl -i http://127.0.0.1:8089/api/workspace/export -o /tmp/export.zip`.
+     - **Hledger Journal & Sankey Diagram Flow**: Open any `.journal` or `.hledger` document (e.g. `finance/journal.journal`). Verify the visual preview renders:
+       - `JournalHighlights` metric cards: Total Income, Total Expenses, Net Retained, Category Breakdown.
+       - Interactive SVG `SankeyDiagram` visualizing money flow from sources to accounts and expenses.
+       - Mode switcher toggles seamlessly between Visual Preview and CodeMirror code editor.
+     - **Schema Validation & Document Toolbar**:
+       - Verify toolbar actions (Validate, Rename, Delete).
+       - Test schema validation endpoint: `curl -i -X POST http://127.0.0.1:8089/api/workspace/validate -H "Content-Type: application/json" -d '{"path":"inbox/proof.md","content":"# Proof\nContent"}'`.
+     - **Ingestion & Sources Inspection**: Inspect `inbox/ingestion/` records and `sources/records/` in the file tree.
+     - **Document Archive Export**: Test workspace document zip export: `curl -i http://127.0.0.1:8089/api/workspace/export -o /tmp/export.zip`.
    - **Open WebUI**: [http://127.0.0.1:8090](http://127.0.0.1:8090)
 
 ---
@@ -199,8 +235,10 @@ When testing is complete, tear down all resources to leave both local and target
 | Symptom / Error | Root Cause | Solution |
 | :--- | :--- | :--- |
 | `unsupported config schema 1` | OpenLia bumped configuration schema to `2`. | Ensure `schema = 2` is set under `[openlia]` in `config.toml`. |
-| `unknown setting "workspace_git.enabled"` | Remote Git repository sync was removed in commit `3bf8dde`. | Remove the `[workspace_git]` table from `config.toml`. |
+| `[workspace_git] invalid schedule` | Workspace Git batch tracking requires a valid cron expression. | Set `schedule = "0 4 * * *"` in `[workspace_git]` in `config.toml`. |
 | `[secrets:command] helper failed; resolving no value: code=1` | An environment variable in `hermes.env` failed `secret-source.sh` regex validation. | Verify `COPILOT_GITHUB_TOKEN` starts with `gho_`, `ghu_`, or `github_pat_`. Comment out any unused or malformed token variables. |
 | `locho-host is disabled` | Running `locho-host share` when `locho-host.enabled = false`. | Set `[locho-host] enabled = true` in `config.toml` and run `./openlia deploy` before sharing. |
 | `backup encryption key setup failed: operator recovery identity is not ready` | `backup.recipient` is set in `config.toml` but the matching private key file does not exist on disk. | Clear `recipient = ""` in `config.toml` so `openlia init` automatically generates a matching pair at `backup.identity_file`. |
+| `ingestion: password_required` or `password_invalid` | Encrypted document (PDF/XLSX) cannot be decrypted without a password. | Add the password under `[passwords]` in `sources/document-passwords.toml` matching the document label. |
+| `No journal transactions detected` | Hledger file lacks standard posting format. | Ensure journal entries have `YYYY-MM-DD Description` followed by indented lines: `<account> <amount>`. |
 | `env: '/opt/.../ops/healthcheck.sh': No such file or directory` | Attempting to run `status` or `doctor` before running `init`. | Run `openlia init` to stage the release files on the target first. |

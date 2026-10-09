@@ -45,6 +45,7 @@ var defaultSkills = []string{
 	"calendar",
 	"workspace-git",
 	"workspace-organize",
+	"personal-health",
 }
 
 const (

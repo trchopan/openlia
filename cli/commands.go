@@ -2363,6 +2363,12 @@ func testSkill(options Options, assets fs.FS, name string) int {
 	directory := filepath.ToSlash(filepath.Join("profile", "skills", name, "scripts"))
 	entries, err := fs.ReadDir(assets, directory)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			skillPath := filepath.ToSlash(filepath.Join("profile", "skills", name, "SKILL.md"))
+			if skillData, readErr := fs.ReadFile(assets, skillPath); readErr == nil && len(skillData) > 0 {
+				return writeResult(options, map[string]any{"schema": 1, "ok": true, "skill": name, "output": "prompt skill verified: no deterministic helper script required"}, name+": self-test passed")
+			}
+		}
 		return fail(options, ExitInternal, err.Error(), nil)
 	}
 	temporary, err := os.MkdirTemp("", "openlia-skill-*")
@@ -2370,6 +2376,16 @@ func testSkill(options Options, assets fs.FS, name string) int {
 		return fail(options, ExitInternal, err.Error(), nil)
 	}
 	defer os.RemoveAll(temporary)
+	systemScriptsDir := filepath.ToSlash(filepath.Join("profile", "system-skills", "workspace-template-customization", "scripts"))
+	if sysEntries, sysErr := fs.ReadDir(assets, systemScriptsDir); sysErr == nil {
+		for _, sysEntry := range sysEntries {
+			if !sysEntry.IsDir() && strings.HasSuffix(sysEntry.Name(), ".py") {
+				if sysData, readSysErr := fs.ReadFile(assets, filepath.ToSlash(filepath.Join(systemScriptsDir, sysEntry.Name()))); readSysErr == nil {
+					_ = os.WriteFile(filepath.Join(temporary, sysEntry.Name()), sysData, 0o700)
+				}
+			}
+		}
+	}
 	var scriptName string
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".py") {

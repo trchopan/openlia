@@ -291,7 +291,7 @@ def run_live(args: argparse.Namespace) -> list[dict[str, Any]]:
         config = temporary / "config.toml"
         config.write_text(
             "[openlia]\n"
-            "schema = 1\n"
+            "schema = 2\n"
             "output_language = \"en\"\n"
             "[secrets]\n"
             f"source = {quote_toml_string(str(staged_env))}\n",
@@ -373,6 +373,24 @@ def run_live(args: argparse.Namespace) -> list[dict[str, Any]]:
                 )
             )
             results.append(
+                run_case(
+                    "LIVE-CALENDAR",
+                    local_skill_check(root, args.project, "calendar")
+                    if args.local
+                    else remote_skill_check(args.target, args.project, root, "calendar"),
+                    timeout=30,
+                )
+            )
+            results.append(
+                run_case(
+                    "LIVE-PERSONAL-HEALTH",
+                    local_skill_check(root, args.project, "personal-health")
+                    if args.local
+                    else remote_skill_check(args.target, args.project, root, "personal-health"),
+                    timeout=30,
+                )
+            )
+            results.append(
                 manual_case(
                     "TELEGRAM-COMMUNICATION",
                     "Send this exact Telegram message to the bot:\n"
@@ -385,6 +403,30 @@ def run_live(args: argparse.Namespace) -> list[dict[str, Any]]:
                     "TELEGRAM-PERSONAL-FINANCE",
                     "Did the reply recognize the spending request and follow the finance skill's safe workflow "
                     "(for example, request a journal path or approval rather than silently writing)? [y/N] ",
+                )
+            )
+            results.append(
+                manual_case(
+                    "TELEGRAM-CALENDAR",
+                    "Send this exact Telegram message to the bot:\n"
+                    '  Lên lịch nhắc nhở lúc 9h sáng mai họp đội ngũ\n'
+                    "Did the agent reply and schedule/confirm the reminder using the Remind calendar skill? [y/N] ",
+                )
+            )
+            results.append(
+                manual_case(
+                    "TELEGRAM-PERSONAL-HEALTH",
+                    "Send this exact Telegram message to the bot:\n"
+                    '  Ghi nhận hồ sơ sức khỏe: cân nặng 65kg, huyết áp 120/80\n'
+                    "Did the agent follow the personal health workflow to structure and confirm the record? [y/N] ",
+                )
+            )
+            results.append(
+                manual_case(
+                    "TELEGRAM-INGESTION",
+                    "Send this exact Telegram message to the bot:\n"
+                    '  Kiểm tra hàng đợi ingestion\n'
+                    "Did the agent query and report ingestion queue status? [y/N] ",
                 )
             )
 
@@ -435,7 +477,7 @@ def run_local_smoke(args: argparse.Namespace) -> list[dict[str, Any]]:
             probe.bind(("127.0.0.1", 0))
             workspace_ui_port = int(probe.getsockname()[1])
     workspace_ui_config = f"[workspace-ui]\nhost = \"127.0.0.1\"\nport = {workspace_ui_port}\n" if workspace_ui else ""
-    config.write_text(f"[openlia]\nschema = 1\n\n{workspace_ui_config}[secrets]\n", encoding="utf-8")
+    config.write_text(f"[openlia]\nschema = 2\n\n{workspace_ui_config}[secrets]\n", encoding="utf-8")
     local_env = {**os.environ, "OPENLIA_CONFIG": str(config)}
     try:
         root_check = run_case("LOCAL-ROOT", ["test", "!", "-e", root], timeout=30)
@@ -460,6 +502,7 @@ def run_local_smoke(args: argparse.Namespace) -> list[dict[str, Any]]:
                 proof_path.parent.mkdir(parents=True, exist_ok=True)
                 proof_path.write_text("# Workspace UI proof\nInitial content.\n", encoding="utf-8")
                 results.append(workspace_ui_case("LOCAL-UI-HEALTH", "GET", "/health"))
+                results.append(workspace_ui_case("LOCAL-UI-VALIDATE", "POST", "/api/workspace/validate", {"path": "inbox/workspace-ui-proof.md", "content": "# Workspace UI proof\nInitial content.\n"}))
                 status, tree = workspace_ui_request("GET", "/api/workspace/tree")
                 found = status == 200 and isinstance(tree, dict) and any(item.get("path") == "inbox/workspace-ui-proof.md" for item in tree.get("entries", []))
                 results.append(live_result("LOCAL-UI-TREE", "PASS" if found else "FAIL", None if found else "workspace proof file was not listed"))
@@ -471,6 +514,9 @@ def run_local_smoke(args: argparse.Namespace) -> list[dict[str, Any]]:
                     results.append(workspace_ui_case("LOCAL-UI-WRITE", "PUT", "/api/workspace/file", {"path": "inbox/workspace-ui-proof.md", "content": "# Workspace UI proof\nEdited through the UI.\n", "expected_revision": old_revision}))
                     proof_path.write_text("# Workspace UI proof\nEdited outside the UI.\n", encoding="utf-8")
                     results.append(workspace_ui_case("LOCAL-UI-CONFLICT", "PUT", "/api/workspace/file", {"path": "inbox/workspace-ui-proof.md", "content": "stale editor draft\n", "expected_revision": old_revision}, expected_status=409))
+                results.append(workspace_ui_case("LOCAL-UI-JOURNAL-WRITE", "PUT", "/api/workspace/file", {"path": "finance/journal.journal", "content": "2026-10-09 Opening Balance\n    assets:cash  1000 USD\n    equity:opening\n"}))
+                results.append(workspace_ui_case("LOCAL-UI-JOURNAL-READ", "GET", "/api/workspace/file?path=finance%2Fjournal.journal"))
+                results.append(workspace_ui_case("LOCAL-UI-EXPORT", "GET", "/api/workspace/export"))
                 results.append(run_case("LOCAL-UI-STOP", ["go", "run", ".", "stop", "--json"], timeout=120, env=local_env))
                 results.append(run_case("LOCAL-UI-START", ["go", "run", ".", "start", "--json"], timeout=300, env=local_env))
                 results.append(workspace_ui_case("LOCAL-UI-PERSIST-RESTART", "GET", "/api/workspace/file?path=inbox%2Fworkspace-ui-proof.md"))
@@ -491,6 +537,8 @@ def run_local_smoke(args: argparse.Namespace) -> list[dict[str, Any]]:
                 ):
                     results.append(run_case(case_id, command, timeout=timeout, env=local_env))
                 results.append(run_case("LOCAL-SKILL-RUNTIME", local_skill_check(root, project, "personal-finance"), timeout=120, env=local_env))
+                results.append(run_case("LOCAL-SKILL-RUNTIME-CALENDAR", local_skill_check(root, project, "calendar"), timeout=120, env=local_env))
+                results.append(run_case("LOCAL-SKILL-RUNTIME-HEALTH", local_skill_check(root, project, "personal-health"), timeout=120, env=local_env))
     finally:
         if args.cleanup and cleanup_eligible:
             results.append(
@@ -536,6 +584,7 @@ def run(mode: str, args: argparse.Namespace) -> list[dict[str, Any]]:
             "calendar",
             "workspace-git",
             "workspace-organize",
+            "personal-health",
         ):
             results.append(run_case(f"SKILL-{skill}", ["go", "run", ".", "skills", "test", skill]))
         compose_env = {**os.environ, **compose_environment("/tmp/openlia-compose-check", "openlia-compose-check")}

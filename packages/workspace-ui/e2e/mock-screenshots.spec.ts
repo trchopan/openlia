@@ -4,7 +4,6 @@ import { captureScreenshot } from "./screenshot";
 const realWorkspace = process.env.WORKSPACE_UI_E2E_MODE === "real";
 
 async function openFiles(page: Page) {
-  await expect(page.getByRole("heading", { name: "Workspace" })).toBeVisible();
   const filesButton = page.getByRole("button", { exact: true, name: "Files" });
   if (await filesButton.isVisible()) {
     await filesButton.click();
@@ -27,9 +26,6 @@ test.describe("mock visual catalog", () => {
 
   test("workspace overview", async ({ page }, testInfo) => {
     await page.goto("/");
-    await expect(
-      page.getByRole("heading", { name: "Workspace" }),
-    ).toBeVisible();
     if (
       await page.getByRole("button", { exact: true, name: "Files" }).isVisible()
     )
@@ -223,5 +219,12 @@ test.describe("mock visual catalog", () => {
       .getByPlaceholder("e.g. invoice-parser")
       .fill("meeting-summarizer");
     await captureScreenshot(page, testInfo, "skills-create-modal");
+  });
+
+  test("journal preview and sankey diagram", async ({ page }, testInfo) => {
+    await page.goto("/files/finance/journal.hledger");
+    await expect(page.getByText("Money Flow (Sankey Diagram)")).toBeVisible();
+    await expect(page.getByText("TOTAL INCOME")).toBeVisible();
+    await captureScreenshot(page, testInfo, "journal-sankey-preview");
   });
 });

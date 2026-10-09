@@ -179,6 +179,9 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 		"shopping",
 		"travel",
 		"finance",
+		"health",
+		"sources",
+		"inbox/ingestion",
 		"archive",
 	} {
 		if err := EnsureDir(filepath.Join(workspace, category), 0o700); err != nil {
