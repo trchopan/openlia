@@ -83,6 +83,12 @@ def _policy_errors() -> list[str]:
             scheduled=True,
         ):
             errors.append("assistant policy rejected its configured scheduled report path")
+        if not validator.policy_allows(
+            policy,
+            "record_financial_data",
+            "finance/intake/2026-10-08-statement.md",
+        ):
+            errors.append("assistant policy rejected delegated finance record writes")
         if validator.policy_allows(
             policy,
             "generate_reports",

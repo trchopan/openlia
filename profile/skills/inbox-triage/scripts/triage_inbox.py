@@ -24,7 +24,7 @@ for SYSTEM_SCRIPTS in SYSTEM_SCRIPTS_CANDIDATES:
 from workspace_registry import load_policy, load_registry, policy_allows, resolve_route_destination
 
 
-ROUTES = ("task", "event", "decision", "idea", "research", "claim", "archive", "review")
+ROUTES = ("task", "event", "decision", "idea", "research", "claim", "finance", "archive", "review")
 ROUTE_DETAILS = {
     "task": {
         "destination": "tasks/",
@@ -49,6 +49,10 @@ ROUTE_DETAILS = {
     "claim": {
         "destination": "knowledge/claims/",
         "next_step": "Write one specific candidate claim with a stable source and evidence.",
+    },
+    "finance": {
+        "destination": "finance/intake/",
+        "next_step": "Identify the source, covered dates, accounts, proposed postings, and reconciliation status.",
     },
     "archive": {
         "destination": "archive/",
@@ -96,6 +100,8 @@ def classify(item: dict[str, Any]) -> tuple[str, str]:
         return explicit, explicit_reason or "preserved explicit route"
 
     text = _text(item)
+    if re.search(r"\b(bank|card|wallet)\s+(?:statement|export)|\bpay\s*slip\b|\breceipt\b|\btransaction\s+export\b|\bcash\s+(?:note|spending)\b", text):
+        return "finance", "contains a financial source or transaction signal"
     if re.search(r"\b(should\s+(?:we|i|you|they)|decide|choose|trade[- ]off|option|compare)\b", text):
         return "decision", "contains a choice or trade-off"
     if re.search(r"\b(todo|to-do|action|follow[- ]?up|need to|remember to|deadline)\b", text):
@@ -136,7 +142,10 @@ def triage(
         route, reason = classify(item)
         destination = ROUTE_DETAILS[route]["destination"]
         if registry is not None:
-            destination = resolve_route_destination(registry, route, _tags(item))
+            route_tags = _tags(item)
+            if route == "finance" and not route_tags:
+                route_tags = ["finance", "intake"]
+            destination = resolve_route_destination(registry, route, route_tags)
             if destination is None and route != "review":
                 reason = f"route '{route}' has no registered destination; manual review is required"
                 route = "review"
@@ -192,6 +201,7 @@ def self_test() -> None:
             {"id": "b", "title": "Follow up on the draft"},
             {"id": "b2", "title": "I should follow up on the draft"},
             {"id": "c", "title": "Interesting reading", "type": "research"},
+            {"id": "c2", "title": "March bank statement"},
             {"id": "d", "title": "A quiet note"},
             {"id": "e", "title": "Dentist appointment", "type": "event"},
             {"id": "f", "title": "Timezone preference", "type": "claim"},
@@ -204,6 +214,7 @@ def self_test() -> None:
         "task",
         "task",
         "research",
+        "finance",
         "review",
         "event",
         "claim",
@@ -213,10 +224,12 @@ def self_test() -> None:
     assert output["counts"]["task"] == 2
     assert output["items"][3]["confidence"] == "high"
     assert output["items"][3]["approval_state"] == "pending"
-    assert output["items"][5]["destination"] == "calendar/"
-    assert output["items"][6]["destination"] == "knowledge/claims/"
-    assert output["items"][4]["needs_review"] is True
-    assert output["items"][8]["needs_review"] is True
+    assert output["items"][4]["destination"] == "finance/intake/"
+    assert output["items"][4]["approval_state"] == "pending"
+    assert output["items"][6]["destination"] == "calendar/"
+    assert output["items"][7]["destination"] == "knowledge/claims/"
+    assert output["items"][5]["needs_review"] is True
+    assert output["items"][9]["needs_review"] is True
 
     delegated = triage(
         [{"id": "task", "title": "Follow up on the draft"}],
@@ -239,6 +252,13 @@ def self_test() -> None:
             {"path": "inbox", "kind": "core", "route": "review", "tags": []},
             {"path": "ideas", "kind": "core", "route": "idea", "tags": []},
             {
+                "path": "finance/intake",
+                "kind": "extension",
+                "route": "finance",
+                "tags": ["finance", "intake"],
+                "lifecycle": "received -> reconciled or archived",
+            },
+            {
                 "path": "travel/ideas",
                 "kind": "extension",
                 "route": "idea",
@@ -251,11 +271,13 @@ def self_test() -> None:
         [
             {"id": "travel", "title": "Summer trip idea", "type": "idea", "tags": ["travel"]},
             {"id": "generic", "title": "Product idea", "type": "idea"},
+            {"id": "statement", "title": "Wallet statement", "type": "finance"},
         ],
         registry,
     )
     assert registered["items"][0]["destination"] == "travel/ideas"
     assert registered["items"][1]["destination"] == "ideas"
+    assert registered["items"][2]["destination"] == "finance/intake"
 
     try:
         triage([{"id": "same"}, {"id": "same"}])

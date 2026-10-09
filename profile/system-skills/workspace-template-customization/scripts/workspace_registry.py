@@ -34,7 +34,7 @@ CORE_ROOTS = {
     "finance",
     "archive",
 }
-ROUTES = {"task", "event", "decision", "idea", "research", "claim", "archive", "review"}
+ROUTES = {"task", "event", "decision", "idea", "research", "claim", "finance", "archive", "review"}
 BRIEFING_CATEGORIES = {
     "calendar",
     "tasks",
@@ -43,6 +43,7 @@ BRIEFING_CATEGORIES = {
     "decisions",
     "monitors",
     "claims",
+    "finance",
     "inbox",
     "extension",
 }

@@ -1,6 +1,6 @@
 ---
 name: weekly-review
-description: Review projects, tasks, and decisions without acting.
+description: Review projects, tasks, decisions, health records, and finance open loops without acting.
 version: 0.1.0
 platforms: [macos, linux]
 required_environment_variables: []
@@ -20,12 +20,13 @@ of outcomes for the next period.
 
 ## Procedure
 
-1. Gather current project, task, decision, and claim records as read-only
+1. Gather current project, task, decision, claim, health, and registered finance records as read-only
    inputs. Read research briefs linked from active projects, open decisions, and
    unresolved tasks; research briefs are supporting records, not a replacement
    for those domain records.
 2. Run `scripts/review_week.py INPUT.json`.
-3. Check completed work, active projects, open tasks, unresolved decisions, and
+3. Check completed work, active projects, open tasks, unresolved decisions, health
+   records needing review, finance intake or review blockers, unreconciled accounts, and
    claims requiring review. Include proposed decisions and decided decisions
    whose `review_date` has arrived in the decisions input with `revisit: true`,
    so the helper surfaces them for attention. Read claim records directly from
@@ -41,14 +42,18 @@ of outcomes for the next period.
    request or `assistant-policy.yaml` delegates them; otherwise ask before
    changing workspace records.
 
-The input object accepts `week`, `projects`, `tasks`, `decisions`, and `claims`
-lists. Claim records are supplied directly as read-only summaries; statuses are
-compared literally and the JSON output is deterministic.
+The input object accepts `week`, `projects`, `tasks`, `decisions`, `claims`,
+`health`, and `finance` lists. Health records are supplied directly as read-only
+summaries; the helper surfaces records marked `needs_review` or `review_due`,
+draft or unknown records, and unconfirmed or provisional conditions. Finance
+records are supplied directly as read-only summaries; the helper surfaces
+blocked, pending-review, attention-needed, unreconciled, or incompletely valued
+records. Statuses are compared literally and the JSON output is deterministic.
 
 The saved or chat report must preserve the template headings: completed work,
 closed or cancelled work, active projects, open loops, research follow-ups,
-decisions to revisit, claims to review, and next-week outcomes with first
-actions.
+decisions to revisit, claims to review, health records to review, and next-week
+outcomes with first actions.
 
 ## Pitfalls
 
@@ -65,5 +70,6 @@ actions.
 
 ## Verification
 
-Confirm all supplied open loops and claim review items are represented,
-completed items are separated, and no source file was changed.
+Confirm all supplied open loops, health attention items, finance attention items,
+and claim review items are represented, completed items are separated, and no
+source file was changed.

@@ -1,13 +1,13 @@
 ---
 name: personal-finance
-description: Use hledger to organize, validate, and analyze personal finance journals, spending, budgets, and reconciliations.
-version: 0.1.0
-platforms: [linux]
+description: Use hledger and structured finance records to organize, validate, reconcile, and review personal finances.
+version: 0.2.0
+platforms: [macos, linux]
 required_environment_variables: []
 required_credential_files: []
 metadata:
   hermes:
-    tags: [personal-os, finance, hledger, accounting]
+    tags: [personal-os, finance, hledger, accounting, investing]
     category: finance
 ---
 
@@ -15,103 +15,227 @@ metadata:
 
 ## When to Use
 
-Use when personal finance information needs to be recorded, checked, imported,
-reconciled, or analyzed with hledger. This includes spending reviews, budgets,
-cash flow, balances, and net-worth snapshots.
+Use when personal finance information needs to be captured, imported, checked,
+reconciled, valued, or analyzed with hledger and the registered finance records.
+This includes spending, budgets, payslips, cash flow, debt, account balances,
+portfolio holdings, net-worth snapshots, and investment research handoffs.
+
+The normal loop is:
+
+**intake -> extract -> authorize -> post -> validate -> reconcile -> review -> research or decision**
+
+## Authority and Data Boundary
+
+Read `workspace.yaml` and `assistant-policy.yaml` before writing. Resolve the
+registered finance paths and their templates rather than inventing a destination.
+
+- Reading, extraction, hledger reports, and proposed changes are read-only.
+- A direct request or standing delegation may authorize local finance record
+  writes when the target domain and action are allowed.
+- The local `record_financial_data` action covers clear local journal postings,
+  account mappings, intake status, and reconciliation metadata. It does not
+  authorize an external transfer, purchase, trade, broker action, or account
+  change.
+- If policy is missing, malformed, or does not allow `record_financial_data`,
+  ask before changing the journal. Ambiguous account, date, amount, currency,
+  duplicate, or classification details remain pending even when delegation is
+  available.
+- Record the authority used (`direct-request` or `standing-delegation`) in the
+  intake record or output. Never silently broaden the authorized batch.
+
+Raw statements, payslips, screenshots, exports, credentials, account numbers,
+private keys, and tokens must remain in an approved private source location
+outside the tracked workspace. Finance intake records may contain a stable
+private-source reference, source identifier or checksum, covered dates, and
+extracted facts. Never copy a raw export into the workspace or profile.
 
 ## Data Model
 
-Keep the source journal and any hledger rules files in the runtime workspace,
-normally under `/opt/data/workspace/finance/`. Do not put bank exports,
-credentials, account numbers, or other personal records in the tracked profile
-or skill files. Prefer one main journal that includes smaller files when the
-ledger is large enough to benefit from that organization.
+Keep the hledger journal and any hledger rules files in the runtime workspace,
+normally under `/opt/data/workspace/finance/`. Prefer one main journal with
+included files only when the journal is large enough to benefit from that
+organization. The journal is authoritative for transactions and holdings;
+Markdown records are configuration, intake, review, and research context.
 
 Use conventional account groups when they fit the person's records:
 
-- `assets:` for cash, bank, savings, and investments.
+- `assets:` for cash, banks, savings, brokerages, exchanges, and investments.
 - `liabilities:` for credit cards, loans, and other obligations.
 - `equity:` for opening balances and other equity entries.
-- `income:` for salary, benefits, interest, and other inflows.
-- `expenses:` for spending categories.
+- `income:` for salary, benefits, interest, dividends, and other inflows.
+- `expenses:` for spending, fees, taxes, and other outflows.
 
-Account names and currencies are user choices. Do not rename or reclassify
-existing accounts without explaining the proposed change first.
+Account names, currencies, categories, and instrument symbols are user choices.
+Do not rename or reclassify existing accounts without explaining the proposal.
+Use the registered records as follows:
+
+- `finance/intake/`: one source batch or manual capture through extraction,
+  posting, and reconciliation.
+- `finance/accounts/`: non-secret account-to-ledger mappings, currencies, and
+  reconciliation cadence.
+- `finance/portfolios/`: valuation scope, quantities, prices, cost-basis gaps,
+  allocation, and performance context.
+- `finance/reviews/`: periodic reports with explicit scope and data quality.
+- `finance/`: legacy or general finance plans and reviews.
 
 ## Procedure
 
-1. Identify the journal. Use `LEDGER_FILE` when it is set. Otherwise inspect the
-   runtime workspace's `finance/` directory and use its single, unambiguous
-   existing hledger journal. If there are multiple plausible journals, ask
-   which one to use. Never expose the complete journal in a response unless it
-   is specifically requested.
-2. If no journal exists, do not create one for a read-only request. When the
-   person explicitly approves a specific journal change, such as recording a
-   proposed transaction, create `finance/journal.hledger` in the runtime
+1. **Resolve the workspace.** Read the registry, policy, relevant finance
+   template and schema, and any existing records. Use `LEDGER_FILE` when set.
+   Otherwise inspect `finance/` for one unambiguous journal. If multiple
+   journals are plausible, ask which one to use. Never expose the complete
+   journal unless specifically requested.
+2. **Create the journal only for an approved write.** If no journal exists, do
+   not create one for a read-only request. When the person explicitly approves
+   a specific journal change, create `finance/journal.hledger` in the runtime
    workspace as part of that approved change. Do not ask for a journal path just
    to perform this setup; tell the person which default path you used. Preserve
    any existing file at that path, and ask if it is present but cannot safely be
    identified as the journal.
-3. For a balanced transaction, use a payment/source account the person has
-   stated or configured as their default. Do not infer `assets:cash` or another
-   balancing account just from wording such as “I spent”. If the source account
-   is unknown, ask which account was used before recording the transaction.
-4. Validate before analyzing with `hledger -f JOURNAL check`. If validation
-   fails, report the error and stop rather than producing financial conclusions
-   from an invalid ledger.
-5. Run only the reports needed for the question. Common read-only commands are:
-   `stats`, `balance`, `register`, `incomestatement`, `balancesheet`, and
-   `cashflow`. Add an explicit period or account query when appropriate, and
-   record the journal path, date range, account scope, and currencies used.
-6. For a structured review, use hledger's report output directly. Keep each
-   figure tied to its source report and scope, and distinguish reported totals
-   from any explicitly shown derived calculations.
-7. Separate reported facts from interpretation. Call out pending or uncleared
-   entries, omitted accounts, incomplete periods, missing prices, and any
-   assumptions about currency conversion or account classification.
-8. For CSV or other imports, preserve the original export, inspect the columns
-   and rules, preview the converted postings with hledger, and check for
-   duplicates before proposing an import. Do not run `hledger import`,
-   `hledger add`, or edit a journal until the person explicitly approves the
-   exact change.
-9. After an approved journal change, run `hledger check` again and show a
-   concise diff or transaction summary. Never send money, place a trade, or
-   change an external financial account as part of this workflow.
+3. **Establish scope.** Record the reporting currency, date range, included
+   accounts, source type, and whether the question concerns transactions,
+   balances, cash flow, net worth, or investments. Do not combine currencies
+   without dated prices and an explicit conversion method.
+4. **Create or update intake.** For a statement, receipt, payslip, screenshot,
+   CSV, or conversational entry, use `finance/intake/` when the source needs
+   extraction, review, posting, or reconciliation. Preserve the stable source
+   reference and mark unknown fields instead of guessing.
+5. **Extract and normalize.** Inspect columns or document fields, dates,
+   payees, amounts, currencies, account scope, pending status, and source
+   identifiers. Preview proposed postings before applying them. Keep a clear
+   list of assumptions and unresolved classifications.
+6. **Match transfers and duplicates.** Match by source identifier where
+   available, otherwise use a reviewed date/payee/amount/account comparison.
+   Check bank-to-wallet transfers, cash withdrawals, wallet top-ups, and
+   credit-card repayments. Do not import a statement twice.
+7. **Authorize the exact local change.** Use `record_financial_data` only for
+   the proposed finance batch covered by the direct request or standing policy.
+   If the source account, destination account, amount, currency, date, or
+   classification is not established, ask a focused clarification. Do not run
+   `hledger import`, `hledger add`, or edit a journal merely because a document
+   was shared.
+8. **Validate before analysis.** Run `hledger -f JOURNAL check`. If it fails,
+   report the error and stop financial analysis until the journal is repaired.
+   If hledger is unavailable, say that validation could not be performed rather
+   than presenting unverified totals as authoritative.
+9. **Post and verify.** After an authorized journal change, run `hledger check`
+   again, inspect the concise diff or transaction summary, and confirm that no
+   unrelated transactions changed. Update intake status and reconciliation
+   metadata only within the same authorized scope.
+10. **Reconcile.** Compare the relevant ledger account and date range with the
+    source statement. Preserve balance assertions when available. Report
+    uncleared items, missing periods, pending transactions, and discrepancies;
+    do not mark a batch reconciled from a balanced transaction alone.
+11. **Review or hand off.** Save a finance review when authorized and useful.
+    Send an investment opportunity to Deep Research when external evidence is
+    needed, then to Decision Analysis when options and constraints are clear.
+    Research and a recommendation never authorize a trade or purchase.
+
+## Transaction Rules
+
+- A bank-to-wallet top-up, bank transfer, cash withdrawal, or brokerage deposit
+  is a transfer between asset accounts, not income or spending.
+- A credit-card purchase records the expense and the card liability. A later
+  card repayment reduces the liability and is not another expense.
+- A cash or wallet purchase records spending from that specific source account.
+  Do not infer `assets:cash` just because the user says "I spent".
+- A salary deposit is one income event. When a payslip is supplied, reconcile
+  gross pay, deductions, reimbursements, and net pay to the bank deposit without
+  recording the same salary twice.
+- Keep payment date and payslip pay-period dates distinct. Unknown deductions
+  remain unresolved until their account treatment is established.
+- Investment purchases exchange cash for an instrument and fees; they are not
+  ordinary consumption. Record instrument identity, units, price, currency,
+  fees, account, and transaction date when supported.
+- Sales separate proceeds, fees, and realized result when the cost basis is
+  known. Dividends, interest, and distributions are investment income when
+  supported by the source.
+- Existing holdings may be recorded with known quantity and unknown cost basis.
+  Do not invent historical cost. Mark the portfolio record as incomplete.
 
 ## Reports
 
 Choose reports based on the question rather than presenting every available
-number:
+number. Every figure must include the journal path, date range, account scope,
+currencies, and source command.
 
-- Spending: query `expenses:` with `balance` or `register`, normally bounded by
-  a requested period.
-- Income and savings: use `incomestatement` and explain the sign convention
-  before calculating a savings result.
-- Cash and debt: use `balancesheet` or targeted `balance` queries for assets and
-  liabilities.
-- Cash movement: use `cashflow` and distinguish transfers from income or
+- **Spending:** query `expenses:` with `balance` or `register`, bounded by a
+  requested period.
+- **Income and savings:** use `incomestatement`; explain the sign convention
+  before deriving a savings result.
+- **Cash and debt:** use `balancesheet` or targeted `balance` queries for
+  `assets:` and `liabilities:`.
+- **Cash movement:** use `cashflow` and distinguish transfers from income or
   expenses.
-- Reconciliation: compare the relevant account and date range with the source
-  statement, and preserve balance assertions when they are available.
+- **Reconciliation:** compare the relevant account and date range with the
+  source statement and preserve balance assertions.
+- **Net worth:** report assets, liabilities, valuation date, prices, and
+  currency conversion separately from transaction totals.
+- **Portfolio:** separate contributions, historical cost, market value, fees,
+  realized result, and unrealized change. Show missing prices or cost basis.
+
+Do not use forecasts, periodic transactions, or budgets as actual historical
+results. hledger output is accounting data, not tax, legal, or investment
+advice; identify when professional advice or source documentation is needed.
+
+## Investment Research Handoff
+
+Use [Deep Research](openlia://skills/deep-research) for one bounded question,
+such as comparing instruments or assessing a market opportunity. Include the
+financial context that is already known without exposing the full journal:
+
+- linked goal or decision;
+- available amount or contribution constraint, if explicitly provided;
+- time horizon, liquidity need, currency, and risk constraints;
+- current portfolio exposure and allocation gaps from a dated review;
+- fees, taxes, concentration, counterparty, custody, and loss risks to examine;
+- freshness requirement, research budget, stopping condition, and what evidence
+  would change the conclusion.
+
+After evidence is sufficient, use [Decision Analysis](openlia://skills/decision-analysis)
+to compare feasible options. Do not turn a research ranking into a personal
+claim, a decision, or a trade. Record the proposed decision in `decisions/`
+and keep the person as decision-maker. Record an eventual trade in the journal
+only after it has actually happened and the local write is authorized.
+
+## Workflow Handoffs
+
+- **Inbox triage:** explicit financial source material routes to
+  `finance/intake/`; investment questions remain research or decision candidates
+  unless the source clearly requests finance intake.
+- **Daily briefing:** registered finance reviews surface due or recently changed
+  reviews; intake records surface blocked, pending-review, or reconciliation
+  issues. The briefing does not post transactions.
+- **Weekly review:** include finance intake blockers, unreconciled accounts,
+  stale portfolio prices, and due finance reviews when assembling open loops.
+  Run detailed hledger reports only when the review question needs them.
+- **Deep research:** use the investment handoff above for external evidence;
+  research never authorizes financial action.
+- **Decision analysis:** use after research and current portfolio context are
+  sufficient; keep the recommendation separate from the person's choice.
 
 ## Pitfalls
 
 - A balanced transaction is not proof that its payee, account, date, or amount
   is correct.
-- Do not treat a transfer between two accounts as income or spending.
-- Do not hide pending, uncleared, or asserted-balance discrepancies.
+- Do not treat transfers, card repayments, or investment purchases as ordinary
+  spending or income.
+- Do not hide pending, uncleared, asserted-balance, price, cost-basis, or
+  reconciliation discrepancies.
 - Do not combine currencies or value investments without explicit prices,
   valuation dates, and a stated conversion method.
-- Do not use forecasts, periodic transactions, or budgets as actual historical
-  results.
-- Do not import the same bank statement twice; use stable source identifiers or
-  a reviewed date/payee/amount comparison.
-- hledger output is accounting data, not automatically tax, legal, or investment
-  advice. State when professional advice or source documentation is needed.
+- Do not claim a source was preserved if only an extracted reference was retained.
+- Do not infer an account, deduction treatment, risk preference, affordability,
+  or investment suitability from vague wording.
+- Do not send money, place a trade, purchase an asset, or change an external
+  financial account as part of this workflow.
 
 ## Verification
 
-Confirm the journal passes `hledger check`, every reported total has a source
-command and scope, currencies and date boundaries are visible, and the source
-files remained unchanged during read-only analysis. For approved writes,
-confirm the post-change check passes and no unrelated transactions changed.
+Confirm that the journal passes `hledger check` before analysis and after every
+authorized change; every reported total has a source command and scope; dates,
+currencies, and valuation boundaries are visible; source identifiers and
+duplicates were checked; finance records conform to their registered schemas;
+and no unrelated source files or transactions changed. For a review or
+portfolio report, show data gaps, assumptions, and the authority used for any
+local write.

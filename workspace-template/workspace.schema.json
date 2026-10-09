@@ -44,7 +44,7 @@
           "minLength": 1
         },
         "route": {
-          "enum": ["task", "event", "decision", "idea", "research", "claim", "archive", "review", null]
+          "enum": ["task", "event", "decision", "idea", "research", "claim", "finance", "archive", "review", null]
         },
         "tags": {
           "type": "array",
@@ -62,7 +62,7 @@
           "default": false
         },
         "briefing_category": {
-          "enum": ["calendar", "tasks", "projects", "goals", "decisions", "monitors", "claims", "inbox", "extension", null]
+          "enum": ["calendar", "tasks", "projects", "goals", "decisions", "monitors", "claims", "finance", "inbox", "extension", null]
         }
       },
       "allOf": [
@@ -98,7 +98,7 @@
             "properties": {
               "briefing_category": {
                 "type": "string",
-                "enum": ["calendar", "tasks", "projects", "goals", "decisions", "monitors", "claims", "inbox", "extension"]
+                "enum": ["calendar", "tasks", "projects", "goals", "decisions", "monitors", "claims", "finance", "inbox", "extension"]
               }
             }
           }

@@ -68,7 +68,8 @@
         "update_records",
         "archive_records",
         "generate_reports",
-        "local_git_commits"
+        "local_git_commits",
+        "record_financial_data"
       ]
     },
     "actionList": {

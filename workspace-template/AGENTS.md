@@ -39,6 +39,15 @@ user-owned delegation policy authorizes the scoped update.
   - `travel/trip-template.md`: itineraries, reservations, and packing lists.
   - `shopping/item-template.md`: product research, price targets, and evaluations.
   - `finance/finance-template.md`: period reviews, spending targets, and budgets.
+  - `finance/intake/intake-template.md`: source batches, extraction, posting, and reconciliation.
+  - `finance/accounts/accounts-template.md`: non-secret account mappings and reconciliation cadence.
+  - `finance/portfolios/portfolios-template.md`: holdings, dated prices, cost basis, and valuation gaps.
+  - `finance/reviews/reviews-template.md`: periodic financial reports and follow-up actions.
+  - `health/profiles/profile-template.md`: stable family-member identity boundaries.
+  - `health/history/history-template.md`: significant medical events and reported findings.
+  - `health/conditions/condition-template.md`: diagnoses, allergies, risks, and status.
+  - `health/treatments/treatment-template.md`: medication and other care courses.
+  - `health/reviews/review-template.md`: source-linked medical summaries.
   - `calendar/event-note-template.md`: event agendas, notes, and follow-up items.
 - Prefer Markdown and small structured files with stable, descriptive names.
 - For a domain whose template frontmatter declares `$schema`, every new or
@@ -56,6 +65,9 @@ user-owned delegation policy authorizes the scoped update.
   useful history.
 - Keep generated reports separate from source notes and label their source.
 - Never place credentials, OAuth files, private keys, or raw service exports here.
+- Financial source originals belong in an approved private location outside the
+  tracked workspace. Finance intake records may keep stable references, covered
+  dates, and extracted facts, but never credentials, account numbers, or raw exports.
 
 ## Workspace Extensions
 

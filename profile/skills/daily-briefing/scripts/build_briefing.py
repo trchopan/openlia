@@ -367,6 +367,25 @@ def _record_candidate(
             return None
         else:
             score, reason = 30, "decision status needs review"
+    elif category == "finance":
+        review_date = _date_value(metadata.get("review_date") or metadata.get("next_review_date"))
+        reconciliation = str(metadata.get("reconciliation_status") or "").lower()
+        if status in {"blocked", "needs-attention"} or reconciliation == "discrepancy":
+            score, reason = 100, "finance record needs attention"
+        elif review_date is not None and review_date < briefing_date:
+            score, reason = 105, f"finance review overdue since {review_date.isoformat()}"
+        elif review_date == briefing_date:
+            score, reason = 100, "finance review due today"
+        elif review_date is not None and review_date <= briefing_date + timedelta(days=lookahead_days):
+            distance = (review_date - briefing_date).days
+            score, reason = 85 - distance, f"finance review due within {distance} day(s)"
+        elif status in {"received", "extracting", "pending-review", "ready-to-post", "draft", "in-progress"}:
+            score, reason = 75, f"open finance record ({status})"
+        elif record["path"] in changed_paths or modified >= recent_cutoff:
+            age = max(0, (briefing_date - modified).days)
+            score, reason = 60 + max(0, recent_days - age), "recently changed finance record"
+        else:
+            return None
     elif category == "claims":
         valid_from = _date_value(metadata.get("valid_from"))
         valid_until = _date_value(metadata.get("valid_until"))
@@ -799,6 +818,13 @@ def self_test() -> None:
                 "    lifecycle: topic -> archive",
                 "    include_in_briefing: true",
                 "    briefing_category: extension",
+                "  - path: finance/reviews",
+                "    kind: extension",
+                "    label: Finance Reviews",
+                "    purpose: Periodic finance reviews",
+                "    lifecycle: draft -> final -> archive",
+                "    include_in_briefing: true",
+                "    briefing_category: finance",
             ]
         )
         (workspace / "workspace.yaml").write_text(
@@ -809,10 +835,19 @@ def self_test() -> None:
             "# Workflow experiment\nTry one reversible AI-assisted task.\n",
             modified=date(2026, 1, 2),
         )
-        registered_packet = collect_sources(workspace, date(2026, 1, 2), max_chars=12000)
+        registered_packet = collect_sources(workspace, date(2026, 1, 2), max_chars=30000)
         assert "## Learning Topics" in registered_packet
         assert "learning/topics/workflow.md" in registered_packet
         assert "Workflow experiment" in registered_packet
+        _write_test_record(
+            workspace / "finance" / "reviews" / "monthly.md",
+            "---\nstatus: needs-attention\nreview_date: 2026-01-02\n---\n# January finance review\nReconcile the card statement.\n",
+            modified=date(2026, 1, 2),
+        )
+        registered_packet = collect_sources(workspace, date(2026, 1, 2), max_chars=30000)
+        assert "## Finance Reviews" in registered_packet
+        assert "January finance review" in registered_packet
+        assert "finance record needs attention" in registered_packet
 
 
 def main(argv: list[str] | None = None) -> int:
