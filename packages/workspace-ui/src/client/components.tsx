@@ -6,6 +6,7 @@ import type {
   WorkspaceActivityResponse,
   WorkspaceDiagnosticsResponse,
   WorkspaceFile,
+  WorkspaceFileMetadata,
   WorkspaceGitStatus,
   WorkspaceTreeEntry,
 } from "../shared/api";
@@ -231,7 +232,7 @@ export function WorkspaceHeader({
   dirty: boolean;
   exporting?: boolean | undefined;
   filesButtonRef: RefObject<HTMLButtonElement | null>;
-  file: WorkspaceFile | null;
+  file: (WorkspaceFile | WorkspaceFileMetadata) | null;
   git: WorkspaceGitStatus | null;
   onExport?: (() => void) | undefined;
   onOpenFiles: () => void;
@@ -239,6 +240,7 @@ export function WorkspaceHeader({
   onSignOut: () => void;
   onTabChange?: ((tab: "documents" | "skills") => void) | undefined;
 }) {
+  const hasDocumentContent = file !== null && "content" in file;
   const gitText = git?.configured
     ? `${git.branch ?? "Git"}${git.dirty ? " / changes" : " / clean"}`
     : "Version control unavailable";
@@ -369,7 +371,7 @@ export function WorkspaceHeader({
           </button>
         )}
         <StatusBadge tone={dirty ? "warning" : "success"}>
-          {dirty ? "Unsaved" : file ? "Saved" : "Ready"}
+          {dirty ? "Unsaved" : hasDocumentContent ? "Saved" : "Ready"}
         </StatusBadge>
         <span className="workspace-git-status">
           <StatusBadge>{gitText}</StatusBadge>
@@ -400,6 +402,8 @@ export function FileNavigator({
   onRenameFile,
   onMoveFile,
   onDeleteFile,
+  rawUrl,
+  downloadUrl,
   onRetry,
   revealToken = 0,
   selectedPath,
@@ -417,6 +421,8 @@ export function FileNavigator({
   onRenameFile?: ((path: string) => void) | undefined;
   onMoveFile?: ((path: string) => void) | undefined;
   onDeleteFile?: ((path: string) => void) | undefined;
+  rawUrl?: ((path: string) => string) | undefined;
+  downloadUrl?: ((path: string) => string) | undefined;
   onRetry: () => void;
   revealToken?: number | undefined;
   selectedPath: string | undefined;
@@ -592,10 +598,15 @@ export function FileNavigator({
                   >
                     <span className="min-w-0 truncate">{node.name}</span>
                     {!node.editable && (
-                      <span className="text-[10px]">Read only</span>
+                      <span className="text-[10px]" title="View only">
+                        View only ↗
+                      </span>
                     )}
                   </button>
-                  {(onRenameFile || onMoveFile || onDeleteFile) && (
+                  {(onRenameFile ||
+                    onMoveFile ||
+                    onDeleteFile ||
+                    (rawUrl && downloadUrl)) && (
                     <div className="dropdown dropdown-end absolute right-1 z-10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                       <button
                         aria-label={`Actions for ${node.name}`}
@@ -644,6 +655,29 @@ export function FileNavigator({
                               Move...
                             </button>
                           </li>
+                        )}
+                        {!node.editable && rawUrl && downloadUrl && (
+                          <>
+                            <li>
+                              <a
+                                href={rawUrl(node.path)}
+                                onClick={(e) => e.stopPropagation()}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                Open in New Tab ↗
+                              </a>
+                            </li>
+                            <li>
+                              <a
+                                download
+                                href={downloadUrl(node.path)}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                Download
+                              </a>
+                            </li>
+                          </>
                         )}
                         <li>
                           <button
@@ -1155,7 +1189,199 @@ function EditorPane({
   );
 }
 
+function formatFileSize(size: number): string {
+  if (size < 1024) return `${size} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = size / 1024;
+  let unit = units[0];
+  for (let index = 0; index < units.length - 1 && value >= 1024; index++) {
+    value /= 1024;
+    unit = units[index + 1] ?? unit;
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}`;
+}
+
+function artifactPreviewKind(
+  path: string,
+): "audio" | "image" | "pdf" | "video" | undefined {
+  const extension = path.slice(path.lastIndexOf(".")).toLowerCase();
+  if (extension === ".pdf") return "pdf";
+  if (
+    [
+      ".avif",
+      ".bmp",
+      ".gif",
+      ".ico",
+      ".jpeg",
+      ".jpg",
+      ".png",
+      ".svg",
+      ".tif",
+      ".tiff",
+      ".webp",
+    ].includes(extension)
+  )
+    return "image";
+  if ([".flac", ".m4a", ".mp3", ".oga", ".ogg", ".wav"].includes(extension))
+    return "audio";
+  if ([".mov", ".mp4", ".ogv", ".webm"].includes(extension)) return "video";
+  return undefined;
+}
+
+function ArtifactPane({
+  artifact,
+  downloadUrl,
+  onDownload,
+  rawUrl,
+}: {
+  artifact: WorkspaceFileMetadata;
+  downloadUrl?: ((path: string) => string) | undefined;
+  onDownload: () => void;
+  rawUrl?: ((path: string) => string) | undefined;
+}) {
+  const previewKind = artifactPreviewKind(artifact.path);
+  const previewUrl = rawUrl?.(artifact.path) ?? "#";
+
+  return (
+    <section
+      aria-label="Non-text artifact"
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <div className="workspace-document-toolbar">
+        <div className="min-w-0 flex-1">
+          <p className="workspace-document-name" title={artifact.path}>
+            {artifact.path}
+          </p>
+          <p className="text-xs text-base-content/60">View only artifact</p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <a
+            className="btn btn-sm btn-primary"
+            href={previewUrl}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open in New Tab ↗
+          </a>
+          <CopyLinkButton
+            className="btn btn-sm btn-ghost"
+            label="Copy Link"
+            link={buildWorkspaceLink(artifact.path)}
+            title="Copy link"
+          />
+          <button
+            className="btn btn-sm btn-ghost"
+            onClick={onDownload}
+            type="button"
+          >
+            Download
+          </button>
+        </div>
+      </div>
+      <div className="grid gap-4 border-b border-base-content/10 bg-base-200/30 px-5 py-4 sm:grid-cols-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-base-content/50">
+            Name
+          </p>
+          <p className="mt-1 break-all text-sm font-medium">
+            {artifact.path.split("/").at(-1) ?? artifact.path}
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-base-content/50">
+            Size
+          </p>
+          <p className="mt-1 text-sm font-medium">
+            {formatFileSize(artifact.size)}
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-base-content/50">
+            Modified
+          </p>
+          <p className="mt-1 text-sm font-medium">
+            {new Date(artifact.modified_at).toLocaleString()}
+          </p>
+        </div>
+        <div className="sm:col-span-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-base-content/50">
+            Link
+          </p>
+          <div className="mt-1 flex items-center gap-2 break-all font-mono text-xs">
+            <span className="min-w-0 flex-1">
+              {buildWorkspaceLink(artifact.path)}
+            </span>
+            <CopyLinkButton
+              className="btn btn-ghost btn-xs btn-square shrink-0"
+              iconOnly
+              link={buildWorkspaceLink(artifact.path)}
+              size="xs"
+              title={`Copy link: ${buildWorkspaceLink(artifact.path)}`}
+            />
+          </div>
+        </div>
+      </div>
+      <div className="workspace-preview-pane min-h-0 flex-1 overflow-auto p-4">
+        {previewKind === "pdf" && (
+          <iframe
+            className="h-full min-h-[32rem] w-full rounded-lg border border-base-content/10 bg-base-100"
+            src={previewUrl}
+            title={`Preview of ${artifact.path}`}
+          />
+        )}
+        {previewKind === "image" && (
+          <div className="flex min-h-full items-center justify-center rounded-lg border border-base-content/10 bg-base-100 p-4">
+            <img
+              alt={artifact.path}
+              className="max-h-full max-w-full object-contain"
+              src={previewUrl}
+            />
+          </div>
+        )}
+        {previewKind === "audio" && (
+          <div className="flex min-h-full items-center justify-center rounded-lg border border-base-content/10 bg-base-100 p-8">
+            {/* Workspace artifacts do not include a separate caption track. */}
+            {/* biome-ignore lint/a11y/useMediaCaption: No caption track is available in the source artifact. */}
+            <audio controls src={previewUrl} />
+          </div>
+        )}
+        {previewKind === "video" && (
+          <div className="flex min-h-full items-center justify-center rounded-lg border border-base-content/10 bg-base-100 p-4">
+            {/* biome-ignore lint/a11y/useMediaCaption: No caption track is available in the source artifact. */}
+            <video
+              className="max-h-full max-w-full"
+              controls
+              src={previewUrl}
+            />
+          </div>
+        )}
+        {!previewKind && (
+          <div className="flex min-h-full flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-base-content/20 bg-base-100 p-8 text-center">
+            <p className="font-semibold">
+              This file cannot be previewed in the browser.
+            </p>
+            <p className="max-w-md text-sm text-base-content/60">
+              Open it in a new tab or download it to use an application that
+              supports this file type.
+            </p>
+            {downloadUrl && (
+              <a
+                className="btn btn-sm btn-outline"
+                download
+                href={downloadUrl(artifact.path)}
+              >
+                Download {artifact.path.split("/").at(-1) ?? "file"}
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function DocumentPane({
+  artifact,
   conflict,
   detailsOpen = false,
   diff,
@@ -1184,6 +1410,8 @@ export function DocumentPane({
   diagnosticsLoading,
   onOpenFile,
   onRefreshActivity,
+  rawUrl,
+  downloadUrl,
 }: {
   conflict: string;
   detailsOpen?: boolean;
@@ -1191,6 +1419,7 @@ export function DocumentPane({
   draft: string;
   documentError: string;
   file: WorkspaceFile | null;
+  artifact?: WorkspaceFileMetadata | null | undefined;
   fileLoading: boolean;
   onCloseFiles: () => void;
   onDelete: () => void;
@@ -1213,6 +1442,8 @@ export function DocumentPane({
   diagnosticsLoading?: boolean | undefined;
   onOpenFile?: ((path: string) => void) | undefined;
   onRefreshActivity?: (() => void) | undefined;
+  rawUrl?: ((path: string) => string) | undefined;
+  downloadUrl?: ((path: string) => string) | undefined;
 }) {
   const dirty = file !== null && file.content !== draft;
   const canEdit = Boolean(file?.editable);
@@ -1221,7 +1452,14 @@ export function DocumentPane({
 
   return (
     <section aria-label="Document workspace" className="workspace-document">
-      {file ? (
+      {artifact ? (
+        <ArtifactPane
+          artifact={artifact}
+          downloadUrl={downloadUrl}
+          onDownload={onDownload}
+          rawUrl={rawUrl}
+        />
+      ) : file ? (
         <>
           <div className="workspace-document-toolbar">
             <div className="min-w-0 flex-1">

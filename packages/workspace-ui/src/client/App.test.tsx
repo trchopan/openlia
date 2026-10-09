@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
-import type { WorkspaceApi } from "./api";
+import { ApiError, type WorkspaceApi } from "./api";
 import { createMockWorkspaceApi } from "./mockApi";
 import { buildWorkspaceLink } from "./openliaLinks";
 
@@ -25,6 +25,67 @@ function setEditorText(editor: HTMLElement, value: string): void {
 }
 
 describe("workspace application", () => {
+  test("opens binary files in the artifact view instead of showing a document error", async () => {
+    const baseApi = createMockWorkspaceApi();
+    const artifact = {
+      editable: false,
+      modified_at: "2026-09-22T00:00:00.000Z",
+      path: "sources/artifacts/sample.bin",
+      size: 2048,
+    };
+    const api: WorkspaceApi = {
+      ...baseApi,
+      async loadFile(path) {
+        if (path === artifact.path) {
+          throw new ApiError(415, {
+            error: "binary_file",
+            ok: false,
+            schema: 1,
+          });
+        }
+        return baseApi.loadFile(path);
+      },
+      async loadFileMetadata(path) {
+        if (path === artifact.path) return artifact;
+        return baseApi.loadFileMetadata(path);
+      },
+      async loadTree() {
+        const response = await baseApi.loadTree();
+        return {
+          ...response,
+          entries: [
+            ...response.entries,
+            { ...artifact, kind: "file" as const },
+          ],
+        };
+      },
+      rawUrl(path) {
+        return `/api/workspace/raw?${new URLSearchParams({ path })}`;
+      },
+    };
+
+    window.history.replaceState(
+      null,
+      "",
+      "/files/sources/artifacts/sample.bin",
+    );
+    render(<App api={api} />);
+
+    expect(
+      await screen.findByRole("region", { name: "Non-text artifact" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("View only artifact")).toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole("region", { name: "Non-text artifact" }),
+      ).getByRole("link", { name: /Open in New Tab/ }),
+    ).toHaveAttribute(
+      "href",
+      "/api/workspace/raw?path=sources%2Fartifacts%2Fsample.bin",
+    );
+    expect(screen.queryByText("This document could not be opened")).toBeNull();
+  });
+
   test("opens a document, tracks edits, and saves it", async () => {
     render(<App api={createMockWorkspaceApi()} />);
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));

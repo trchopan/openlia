@@ -39,6 +39,7 @@ export interface WorkspaceApi {
   login(password: string): Promise<AuthLoginResponse>;
   logout(): Promise<AuthLoginResponse>;
   loadFile(path: string): Promise<WorkspaceFile>;
+  loadFileMetadata(path: string): Promise<WorkspaceFileMetadata>;
   saveFile(
     path: string,
     content: string,
@@ -62,6 +63,7 @@ export interface WorkspaceApi {
   loadGitStatus(): Promise<WorkspaceGitStatus>;
   loadActivity(): Promise<WorkspaceActivityResponse>;
   downloadUrl(path: string): string;
+  rawUrl(path: string): string;
   exportWorkspaceUrl(): string;
   downloadWorkspaceExport(): Promise<void>;
 
@@ -175,6 +177,12 @@ function isWorkspaceFile(value: unknown): value is WorkspaceFile {
     typeof value.content === "string" &&
     typeof value.revision === "string"
   );
+}
+
+function isWorkspaceFileMetadataResponse(
+  value: unknown,
+): value is WorkspaceFileMetadata {
+  return isWorkspaceFileMetadata(value);
 }
 
 function isWorkspaceWriteResponse(
@@ -342,6 +350,11 @@ export const httpWorkspaceApi: WorkspaceApi = {
       `/api/workspace/file?${new URLSearchParams({ path })}`,
       isWorkspaceFile,
     ),
+  loadFileMetadata: (path) =>
+    requestJson<WorkspaceFileMetadata>(
+      `/api/workspace/metadata?${new URLSearchParams({ path })}`,
+      isWorkspaceFileMetadataResponse,
+    ),
   saveFile: (path, content, expectedRevision) =>
     requestJson<WorkspaceWriteResponse>(
       "/api/workspace/file",
@@ -414,6 +427,7 @@ export const httpWorkspaceApi: WorkspaceApi = {
     ),
   downloadUrl: (path) =>
     `/api/workspace/download?${new URLSearchParams({ path })}`,
+  rawUrl: (path) => `/api/workspace/raw?${new URLSearchParams({ path })}`,
   exportWorkspaceUrl: () => "/api/workspace/export",
   downloadWorkspaceExport: async () => {
     const res = await fetch("/api/workspace/export");

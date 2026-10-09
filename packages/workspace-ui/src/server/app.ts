@@ -34,15 +34,62 @@ export interface WorkspaceHandlerOptions {
 }
 
 const contentTypes: Record<string, string> = {
+  ".avif": "image/avif",
+  ".bmp": "image/bmp",
   ".css": "text/css; charset=utf-8",
+  ".csv": "text/csv; charset=utf-8",
+  ".flac": "audio/flac",
+  ".gif": "image/gif",
+  ".ico": "image/x-icon",
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
   ".map": "application/json; charset=utf-8",
+  ".m4a": "audio/mp4",
+  ".mp3": "audio/mpeg",
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".oga": "audio/ogg",
+  ".ogg": "audio/ogg",
+  ".ogv": "video/ogg",
+  ".pdf": "application/pdf",
+  ".png": "image/png",
   ".svg": "image/svg+xml",
+  ".text": "text/plain; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+  ".tif": "image/tiff",
+  ".tiff": "image/tiff",
+  ".wav": "audio/wav",
+  ".webm": "video/webm",
+  ".webp": "image/webp",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
 };
+const inlineContentTypes = new Set([
+  "application/pdf",
+  "audio/flac",
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/ogg",
+  "audio/wav",
+  "image/avif",
+  "image/bmp",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/svg+xml",
+  "image/tiff",
+  "image/x-icon",
+  "image/webp",
+  "text/csv; charset=utf-8",
+  "text/plain; charset=utf-8",
+  "video/mp4",
+  "video/ogg",
+  "video/quicktime",
+  "video/webm",
+]);
 const maxLoginRequestBytes = 16 * 1024;
 const maxDeleteRequestBytes = 8 * 1024;
 
@@ -284,6 +331,43 @@ export function createWorkspaceHandler(
       }
       if (request.method === "GET" && url.pathname === "/api/workspace/file") {
         return json(service.read(url.searchParams.get("path")));
+      }
+      if (
+        request.method === "GET" &&
+        url.pathname === "/api/workspace/metadata"
+      ) {
+        return json(service.metadata(url.searchParams.get("path")));
+      }
+      if (request.method === "GET" && url.pathname === "/api/workspace/raw") {
+        const file = service.download(url.searchParams.get("path"));
+        const extension = file.path
+          .slice(file.path.lastIndexOf("."))
+          .toLowerCase();
+        const contentType =
+          contentTypes[extension] ?? "application/octet-stream";
+        const disposition = inlineContentTypes.has(contentType)
+          ? "inline"
+          : "attachment";
+        const range = parseByteRange(request.headers.get("range"), file.size);
+        const headers: Record<string, string> = {
+          ...securityHeaders(),
+          "Content-Security-Policy":
+            "default-src 'none'; frame-ancestors 'self'",
+          "Content-Disposition": `${disposition}; filename="${file.filename}"`,
+          "Content-Type": contentType,
+          "Accept-Ranges": "bytes",
+        };
+        if (range) {
+          headers["Content-Length"] = String(range.end - range.start + 1);
+          headers["Content-Range"] =
+            `bytes ${range.start}-${range.end}/${file.size}`;
+          return new Response(
+            Bun.file(file.absolute).slice(range.start, range.end + 1),
+            { headers, status: 206 },
+          );
+        }
+        headers["Content-Length"] = String(file.size);
+        return new Response(Bun.file(file.absolute), { headers });
       }
       if (
         request.method === "GET" &&
@@ -553,6 +637,42 @@ export function createWorkspaceHandler(
       return errorResponse(error);
     }
   };
+}
+
+function parseByteRange(
+  value: string | null,
+  size: number,
+): { start: number; end: number } | undefined {
+  if (!value) return undefined;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match || size === 0) {
+    throw new WorkspaceError("invalid byte range", 416, "invalid_range");
+  }
+  const startValue = match[1];
+  const endValue = match[2];
+  let start: number;
+  let end: number;
+  if (startValue) {
+    start = Number(startValue);
+    end = endValue ? Number(endValue) : size - 1;
+  } else {
+    const suffixLength = Number(endValue);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) {
+      throw new WorkspaceError("invalid byte range", 416, "invalid_range");
+    }
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  }
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    start >= size ||
+    end < start
+  ) {
+    throw new WorkspaceError("invalid byte range", 416, "invalid_range");
+  }
+  return { end: Math.min(end, size - 1), start };
 }
 
 function sameOrigin(

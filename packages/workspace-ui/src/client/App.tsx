@@ -14,6 +14,7 @@ import type {
   WorkspaceActivityResponse,
   WorkspaceDiagnosticsResponse,
   WorkspaceFile,
+  WorkspaceFileMetadata,
   WorkspaceGitStatus,
   WorkspaceTreeEntry,
 } from "../shared/api";
@@ -63,6 +64,59 @@ function viewForPath(
   if (requested === "info") return "info";
   if (path && !isMarkdownPath(path) && !isJournalPath(path)) return "edit";
   return requested ?? defaultView(path);
+}
+
+function isArtifactError(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    ["binary_file", "file_too_large", "invalid_utf8"].includes(
+      error.payload?.error ?? "",
+    )
+  );
+}
+
+const artifactExtensions = new Set([
+  ".7z",
+  ".avif",
+  ".bin",
+  ".bmp",
+  ".doc",
+  ".docx",
+  ".flac",
+  ".gif",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".m4a",
+  ".mkv",
+  ".mov",
+  ".mp3",
+  ".mp4",
+  ".oga",
+  ".ogg",
+  ".ogv",
+  ".pdf",
+  ".png",
+  ".ppt",
+  ".pptx",
+  ".rar",
+  ".svg",
+  ".iso",
+  ".tar",
+  ".gz",
+  ".tif",
+  ".tiff",
+  ".wav",
+  ".webm",
+  ".webp",
+  ".xls",
+  ".xlsx",
+  ".zip",
+]);
+
+function isKnownArtifactPath(path: string): boolean {
+  const extension = path.slice(path.lastIndexOf(".")).toLowerCase();
+  return artifactExtensions.has(extension);
 }
 
 function areTreesEqual(
@@ -222,6 +276,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   const [treeTruncated, setTreeTruncated] = useState(false);
   const [filter, setFilter] = useState(() => initialRoute.current.filter ?? "");
   const [file, setFile] = useState<WorkspaceFile | null>(null);
+  const [artifact, setArtifact] = useState<WorkspaceFileMetadata | null>(null);
   const [draft, setDraft] = useState("");
   const [git, setGit] = useState<WorkspaceGitStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -316,7 +371,9 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         : undefined
       : file
         ? buildWorkspaceLink(file.path)
-        : undefined;
+        : artifact
+          ? buildWorkspaceLink(artifact.path)
+          : undefined;
 
   const directories = useMemo(() => {
     const set = new Set<string>();
@@ -335,6 +392,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
   const appStateRef = useRef({
     activeTab,
+    artifact,
     dirty,
     docDirty,
     file,
@@ -349,6 +407,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   });
   appStateRef.current = {
     activeTab,
+    artifact,
     dirty,
     docDirty,
     file,
@@ -594,8 +653,16 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
   useEffect(() => {
     function handlePopState() {
-      const { activeTab, dirty, file, filter, openFile, openSkill, view } =
-        appStateRef.current;
+      const {
+        activeTab,
+        artifact,
+        dirty,
+        file,
+        filter,
+        openFile,
+        openSkill,
+        view,
+      } = appStateRef.current;
       const route = parseRoute(window.location);
 
       if (dirty) {
@@ -645,7 +712,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           void openSkill(route.skill, route.skillFile);
         }
       } else if (route.path) {
-        if (route.path !== file?.path) {
+        if (route.path !== file?.path && route.path !== artifact?.path) {
           void openFile(route.path, {
             requestedView: route.view,
             replaceHistory: true,
@@ -653,6 +720,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         }
       } else {
         setFile(null);
+        setArtifact(null);
         setDraft("");
         setConflict("");
         setDocumentError("");
@@ -670,14 +738,15 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         ? `${selectedSkillDetail.name} - OpenLia Skills`
         : "Skills - OpenLia Workspace";
     } else {
-      if (file?.path) {
-        const name = file.path.split("/").at(-1) ?? file.path;
+      const selectedPath = file?.path ?? artifact?.path;
+      if (selectedPath) {
+        const name = selectedPath.split("/").at(-1) ?? selectedPath;
         document.title = `${name} - OpenLia Workspace`;
       } else {
         document.title = "OpenLia Workspace";
       }
     }
-  }, [activeTab, file?.path, selectedSkillDetail]);
+  }, [activeTab, artifact?.path, file?.path, selectedSkillDetail]);
 
   function handleUnauthorized() {
     setTree([]);
@@ -765,6 +834,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     setSkills([]);
     setGit(null);
     setFile(null);
+    setArtifact(null);
     setDraft("");
     setDiagnostics(null);
     setSelectedSkillDetail(null);
@@ -838,10 +908,39 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     setFileLoading(true);
     setDocumentError("");
     setConflict("");
+    const selectArtifact = (metadata: WorkspaceFileMetadata) => {
+      if (requestSequence !== fileRequestSequence.current) return;
+      setFile(null);
+      setArtifact(metadata);
+      setDraft("");
+      setFilesOpen(false);
+      setView(viewForPath(path, options?.requestedView));
+      const currentRoute =
+        typeof window !== "undefined" ? parseRoute(window.location) : {};
+      navigateRoute(
+        {
+          filter: filter || undefined,
+          path,
+          scenario: currentRoute.scenario,
+          tab: "documents",
+          view: options?.requestedView,
+        },
+        { replace: options?.replaceHistory },
+      );
+    };
+    const treeEntry = tree.find(
+      (entry): entry is WorkspaceTreeEntry & { kind: "file" } =>
+        entry.kind === "file" && entry.path === path,
+    );
     try {
+      if (treeEntry && !treeEntry.editable && isKnownArtifactPath(path)) {
+        selectArtifact(treeEntry);
+        return;
+      }
       const response = await api.loadFile(path);
       if (requestSequence !== fileRequestSequence.current) return;
       setFile(response);
+      setArtifact(null);
       setDraft(response.content);
       setFilesOpen(false);
       const nextView = viewForPath(path, options?.requestedView);
@@ -864,6 +963,19 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         handleUnauthorized();
         return;
       }
+      if (isArtifactError(caught)) {
+        try {
+          const metadata = treeEntry ?? (await api.loadFileMetadata(path));
+          selectArtifact(metadata);
+          return;
+        } catch (metadataError) {
+          if (metadataError instanceof ApiError && metadataError.status === 401)
+            handleUnauthorized();
+          else
+            setDocumentError("This document could not be opened. Try again.");
+          return;
+        }
+      }
       setDocumentError("This document could not be opened. Try again.");
     } finally {
       if (requestSequence === fileRequestSequence.current)
@@ -873,7 +985,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
   function requestOpenFile(path: string) {
     if (!path) {
-      if (!file) {
+      if (!file && !artifact) {
         setFilesOpen(false);
         return;
       }
@@ -881,6 +993,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         setPendingAction({ kind: "open", path: "" });
       } else {
         setFile(null);
+        setArtifact(null);
         setDraft("");
         setConflict("");
         setDocumentError("");
@@ -895,7 +1008,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       }
       return;
     }
-    if (path === file?.path) {
+    if (path === (file?.path ?? artifact?.path)) {
       setFilesOpen(false);
       return;
     }
@@ -1045,6 +1158,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       setPendingDelete(null);
       if (file?.path === pending.path) {
         setFile(null);
+        setArtifact(null);
         setDraft("");
         setConflict("");
         setDocumentError("");
@@ -1083,6 +1197,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       } else if (caught instanceof ApiError && caught.status === 404) {
         setPendingDelete(null);
         setFile(null);
+        setArtifact(null);
         setDraft("");
         setConflict("");
         setDocumentError("This document no longer exists.");
@@ -1332,6 +1447,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         void openFile(action.path, { requestedView: action.view });
       } else {
         setFile(null);
+        setArtifact(null);
         setDraft("");
         navigateRoute({ tab: "documents", view }, { replace: true });
       }
@@ -1361,6 +1477,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         void openFile(action.path, { requestedView: action.view });
       } else {
         setFile(null);
+        setArtifact(null);
         setDraft("");
         navigateRoute({ tab: "documents", view }, { replace: true });
       }
@@ -1382,7 +1499,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     navigateRoute(
       {
         filter: normalizedFilter || undefined,
-        path: file?.path,
+        path: file?.path ?? artifact?.path,
         scenario: currentRoute.scenario,
         tab: "documents",
         view,
@@ -1392,7 +1509,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   }
 
   function handleViewChange(nextView: WorkspaceView) {
-    const normalizedView = viewForPath(file?.path, nextView);
+    const normalizedView = viewForPath(file?.path ?? artifact?.path, nextView);
     setView(normalizedView);
     if (normalizedView === "info") setDetailsOpen(true);
     const currentRoute =
@@ -1400,7 +1517,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     navigateRoute(
       {
         filter: filter || undefined,
-        path: file?.path,
+        path: file?.path ?? artifact?.path,
         scenario: currentRoute.scenario,
         tab: activeTab,
         view: normalizedView,
@@ -1417,10 +1534,10 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       typeof window !== "undefined" &&
       !window.matchMedia("(min-width: 1280px)").matches
     ) {
-      nextView = nextOpen ? "info" : defaultView(file?.path);
+      nextView = nextOpen ? "info" : defaultView(file?.path ?? artifact?.path);
       setView(nextView);
     } else if (!nextOpen && view === "info") {
-      nextView = defaultView(file?.path);
+      nextView = defaultView(file?.path ?? artifact?.path);
       setView(nextView);
     }
     const currentRoute =
@@ -1428,7 +1545,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     navigateRoute(
       {
         filter: filter || undefined,
-        path: file?.path,
+        path: file?.path ?? artifact?.path,
         scenario: currentRoute.scenario,
         tab: activeTab,
         view: nextView,
@@ -1494,7 +1611,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         currentLink={currentLink}
         dirty={dirty}
         exporting={exporting}
-        file={activeTab === "skills" ? null : file}
+        file={activeTab === "skills" ? null : (file ?? artifact)}
         filesButtonRef={filesButtonRef}
         git={git}
         onExport={handleExport}
@@ -1529,20 +1646,23 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
               filesButtonRef.current?.focus();
             }}
             onDeleteFile={(path) => requestDelete(path)}
+            downloadUrl={api.downloadUrl}
             onFilterChange={handleFilterChange}
             onMoveFile={(path) => requestMove(path)}
             onOpenFile={requestOpenFile}
             onOpenActivity={() => requestOpenFile("")}
             onRenameFile={(path) => requestRename(path)}
             onRetry={() => void loadWorkspace()}
+            rawUrl={api.rawUrl}
             revealToken={revealToken}
-            selectedPath={file?.path}
+            selectedPath={file?.path ?? artifact?.path}
             truncated={treeTruncated}
             workspaceError={workspaceError}
           />
           <DocumentPane
             activity={activity}
             activityLoading={activityLoading}
+            artifact={artifact}
             conflict={conflict}
             deleting={deleting}
             detailsOpen={detailsOpen}
@@ -1556,7 +1676,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             onCloseFiles={() => setFilesOpen(true)}
             onDelete={() => requestDelete()}
             onDownload={() => {
-              if (file) window.location.href = api.downloadUrl(file.path);
+              const path = file?.path ?? artifact?.path;
+              if (path) window.location.href = api.downloadUrl(path);
             }}
             onDraftChange={setDraft}
             onMove={() => requestMove()}
@@ -1581,10 +1702,11 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
                 setDiagnosticsLoading(false);
               });
             }}
-            onRevealInTree={file ? handleRevealInTree : undefined}
+            onRevealInTree={file || artifact ? handleRevealInTree : undefined}
             onRetry={() => {
               const pathToRetry =
                 file?.path ??
+                artifact?.path ??
                 (typeof window !== "undefined"
                   ? parseRoute(window.location).path
                   : undefined);
@@ -1593,6 +1715,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             }}
             onSave={() => void save()}
             onViewChange={handleViewChange}
+            rawUrl={api.rawUrl}
+            downloadUrl={api.downloadUrl}
             saving={saving}
             view={view}
           />
