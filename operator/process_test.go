@@ -24,7 +24,7 @@ func (r *environmentRecordingRunner) RunWithEnv(_ context.Context, environment [
 
 func TestComposeRunPassesResolvedRuntimeEnvironment(t *testing.T) {
 	config := testConfig(t.TempDir(), t.TempDir())
-	config.EnabledTools = []string{"pdf", "ocr"}
+	config.IngestionMaxConcurrentJobs = 2
 	runner := &environmentRecordingRunner{}
 	compose := NewCompose(config, runner)
 	if _, err := compose.Run(context.Background(), "config", "--quiet"); err != nil {
@@ -36,7 +36,7 @@ func TestComposeRunPassesResolvedRuntimeEnvironment(t *testing.T) {
 		"OPENLIA_SYSTEM_SKILLS_ROOT=" + config.SystemSkillsRoot,
 		"OPENLIA_SECRET_DIR=" + config.SecretDir,
 		"OPENLIA_NETWORK_NAME=" + config.NetworkName,
-		"OPENLIA_ENABLED_TOOLS=pdf,ocr",
+		"OPENLIA_INGESTION_MAX_CONCURRENT_JOBS=2",
 	} {
 		if !strings.Contains(environment, expected) {
 			t.Fatalf("Compose environment missing %q:\n%s", expected, environment)

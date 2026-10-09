@@ -39,7 +39,7 @@ To use and understand OpenLia, it is essential to distinguish between **two dist
 | **Primary Tool**     | Telegram, Open WebUI, Workspace Editor                                          | `openlia` CLI (terminal on workstation)                                            |
 | **Responsibilities** | Daily goals, quick capture, meeting prep, financial ledger, decision trade-offs | Deployment, VM setup, API keys, rotation, backups, updates, system health          |
 | **Data Handled**     | Personal journal, projects, health records, knowledge claims, calendar notes    | SSH credentials, LLM API keys, Docker containers, disk mounts, Age encryption keys |
-| **Policy Control**   | `assistant-policy.yaml` (delegated autonomy vs. explicit user confirmations)    | System resource limits, tool allowlists (`tools.enabled`), network topology        |
+| **Policy Control**   | `assistant-policy.yaml` (delegated autonomy vs. explicit user confirmations)    | System resource limits, required ingestion dependencies, network topology            |
 | **Cadence**          | Multiple times daily                                                            | Setup once; periodic updates, secret rotation, and backup monitoring               |
 
 > [!TIP]
@@ -606,40 +606,27 @@ model = "official-openai-model"
 The `fallback_providers` table order is the failover order. Use the actual
 Locho Compose hostname, service port, and model IDs for your deployment.
 
-### Optional Tools
+### Ingestion Runtime
 
-OpenLia can add curated command-line capabilities to the Hermes image. Enable
-only the bundles the deployment needs:
+The Hermes image includes the required ingestion runtime. It supports chat text,
+text files, PDF, images, modern and legacy Excel, CSV, and YouTube metadata or
+transcripts. It retains originals under the registered `sources/` library and
+uses the configured vision-capable LLM for scanned pages and images. No optional
+tools configuration is needed.
 
 ```toml
-[tools]
-enabled = ["pdf", "office", "ocr", "media-transcripts"]
+[ingestion]
+max_concurrent_jobs = 1
 ```
 
-| Capability          | Installed commands and scope                                                                              |
-| ------------------- | --------------------------------------------------------------------------------------------------------- |
-| `pdf`               | Poppler utilities including `pdftotext` and `pdfinfo`                                                     |
-| `office`            | Headless LibreOffice Writer and Calc for Word and Excel files, including legacy `.doc` and `.xls` formats |
-| `ocr`               | Tesseract OCR with English language data                                                                  |
-| `media-transcripts` | Pinned `yt-dlp` 2026.8.19 and `ffmpeg` for captions and media from supported public URLs                  |
+The concurrency setting defaults to one and must be a positive integer. Higher
+values increase CPU, memory, disk, network, and workspace publication contention.
+YouTube transcript availability depends on the source; the first version does
+not support Google Docs, Word, arbitrary URLs, Facebook, or TikTok.
 
-The list is an allowlist of capability names, not operating-system package
-names. Unknown and duplicate values are rejected. The default is an empty list
-so existing deployments retain the smaller base image. After changing the
-list, run `openlia deploy` to rebuild and recreate Hermes.
-
-`media-transcripts` retrieves subtitles or automatic captions when the source
-site exposes them. It does not perform local speech-to-text. YouTube, Twitter,
-and Facebook behavior depends on the pinned `yt-dlp` extractor support; private,
-age-gated, or authenticated media is not supported by this initial capability.
-
-Optional OS packages are resolved from the dated Debian snapshot pinned in the
-Compose build arguments. Updating that snapshot is an intentional dependency
-refresh and should be accompanied by a new image verification run.
-
-Managed Hermes image names include the project, base-image identity, and a hash
-of the canonical tool set. This prevents two OpenLia projects on one Docker
-host from replacing each other's tool-enabled image. Custom
+Managed Hermes image names include the project, base-image identity, and the
+required ingestion dependency revision. This prevents two OpenLia projects on
+one Docker host from replacing each other's ingestion image. Custom
 `components.hermes_image` values remain the operator's responsibility to keep
 isolated between projects.
 

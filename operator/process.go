@@ -167,7 +167,7 @@ func (c Compose) composeEnvironment() []string {
 		"OPENLIA_AWS_CREDENTIALS_SOURCE=" + awsCredentials,
 		"OPENLIA_AWS_CONFIG_SOURCE=" + awsConfig,
 		"OPENLIA_NETWORK_NAME=" + c.Config.NetworkName,
-		"OPENLIA_ENABLED_TOOLS=" + strings.Join(c.Config.EnabledTools, ","),
+		"OPENLIA_INGESTION_MAX_CONCURRENT_JOBS=" + strconv.Itoa(c.Config.IngestionMaxConcurrentJobs),
 	}
 }
 

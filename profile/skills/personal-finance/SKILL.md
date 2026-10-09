@@ -43,11 +43,12 @@ registered finance paths and their templates rather than inventing a destination
 - Record the authority used (`direct-request` or `standing-delegation`) in the
   intake record or output. Never silently broaden the authorized batch.
 
-Raw statements, payslips, screenshots, exports, credentials, account numbers,
-private keys, and tokens must remain in an approved private source location
-outside the tracked workspace. Finance intake records may contain a stable
-private-source reference, source identifier or checksum, covered dates, and
-extracted facts. Never copy a raw export into the workspace or profile.
+Retained statements, payslips, screenshots, and exports captured by durable
+ingestion live under the registered `sources/` library. Credentials, account
+numbers, private keys, and tokens remain prohibited. Finance intake records may
+contain a stable source reference, source identifier or checksum, covered dates,
+and extracted facts. Never copy service authentication material into the
+workspace or profile.
 
 ## Data Model
 

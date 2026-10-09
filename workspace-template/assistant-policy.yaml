@@ -18,6 +18,7 @@ delegation:
       - record_financial_data
     allowed_domains:
       - inbox
+      - sources
       - goals
       - areas
       - projects

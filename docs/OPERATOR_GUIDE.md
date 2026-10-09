@@ -51,9 +51,9 @@ model = "gpt-5.6-luna"
 output_language = "en"
 timezone = "America/New_York"
 
-# Allowlist optional command-line tools in the Hermes container
-[tools]
-enabled = ["pdf", "office", "ocr", "media-transcripts"]
+# Required durable ingestion worker concurrency
+[ingestion]
+max_concurrent_jobs = 1
 
 # Web chat interface
 [open-webui]

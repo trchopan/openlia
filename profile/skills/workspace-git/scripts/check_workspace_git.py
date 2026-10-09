@@ -25,6 +25,7 @@ DOMAIN_MESSAGES: dict[str, str] = {
     "health": "docs(health): update medical history",
     "calendar": "docs(calendar): update event notes",
     "ideas": "docs(ideas): update ideas and exploration",
+    "sources": "docs(sources): update retained source artifacts",
     "archive": "chore(archive): archive stale records",
     "workspace": "chore(workspace): update workspace configuration",
 }
@@ -84,6 +85,7 @@ def self_test() -> None:
     assert categorize_workspace_path("tasks/do-thing.md") == "tasks"
     assert categorize_workspace_path("inbox/capture.md") == "inbox"
     assert categorize_workspace_path("workspace.yaml") == "workspace"
+    assert categorize_workspace_path("sources/records/src_example.md") == "sources"
 
     # Clean workspace -> empty plan (no commit)
     assert group_workspace_changes([]) == []

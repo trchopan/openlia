@@ -4,10 +4,17 @@ set -eu
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-for command in ffmpeg libreoffice pdfinfo pdftoppm pdftotext tesseract yt-dlp; do
+for command in ffmpeg ffprobe pdfinfo pdftoppm pdftotext yt-dlp; do
     command -v "$command" >/dev/null
 done
-tesseract --list-langs | grep -qx eng
+/opt/hermes/.venv/bin/python - <<'PY'
+import jsonschema
+import openpyxl
+import PIL
+import pypdfium2
+import xlrd
+import msoffcrypto
+PY
 
 python3 - "$work/sample.pdf" <<'PY'
 import sys
@@ -37,38 +44,16 @@ with open(path, "wb") as output:
 PY
 pdftotext "$work/sample.pdf" "$work/sample.txt"
 grep -Fqx 'OpenLia PDF' "$work/sample.txt"
-pdftoppm -png -singlefile "$work/sample.pdf" "$work/sample" >/dev/null
-tesseract "$work/sample.png" "$work/ocr" >/dev/null 2>&1
-grep -Fq 'OpenLia PDF' "$work/ocr.txt"
-
-python3 - "$work/sample.docx" <<'PY'
-import sys
-import zipfile
-
-document = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body><w:p><w:r><w:t>OpenLia Office</w:t></w:r></w:p></w:body>
-</w:document>'''
-content_types = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxml-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-</Types>'''
-relationships = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-</Relationships>'''
-with zipfile.ZipFile(sys.argv[1], "w") as output:
-    output.writestr("[Content_Types].xml", content_types)
-    output.writestr("_rels/.rels", relationships)
-    output.writestr("word/document.xml", document)
-PY
-libreoffice --headless --convert-to txt:Text --outdir "$work" "$work/sample.docx" >/dev/null
-grep -Fq 'OpenLia Office' "$work/sample.txt"
-
 printf '%s\n' 'name,value' 'OpenLia,1' >"$work/sample.csv"
-libreoffice --headless --convert-to xlsx --outdir "$work" "$work/sample.csv" >/dev/null
+python3 - "$work/sample.xlsx" <<'PY'
+import sys
+from openpyxl import Workbook
+book = Workbook()
+sheet = book.active
+sheet.append(["name", "value"])
+sheet.append(["OpenLia", 1])
+book.save(sys.argv[1])
+PY
 test -s "$work/sample.xlsx"
 
 ffmpeg -version >/dev/null

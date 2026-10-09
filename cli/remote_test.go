@@ -75,16 +75,16 @@ func TestOperationCommandIncludesOutputLanguage(t *testing.T) {
 	}
 }
 
-func TestOperationCommandIncludesEnabledTools(t *testing.T) {
+func TestOperationCommandIncludesIngestionConcurrency(t *testing.T) {
 	config := defaultConfig()
 	config.Target = "operator@example.test"
-	config.EnabledTools = []string{"pdf", "media-transcripts"}
+	config.IngestionMaxConcurrentJobs = 2
 	command := (Remote{Config: config}).operationCommand("ops/deploy.sh")
-	if !strings.Contains(command, "OPENLIA_ENABLED_TOOLS='pdf,media-transcripts'") {
-		t.Fatalf("operation command does not include enabled tools: %s", command)
+	if !strings.Contains(command, "OPENLIA_INGESTION_MAX_CONCURRENT_JOBS='2'") {
+		t.Fatalf("operation command does not include ingestion concurrency: %s", command)
 	}
-	if !strings.Contains(strings.Join(operationEnvironment(config, "/tmp/release"), "\n"), "OPENLIA_ENABLED_TOOLS=pdf,media-transcripts") {
-		t.Fatal("local environment does not transport enabled tools")
+	if !strings.Contains(strings.Join(operationEnvironment(config, "/tmp/release"), "\n"), "OPENLIA_INGESTION_MAX_CONCURRENT_JOBS=2") {
+		t.Fatal("local environment does not transport ingestion concurrency")
 	}
 }
 
@@ -92,7 +92,6 @@ func TestOperationCommandUsesProjectScopedManagedHermesImage(t *testing.T) {
 	first := defaultConfig()
 	first.Target = "operator@example.test"
 	first.Project = "first"
-	first.EnabledTools = []string{"pdf"}
 	second := first
 	second.Project = "second"
 	firstCommand := (Remote{Config: first}).operationCommand("ops/deploy.sh")

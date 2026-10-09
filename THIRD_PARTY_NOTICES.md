@@ -38,12 +38,11 @@ The derived images use these pinned base images:
   `sha256:109e2c65005bf160609e4ba6acf7783752f8502ad218e298253428690b9eaa4b`.
 
 The Dockerfiles install distribution packages including `ca-certificates`,
-`curl`, `git`, `hledger`, `passwd`, `tzdata`, `unzip`, and `xz-utils`. Optional
-tool capabilities may also install Poppler, LibreOffice Writer and Calc
-headless packages,
-Tesseract OCR and English language data, FFmpeg, and yt-dlp. These packages and
+`curl`, `ffmpeg`, `git`, `hledger`, Poppler utilities, `tzdata`, `unzip`, and
+`xz-utils`, plus the pinned `yt-dlp` runtime and Python document-processing
+libraries. These packages and
 their transitive dependencies have package-specific licenses and copyright
-notices. The optional image build resolves Debian packages from the dated
+notices. The image build resolves Debian packages from the dated
 `20260505T000000Z` snapshot configured in `docker/compose.yaml`, making package
 resolution reproducible for that snapshot. For a built image, inspect the
 package metadata and files under

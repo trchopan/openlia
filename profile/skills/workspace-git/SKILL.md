@@ -35,6 +35,9 @@ synchronize workspace history over the network.
 
 - Never put tokens, credentials, OAuth files, private keys, or raw secret
   exports in the workspace.
+- `sources/document-passwords.toml` is an intentional plaintext exception for
+  user-provided document-unlock passwords. Never print its contents or include
+  password values in commit messages or reports.
 - Never stage or commit `.env`, `auth.json`, `sessions/`, `logs/`, or `cache/`.
 - Never use `git reset --hard`, `git clean`, or destructive conflict handling.
 - Do not add a Git remote or use Git network operations; use OpenLia backups
@@ -61,7 +64,8 @@ synchronize workspace history over the network.
    Or group files logically by directory:
    - `tasks/` & `projects/` -> `docs(tasks): update task records`
    - `inbox/` -> `docs(inbox): file intake records`
-   - `knowledge/` -> `feat(knowledge): update research and claims`
+    - `knowledge/` -> `feat(knowledge): update research and claims`
+    - `sources/` -> `docs(sources): update retained source artifacts`
    - `reports/` -> `docs(reports): archive generated reports`
    - `decisions/` -> `docs(decisions): record decision log`
    - `areas/` -> `docs(areas): update area standards`

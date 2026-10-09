@@ -24,7 +24,7 @@ func TestEmbeddedWorkspaceIncludesControlFiles(t *testing.T) {
 	}
 }
 
-func TestEmbeddedRuntimeWiresOptionalTools(t *testing.T) {
+func TestEmbeddedRuntimeWiresRequiredIngestion(t *testing.T) {
 	compose, err := fs.ReadFile(releaseAssets, "docker/compose.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -33,14 +33,11 @@ func TestEmbeddedRuntimeWiresOptionalTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(compose), `OPENLIA_ENABLED_TOOLS: "${OPENLIA_ENABLED_TOOLS:-}"`) {
-		t.Fatal("embedded Compose file does not pass optional tools as a build argument")
-	}
 	if !strings.Contains(string(compose), `DEBIAN_SNAPSHOT: "${DEBIAN_SNAPSHOT:-20260505T000000Z}"`) {
 		t.Fatal("embedded Compose file does not pin the Debian snapshot")
 	}
-	if !strings.Contains(string(dockerfile), "openlia-install-tools") {
-		t.Fatal("embedded Dockerfile does not run the optional tool installer")
+	if !strings.Contains(string(dockerfile), "openlia-install-tools") || !strings.Contains(string(dockerfile), "openlia-ingestion") {
+		t.Fatal("embedded Dockerfile does not install the required ingestion runtime")
 	}
 }
 
