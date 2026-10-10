@@ -1,0 +1,127 @@
+package operator
+
+import (
+	"archive/zip"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+type WorkspaceExportResult struct {
+	OK         bool   `json:"ok"`
+	OutputFile string `json:"output_file"`
+	FilesCount int    `json:"files_count"`
+	SizeBytes  int64  `json:"size_bytes"`
+}
+
+func isExportNoise(relPath string, info os.FileInfo) bool {
+	if info.Mode()&os.ModeSymlink != 0 {
+		return true
+	}
+	parts := strings.Split(filepath.ToSlash(relPath), "/")
+	for _, part := range parts {
+		if part == ".git" || part == ".obsidian" || part == ".trash" ||
+			part == ".DS_Store" || strings.EqualFold(part, "thumbs.db") ||
+			part == "desktop.ini" || strings.HasPrefix(part, "._") {
+			return true
+		}
+	}
+	return false
+}
+
+func addDirectoryToZip(w *zip.Writer, rootDir, archivePrefix string) (int, error) {
+	if _, err := os.Stat(rootDir); os.IsNotExist(err) {
+		return 0, nil
+	}
+	count := 0
+	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(rootDir, path)
+		if err != nil || rel == "." {
+			return nil
+		}
+		if isExportNoise(rel, info) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		cleanRel := filepath.ToSlash(rel)
+		zipPath := archivePrefix + "/" + cleanRel
+
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+		header.Name = zipPath
+		header.Method = zip.Deflate
+
+		writer, err := w.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		if _, err := io.Copy(writer, file); err != nil {
+			return err
+		}
+		count++
+		return nil
+	})
+	return count, err
+}
+
+func WorkspaceExport(config Config, outputFile string) (WorkspaceExportResult, error) {
+	if err := os.MkdirAll(filepath.Dir(outputFile), 0o700); err != nil {
+		return WorkspaceExportResult{}, fmt.Errorf("create export parent directory: %w", err)
+	}
+
+	zipFile, err := os.OpenFile(outputFile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return WorkspaceExportResult{}, fmt.Errorf("create export file: %w", err)
+	}
+	defer zipFile.Close()
+
+	zipWriter := zip.NewWriter(zipFile)
+
+	workspaceDir := filepath.Join(config.DataRoot, "workspace")
+	wsCount, err := addDirectoryToZip(zipWriter, workspaceDir, "workspace")
+	if err != nil {
+		return WorkspaceExportResult{}, fmt.Errorf("archive workspace: %w", err)
+	}
+
+	skillsDir := filepath.Join(config.DataRoot, "skills")
+	skCount, err := addDirectoryToZip(zipWriter, skillsDir, "skills")
+	if err != nil {
+		return WorkspaceExportResult{}, fmt.Errorf("archive skills: %w", err)
+	}
+
+	if err := zipWriter.Close(); err != nil {
+		return WorkspaceExportResult{}, fmt.Errorf("close zip writer: %w", err)
+	}
+
+	info, err := zipFile.Stat()
+	if err != nil {
+		return WorkspaceExportResult{}, fmt.Errorf("stat export file: %w", err)
+	}
+
+	return WorkspaceExportResult{
+		OK:         true,
+		OutputFile: outputFile,
+		FilesCount: wsCount + skCount,
+		SizeBytes:  info.Size(),
+	}, nil
+}

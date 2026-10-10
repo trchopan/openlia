@@ -61,7 +61,7 @@ func Run(args []string, assets fs.FS) int {
 	case "backup":
 		return commandBackup(options, remaining[1:])
 	case "workspace":
-		return commandWorkspace(options, remaining[1:])
+		return commandWorkspace(options, remaining[1:], assets)
 	case "instructions":
 		return commandInstructions(options, remaining[1:])
 	case "workspace-ui":
@@ -1693,11 +1693,15 @@ func formatRemoteBackupList(archives []remoteBackupArchive) string {
 	return strings.TrimSuffix(builder.String(), "\n")
 }
 
-func commandWorkspace(options Options, args []string) int {
+func commandWorkspace(options Options, args []string, assets fs.FS) int {
 	if len(args) == 0 {
-		return fail(options, ExitUsage, "workspace requires git or migrate subcommand", nil)
+		return fail(options, ExitUsage, "workspace requires serve, export, git, or migrate subcommand", nil)
 	}
 	switch args[0] {
+	case "serve":
+		return commandWorkspaceServe(options, args[1:], assets)
+	case "export":
+		return commandWorkspaceExport(options, args[1:])
 	case "git":
 		return commandWorkspaceGit(options, args[1:])
 	case "migrate":

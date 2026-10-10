@@ -102,6 +102,8 @@ func RunContext(ctx context.Context, args []string, input io.Reader, output, err
 		return runWorkspaceGit(ctx, config, args, output, errorOutput, jsonOutput)
 	case "workspace-migrate":
 		return runWorkspaceMigrate(ctx, config, args, output, errorOutput, jsonOutput)
+	case "workspace-export":
+		return runWorkspaceExport(ctx, config, args, output, errorOutput, jsonOutput)
 	case "instructions":
 		return runInstructions(config, args, input, output, errorOutput, jsonOutput, now)
 	case "uninstall":
@@ -479,6 +481,24 @@ func runWorkspaceGit(ctx context.Context, config Config, args []string, output, 
 	return emit(output, result, jsonOutput, "openlia workspace git: operation completed")
 }
 
+func runWorkspaceExport(ctx context.Context, config Config, args []string, output, errorOutput io.Writer, jsonOutput bool) int {
+	outputFile := ""
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--output" && i+1 < len(args) {
+			outputFile = args[i+1]
+			i++
+		}
+	}
+	if outputFile == "" {
+		return commandError(output, errorOutput, jsonOutput, ExitUsage, fmt.Errorf("workspace-export requires --output"))
+	}
+	result, err := WorkspaceExport(config, outputFile)
+	if err != nil {
+		return commandError(output, errorOutput, jsonOutput, ExitFailure, err)
+	}
+	return emit(output, result, jsonOutput, fmt.Sprintf("openlia workspace-export: %d files exported (%d bytes)", result.FilesCount, result.SizeBytes))
+}
+
 func emit(output io.Writer, value any, jsonOutput bool, human string) int {
 	if jsonOutput {
 		if err := WriteJSON(output, value); err != nil {
@@ -614,7 +634,7 @@ Usage:
 
 Subcommands:
 	  bootstrap profile skill-status skill-fork skill-migration backup attachments locho-host auth deploy
-	  healthcheck workspace-git workspace-migrate instructions uninstall`)
+	  healthcheck workspace-git workspace-migrate workspace-export instructions uninstall`)
 }
 
 func runWorkspaceMigrate(ctx context.Context, config Config, args []string, output, errorOutput io.Writer, jsonOutput bool) int {

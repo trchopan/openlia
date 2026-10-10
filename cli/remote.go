@@ -227,7 +227,7 @@ func (remote Remote) operation(ctx context.Context, script string, input []byte,
 
 func remoteOperationReadOnly(script string, args []string) bool {
 	switch filepath.ToSlash(script) {
-	case "healthcheck", "skill-status", "locho-host":
+	case "healthcheck", "skill-status", "locho-host", "workspace-export":
 		return true
 	case "instructions":
 		return len(args) > 0 && (args[0] == "status" || args[0] == "diff")
@@ -313,6 +313,8 @@ func operatorArguments(operation string, args []string) ([]string, bool) {
 		command = "uninstall"
 	case "workspace-migrate":
 		command = "workspace-migrate"
+	case "workspace-export":
+		command = "workspace-export"
 	case "instructions":
 		command = "instructions"
 	case "ops/bootstrap.sh":
@@ -343,7 +345,7 @@ func operatorArguments(operation string, args []string) ([]string, bool) {
 
 func operatorOnlyOperation(operation string) bool {
 	switch filepath.ToSlash(operation) {
-	case "workspace-git", "ops/workspace-git.sh", "workspace-migrate", "instructions":
+	case "workspace-git", "ops/workspace-git.sh", "workspace-migrate", "workspace-export", "instructions":
 		return true
 	default:
 		return false
