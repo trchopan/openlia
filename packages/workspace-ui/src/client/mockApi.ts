@@ -80,6 +80,68 @@ export function createMockWorkspaceApi({
       kind: "file",
     },
     {
+      ...metadata(
+        "calendar/reminders.rem",
+        `# OpenLia Workspace Calendar
+INCLUDE holidays.rem
+
+REM 2026-10-15 AT 10:00 DURATION 1:30 TAG sprint PRIORITY 100 \\
+    INFO "Location: 123 Market St, Room 4" \\
+    INFO "Map-Url: https://maps.google.com/?q=123+Market+St" \\
+    INFO "Video-Link: https://meet.google.com/abc-defg-hij" \\
+    INFO "Attendees: Alice <alice@example.com>, Bob, [[Charlie]]" \\
+    INFO "Description: Quarterly strategy sync and roadmap review" \\
+    INFO "Event-Note: calendar/2026-10-15-q4-sync.md" \\
+    MSG Q4 Strategy Sync
+
+REM 2026-10-16 AT 14:00 DURATION 45 TAG 1on1 \\
+    INFO "Video-Link: https://meet.google.com/xyz-uvwx-rst" \\
+    INFO "Attendees: Sarah" \\
+    INFO "Description: Bi-weekly 1:1 check-in" \\
+    MSG Sarah 1:1 Sync
+
+REM 2026-10-20 AT 11:00 DURATION 1:00 TAG architecture \\
+    INFO "Location: Engineering Lounge" \\
+    INFO "Video-Link: https://zoom.us/j/9876543210" \\
+    INFO "Attendees: Dave, Elena, Frank" \\
+    INFO "Description: API V2 design discussion" \\
+    MSG API Architecture Review
+
+REM Mon AT 09:30 DURATION 30 TAG team recurring MSG Weekly Team Standup
+
+REM Fri AT 16:30 DURATION 45 TAG team recurring MSG Friday Demo & Retro
+`,
+      ),
+      kind: "file",
+    },
+    {
+      ...metadata(
+        "calendar/holidays.rem",
+        `# Company & National Holidays
+REM 2026-10-12 MSG Columbus Day / Indigenous Peoples' Day
+REM 2026-10-31 TAG social MSG Halloween Celebration
+`,
+      ),
+      kind: "file",
+    },
+    {
+      ...metadata(
+        "calendar/2026-10-15-q4-sync.md",
+        `# Q4 Strategy Sync Notes
+
+- **Date**: 2026-10-15
+- **Time**: 10:00 - 11:30
+- **Attendees**: Alice, Bob, Charlie
+
+## Agenda
+1. Review Q3 Milestones
+2. Finalize Q4 Roadmap
+3. Resource allocation
+`,
+      ),
+      kind: "file",
+    },
+    {
       ...metadata("workspace.yaml", "domains:\n  - inbox\n"),
       kind: "file",
     },
@@ -203,10 +265,57 @@ export function createMockWorkspaceApi({
 `,
     "projects/project.md": "# Project\n\nA sample project.\n",
     "tasks/task.md": "# Task\n\nA sample task.\n",
+    "calendar/reminders.rem": `# OpenLia Workspace Calendar
+INCLUDE holidays.rem
+
+REM 2026-10-15 AT 10:00 DURATION 1:30 TAG sprint PRIORITY 100 \\
+    INFO "Location: 123 Market St, Room 4" \\
+    INFO "Map-Url: https://maps.google.com/?q=123+Market+St" \\
+    INFO "Video-Link: https://meet.google.com/abc-defg-hij" \\
+    INFO "Attendees: Alice <alice@example.com>, Bob, [[Charlie]]" \\
+    INFO "Description: Quarterly strategy sync and roadmap review" \\
+    INFO "Event-Note: calendar/2026-10-15-q4-sync.md" \\
+    MSG Q4 Strategy Sync
+
+REM 2026-10-16 AT 14:00 DURATION 45 TAG 1on1 \\
+    INFO "Video-Link: https://meet.google.com/xyz-uvwx-rst" \\
+    INFO "Attendees: Sarah" \\
+    INFO "Description: Bi-weekly 1:1 check-in" \\
+    MSG Sarah 1:1 Sync
+
+REM 2026-10-20 AT 11:00 DURATION 1:00 TAG architecture \\
+    INFO "Location: Engineering Lounge" \\
+    INFO "Video-Link: https://zoom.us/j/9876543210" \\
+    INFO "Attendees: Dave, Elena, Frank" \\
+    INFO "Description: API V2 design discussion" \\
+    MSG API Architecture Review
+
+REM Mon AT 09:30 DURATION 30 TAG team recurring MSG Weekly Team Standup
+
+REM Fri AT 16:30 DURATION 45 TAG team recurring MSG Friday Demo & Retro
+`,
+    "calendar/holidays.rem": `# Company & National Holidays
+REM 2026-10-12 MSG Columbus Day / Indigenous Peoples' Day
+REM 2026-10-31 TAG social MSG Halloween Celebration
+`,
+    "calendar/2026-10-15-q4-sync.md": `# Q4 Strategy Sync Notes
+
+- **Date**: 2026-10-15
+- **Time**: 10:00 - 11:30
+- **Attendees**: Alice, Bob, Charlie
+
+## Agenda
+1. Review Q3 Milestones
+2. Finalize Q4 Roadmap
+3. Resource allocation
+`,
     [path]: content,
   };
   const fileRevisions: Record<string, string> = {
     "calendar/event.md": "sha256:mock-calendar",
+    "calendar/reminders.rem": "sha256:mock-reminders",
+    "calendar/holidays.rem": "sha256:mock-holidays",
+    "calendar/2026-10-15-q4-sync.md": "sha256:mock-q4-sync",
     "workspace.yaml": "sha256:mock-workspace",
     "finance/journal.hledger": "sha256:mock-journal",
     "projects/project.md": "sha256:mock-project",

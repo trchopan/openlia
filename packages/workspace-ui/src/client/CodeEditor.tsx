@@ -54,9 +54,17 @@ export function isJournalPath(path: string): boolean {
   return lower.endsWith(".journal") || lower.endsWith(".hledger");
 }
 
+export function isRemindPath(path: string): boolean {
+  const lower = path.toLowerCase();
+  return lower.endsWith(".rem") || lower.endsWith(".remind");
+}
+
 export function detectLanguage(path: string): { id: string; name: string } {
   const ext = path.toLowerCase().split(".").pop() ?? "";
   switch (ext) {
+    case "rem":
+    case "remind":
+      return { id: "remind", name: "Remind" };
     case "py":
       return { id: "python", name: "Python" };
     case "sh":

@@ -676,8 +676,8 @@ messages:
     expect(
       within(screen.getByRole("navigation", { name: "Workspace navigation" }))
         .getAllByRole("button")
-        .map((button) => button.textContent),
-    ).toEqual(["Documents", "Skills", "Git"]);
+        .map((btn) => btn.textContent?.trim()),
+    ).toEqual(["Documents", "Calendar", "Skills", "Git"]);
 
     for (const tab of ["Skills", "Configuration"]) {
       fireEvent.click(screen.getByRole("button", { name: tab }));
@@ -687,6 +687,31 @@ messages:
       ).toBeInTheDocument();
       expect(window.location.pathname).toBe("/");
     }
+  });
+
+  test("navigates to Calendar and displays visual calendar preview for reminders.rem", async () => {
+    render(<App api={createMockWorkspaceApi()} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Recent Changes" }),
+    ).toBeInTheDocument();
+
+    // Click Calendar in navigation
+    const nav = screen.getByRole("navigation", {
+      name: "Workspace navigation",
+    });
+    const calendarButton = within(nav).getByRole("button", {
+      name: "Calendar",
+    });
+    fireEvent.click(calendarButton);
+
+    // Expect calendar to load reminders.rem in preview mode
+    expect(await screen.findByText("Q4 Strategy Sync")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Month" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(calendarButton).toHaveAttribute("aria-current", "page");
   });
 
   test("navigates to Git Activity tab and displays commit history", async () => {
