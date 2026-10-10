@@ -84,6 +84,9 @@ RUN /usr/local/bin/openlia-install-tools \
         --requirement /tmp/openlia-ingestion-requirements.txt \
     && rm -f /tmp/openlia-ingestion-requirements.txt
 COPY profile/plugins/openlia-ingestion /opt/hermes/plugins/openlia-ingestion
+# Release archives protect source files with mode 0600; supervised Hermes runs
+# as an unprivileged user and must be able to read the bundled plugins.
+RUN chmod -R a+rX /opt/hermes/plugins/openlia-policy /opt/hermes/plugins/openlia-ingestion
 LABEL org.openlia.project="${OPENLIA_PROJECT_NAME}" org.openlia.ingestion="required" org.openlia.debian-snapshot="${DEBIAN_SNAPSHOT}"
 
 # Keep the upstream default USER and ENTRYPOINT unchanged. s6 must start as

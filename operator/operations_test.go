@@ -340,6 +340,9 @@ func TestDeployOpenWebUIComponentTargetsOnlyOpenWebUI(t *testing.T) {
 	if !strings.Contains(joined, "up -d --no-deps --force-recreate open-webui") {
 		t.Fatalf("open-webui target was not started directly: %s", joined)
 	}
+	if !strings.Contains(joined, "except Exception:") || !strings.Contains(joined, "sys.exit(1)") {
+		t.Fatalf("open-webui health probe does not suppress expected startup failures: %s", joined)
+	}
 	if strings.Contains(joined, "hermes") || strings.Contains(joined, "locho") || strings.Contains(joined, "workspace-ui") {
 		t.Fatalf("targeted open-webui deploy touched another service: %s", joined)
 	}
@@ -1113,6 +1116,7 @@ func TestGeneratedAttachmentsContainOpenWebUI(t *testing.T) {
 		"ENABLE_OLLAMA_API: \"False\"",
 		"WEBUI_NAME: \"OpenLia\"",
 		"WEBUI_AUTH: \"True\"",
+		"except Exception:\\n    sys.exit(1)",
 		"API_SERVER_ENABLED: \"true\"",
 		"API_SERVER_HOST: \"0.0.0.0\"",
 	} {

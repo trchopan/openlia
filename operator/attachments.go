@@ -369,7 +369,7 @@ func generateAttachmentsFile(config Config) error {
 			builder.WriteString("      WEBUI_AUTH: \"False\"\n")
 		}
 		builder.WriteString("    networks:\n      - openlia-private\n")
-		builder.WriteString("    healthcheck:\n      test: [\"CMD\", \"python3\", \"-c\", \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)\"]\n      interval: 10s\n      timeout: 5s\n      retries: 5\n")
+		fmt.Fprintf(&builder, "    healthcheck:\n      test: [\"CMD\", \"python3\", \"-c\", %q]\n      interval: 10s\n      timeout: 5s\n      retries: 5\n", openWebUIHealthProbe)
 		builder.WriteString("    deploy:\n      resources:\n        limits:\n          cpus: \"1.0\"\n          memory: 1G\n")
 		builder.WriteString("    logging:\n      driver: \"json-file\"\n      options:\n        max-size: \"20m\"\n        max-file: \"5\"\n")
 	}

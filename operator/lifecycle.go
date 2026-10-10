@@ -26,6 +26,13 @@ type DeployResult struct {
 	Backup string `json:"backup"`
 }
 
+const openWebUIHealthProbe = `import sys, urllib.request
+try:
+    response = urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)
+    response.close()
+except Exception:
+    sys.exit(1)`
+
 func Deploy(ctx context.Context, config Config, compose Compose, options DeployOptions, now time.Time) (DeployResult, error) {
 	if err := config.ValidatePaths(); err != nil {
 		return DeployResult{}, err
@@ -370,7 +377,7 @@ func openWebUIHealthy(ctx context.Context, config Config, compose Compose) bool 
 	if !strings.Contains(binding, fmt.Sprintf("%s:%d", config.OpenWebUIHost, config.OpenWebUIPort)) {
 		return false
 	}
-	_, err = compose.Run(ctx, "exec", "-T", "open-webui", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)")
+	_, err = compose.Run(ctx, "exec", "-T", "open-webui", "python3", "-c", openWebUIHealthProbe)
 	return err == nil
 }
 
@@ -495,7 +502,7 @@ func Healthcheck(ctx context.Context, config Config, compose Compose, allowStopp
 					if endpointErr != nil || portErr != nil || binding == "" {
 						add("listener:open-webui", false, "missing_configured_port")
 					} else if strings.Contains(binding, expectedBinding) {
-						if _, probeErr := compose.Run(ctx, "exec", "-T", "open-webui", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"); probeErr != nil {
+						if _, probeErr := compose.Run(ctx, "exec", "-T", "open-webui", "python3", "-c", openWebUIHealthProbe); probeErr != nil {
 							add("listener:open-webui", false, "health_endpoint_unavailable")
 						} else {
 							add("listener:open-webui", true, "configured_endpoint")
