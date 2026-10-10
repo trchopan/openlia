@@ -267,11 +267,11 @@ describe("CopyLinkButton and document copy integration", () => {
       },
     });
 
-    const expectedLink = buildWorkspaceLink("tasks.md");
+    const expectedUri = buildCanonicalWorkspaceUri("tasks.md");
     render(
       <WorkspaceHeader
         authRequired={false}
-        currentLink={expectedLink}
+        currentLink={expectedUri}
         file={{
           content: "hello",
           editable: true,
@@ -289,11 +289,11 @@ describe("CopyLinkButton and document copy integration", () => {
     );
 
     const copyBtn = screen.getByRole("button", {
-      name: `Copy link: ${expectedLink}`,
+      name: `Copy link: ${expectedUri}`,
     });
     expect(copyBtn).toBeInTheDocument();
     fireEvent.click(copyBtn);
-    expect(copied).toBe(expectedLink);
+    expect(copied).toBe(expectedUri);
   });
 
   test("WorkspaceHeader opens Documents without an export button", () => {
@@ -319,17 +319,7 @@ describe("CopyLinkButton and document copy integration", () => {
     expect(opened).toBe(true);
   });
 
-  test("DocumentPane renders copy link button in toolbar", async () => {
-    let copied = "";
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: {
-        writeText: async (text: string) => {
-          copied = text;
-        },
-      },
-    });
-
+  test("DocumentPane does not render a duplicate toolbar copy button", () => {
     const expectedLink = buildWorkspaceLink("tasks.md");
     render(
       <DocumentPane
@@ -361,12 +351,9 @@ describe("CopyLinkButton and document copy integration", () => {
       />,
     );
 
-    const copyBtn = screen.getByRole("button", {
-      name: `Copy link (${expectedLink})`,
-    });
-    expect(copyBtn).toBeInTheDocument();
-    fireEvent.click(copyBtn);
-    expect(copied).toBe(expectedLink);
+    expect(
+      screen.queryByRole("button", { name: `Copy link: ${expectedLink}` }),
+    ).not.toBeInTheDocument();
   });
 
   test("DocumentPane renders Reveal in Tree button and fires callback", () => {

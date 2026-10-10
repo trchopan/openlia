@@ -42,8 +42,8 @@ import {
 import { GoToModal } from "./GoToModal";
 import { diffLines } from "./markdown";
 import {
+  buildCanonicalWorkspaceUri,
   buildSkillLink,
-  buildWorkspaceLink,
   resolveLinkTarget,
 } from "./openliaLinks";
 import { type MainTab, navigateRoute, parseRoute } from "./route";
@@ -464,9 +464,9 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         : undefined
       : activeTab === "documents"
         ? file
-          ? buildWorkspaceLink(file.path)
+          ? buildCanonicalWorkspaceUri(file.path)
           : artifact
-            ? buildWorkspaceLink(artifact.path)
+            ? buildCanonicalWorkspaceUri(artifact.path)
             : undefined
         : undefined;
 
