@@ -67,6 +67,32 @@ func TestScheduleRuntimeConfigProjectsOptionalRuntimePaths(t *testing.T) {
 	}
 }
 
+func TestScheduleRuntimeConfigProjectsWriterCredentialsIntoTmpfs(t *testing.T) {
+	config := Config{
+		InstallRoot: filepath.Join("/srv", "openlia"),
+		BackupDestinations: []BackupDestination{{
+			Name: "archive", Type: "s3", CredentialsFile: "/srv/openlia/runtime/backup-credentials/archive/credentials",
+		}},
+	}
+	runtimeConfig := scheduleRuntimeConfig(config)
+	if got := runtimeConfig.BackupDestinations[0].CredentialsFile; got != "/tmp/openlia-backup/archive/credentials" {
+		t.Fatalf("runtime credential path = %q", got)
+	}
+	if got := config.BackupDestinations[0].CredentialsFile; got != "/srv/openlia/runtime/backup-credentials/archive/credentials" {
+		t.Fatalf("host credential path was mutated = %q", got)
+	}
+}
+
+func TestBackupSchedulerCredentialVolumesUseCredentialDirectories(t *testing.T) {
+	config := Config{BackupScheduleEnabled: true, BackupDestinations: []BackupDestination{{
+		Name: "archive", Type: "s3", CredentialsFile: "/srv/openlia/runtime/backup-credentials/archive/credentials",
+	}}}
+	volumes := backupSchedulerCredentialVolumes(config)
+	if len(volumes) != 1 || volumes[0].source != `"/srv/openlia/runtime/backup-credentials/archive"` || volumes[0].target != "/run/openlia-destinations/archive" {
+		t.Fatalf("credential volumes = %#v", volumes)
+	}
+}
+
 func TestBackupSchedulerIdentityVolumesFollowScheduleState(t *testing.T) {
 	config := Config{BackupScheduleEnabled: true, BackupDestinations: []BackupDestination{{Name: "nas", Type: "rsync", IdentityFile: "/srv/keys/openlia"}}}
 	if got := backupSchedulerIdentityVolumes(config); len(got) != 1 || got[0].target != "/run/openlia-destinations/nas" {

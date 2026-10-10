@@ -116,16 +116,20 @@ type Config struct {
 }
 
 type BackupDestinationConfig struct {
-	Name                 string
-	Type                 string
-	Endpoint             string
-	Bucket               string
-	Prefix               string
-	Region               string
-	PathStyle            bool
-	RsyncTarget          string
-	IdentityFile         string
-	OperatorIdentityFile string
+	Name                  string
+	Type                  string
+	Endpoint              string
+	Bucket                string
+	Prefix                string
+	Region                string
+	PathStyle             bool
+	RsyncTarget           string
+	IdentityFile          string
+	OperatorIdentityFile  string
+	ReaderCredentialsFile string
+	ReaderAWSProfile      string
+	WriterCredentialsFile string
+	WriterAWSProfile      string
 }
 
 type ServiceHostConfig struct {
@@ -371,6 +375,20 @@ func parseConfigUnchecked(data string) (Config, error) {
 				if err == nil {
 					current.OperatorIdentityFile = expandTilde(current.OperatorIdentityFile)
 				}
+			case "reader_credentials_file":
+				current.ReaderCredentialsFile, err = parseString(value)
+				if err == nil {
+					current.ReaderCredentialsFile = expandTilde(current.ReaderCredentialsFile)
+				}
+			case "reader_aws_profile":
+				current.ReaderAWSProfile, err = parseString(value)
+			case "writer_credentials_file":
+				current.WriterCredentialsFile, err = parseString(value)
+				if err == nil {
+					current.WriterCredentialsFile = expandTilde(current.WriterCredentialsFile)
+				}
+			case "writer_aws_profile":
+				current.WriterAWSProfile, err = parseString(value)
 			default:
 				return Config{}, fmt.Errorf("line %d contains unknown backup destination setting %q", lineNumber, key)
 			}
@@ -594,6 +612,9 @@ func validateConfig(config Config) error {
 		if destination.IdentityFile != "" && (pathWithin(destination.IdentityFile, filepath.Join(config.InstallRoot, "runtime", "secrets")) || pathWithin(destination.IdentityFile, filepath.Join(config.InstallRoot, "runtime", "hermes"))) {
 			return fmt.Errorf("backup rsync identity files must not be inside Hermes data or mounted runtime secrets")
 		}
+		if err := validateBackupCredentialReferences(destination); err != nil {
+			return err
+		}
 	}
 	if err := validateOutputLanguage(config.OutputLanguage); err != nil {
 		return err
@@ -759,6 +780,12 @@ func validateBackupDestinations(destinations []BackupDestinationConfig) error {
 			if strings.HasPrefix(destination.Prefix, "/") || strings.Contains(destination.Prefix, "..") || strings.ContainsAny(destination.Prefix, "\\\r\n") {
 				return fmt.Errorf("S3 destination %s has an unsafe prefix", destination.Name)
 			}
+			if destination.WriterAWSProfile != "" && destination.WriterCredentialsFile == "" {
+				return fmt.Errorf("S3 destination %s writer_aws_profile requires writer_credentials_file", destination.Name)
+			}
+			if destination.ReaderAWSProfile != "" && destination.ReaderCredentialsFile == "" {
+				return fmt.Errorf("S3 destination %s reader_aws_profile requires reader_credentials_file", destination.Name)
+			}
 		case "rsync":
 			if destination.RsyncTarget == "" || strings.ContainsAny(destination.RsyncTarget, " \t\r\n;$&|()<>`'") {
 				return fmt.Errorf("rsync destination %s has an invalid target", destination.Name)
@@ -775,6 +802,9 @@ func validateBackupDestinations(destinations []BackupDestinationConfig) error {
 				if isInsideWorkingTree(destination.OperatorIdentityFile) {
 					return errors.New("backup destination operator_identity_file must be outside the OpenLia checkout")
 				}
+			}
+			if destination.ReaderCredentialsFile != "" || destination.ReaderAWSProfile != "" || destination.WriterCredentialsFile != "" || destination.WriterAWSProfile != "" {
+				return fmt.Errorf("rsync destination %s cannot configure S3 credentials", destination.Name)
 			}
 		default:
 			return fmt.Errorf("backup destination %s type must be s3 or rsync", destination.Name)
@@ -1144,6 +1174,18 @@ func renderConfig(config Config) string {
 		}
 		if destination.OperatorIdentityFile != "" {
 			fmt.Fprintf(&builder, "operator_identity_file = %q\n", destination.OperatorIdentityFile)
+		}
+		if destination.ReaderCredentialsFile != "" {
+			fmt.Fprintf(&builder, "reader_credentials_file = %q\n", destination.ReaderCredentialsFile)
+		}
+		if destination.ReaderAWSProfile != "" {
+			fmt.Fprintf(&builder, "reader_aws_profile = %q\n", destination.ReaderAWSProfile)
+		}
+		if destination.WriterCredentialsFile != "" {
+			fmt.Fprintf(&builder, "writer_credentials_file = %q\n", destination.WriterCredentialsFile)
+		}
+		if destination.WriterAWSProfile != "" {
+			fmt.Fprintf(&builder, "writer_aws_profile = %q\n", destination.WriterAWSProfile)
 		}
 	}
 	for _, host := range config.Services {

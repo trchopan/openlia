@@ -991,6 +991,10 @@ bucket = "openlia-backups"
 prefix = "personal"
 region = "us-east-1"
 path_style = true
+reader_credentials_file = "s3-reader-credentials"
+reader_aws_profile = "reader"
+writer_credentials_file = "s3-writer-credentials"
+writer_aws_profile = "writer"
 
 [[backup.destinations]]
 name = "nas"
@@ -1000,13 +1004,17 @@ identity_file = "/srv/openlia/operator-secrets/backup-rsync-key"
 operator_identity_file = "/Users/me/.ssh/openlia-backup-read"
 ```
 
-S3 uses the target's standard AWS credential chain; grant it only the required
-put/list/delete permissions for the configured prefix. The scheduler sidecar
-forwards target AWS environment credentials and uses the target user's shared
-AWS credentials/config files when present. The operator machine also needs read
-access to retrieve remote backups. For rsync, provision the target-side SSH key
-at `identity_file` outside `runtime/secrets` and the Hermes data directory so
-the agent container cannot read it. Pin the host in the configured target
+S3 credential paths are relative to the selected profile's `config.toml`
+directory. Files must be regular mode-`0600` files outside the checkout and use
+the standard AWS shared-credentials format. OpenLia uses the reader file only
+for local listing/downloads, and deploys only the selected writer profile to the
+target for uploads and retention. The private age recovery identity is never
+deployed. Re-run deployment or `openlia backup push` after rotating a writer
+file. If these fields are absent, the existing AWS environment/shared-file
+credential chain remains active. The operator machine also needs reader access
+to retrieve remote backups. For rsync, provision the target-side SSH key at
+`identity_file` outside `runtime/secrets` and the Hermes data directory so the
+agent container cannot read it. Pin the host in the configured target
 `known_hosts` file, and configure `operator_identity_file` (or an operator-side
 SSH agent) for recovery. Remote retention defaults to 30 successful backups per
 destination; local retention remains five durable archives. `openlia backup

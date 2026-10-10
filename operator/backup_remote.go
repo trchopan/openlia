@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
@@ -92,9 +91,9 @@ func PushBackup(ctx context.Context, config Config, result BackupResult, now tim
 }
 
 func pushS3Backup(ctx context.Context, config Config, destination BackupDestination, archive string) error {
-	awsConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(destination.Region))
+	awsConfig, err := loadS3BackupConfig(ctx, destination)
 	if err != nil {
-		return fmt.Errorf("load target S3 credentials: %w", err)
+		return err
 	}
 	client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
 		options.UsePathStyle = destination.PathStyle

@@ -43,7 +43,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	want.BackupScheduleEnabled = true
 	want.BackupRemoteRetention = 30
 	want.BackupDestinations = []BackupDestinationConfig{
-		{Name: "archive", Type: "s3", Endpoint: "https://s3.example.test", Bucket: "openlia-backups", Prefix: "personal", Region: "us-east-1", PathStyle: true},
+		{Name: "archive", Type: "s3", Endpoint: "https://s3.example.test", Bucket: "openlia-backups", Prefix: "personal", Region: "us-east-1", PathStyle: true, ReaderCredentialsFile: filepath.Join(temporary, "reader-credentials"), ReaderAWSProfile: "reader", WriterCredentialsFile: filepath.Join(temporary, "writer-credentials"), WriterAWSProfile: "writer"},
 		{Name: "nas", Type: "rsync", RsyncTarget: "backup@nas.example.test:/srv/backups/openlia", IdentityFile: "/srv/openlia/backup-ssh-key", OperatorIdentityFile: filepath.Join(temporary, "rsync-key")},
 	}
 	want.SecretSource = filepath.Join(temporary, "hermes.env")
