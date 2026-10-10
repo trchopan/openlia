@@ -16,11 +16,10 @@ import type {
 } from "../shared/api";
 import { isConfigurationPath, protectedPath } from "./workspace";
 
-const ajv = new Ajv2020({
-  allErrors: true,
-  strict: false,
-});
-addFormats(ajv);
+const compiledValidators = new Map<
+  string,
+  { content: string; validate: ValidateFunction }
+>();
 
 export function parseRecordFrontmatter(content: string): {
   metadata: Record<string, unknown> | null;
@@ -120,12 +119,21 @@ export function findDomainTemplate(
 }
 
 function getCompiledValidator(schemaPath: string): ValidateFunction | null {
+  const absolutePath = resolve(schemaPath);
   try {
-    const raw = readFileSync(schemaPath, "utf-8");
+    const raw = readFileSync(absolutePath, "utf-8");
+    const cached = compiledValidators.get(absolutePath);
+    if (cached?.content === raw) return cached.validate;
+
+    // Isolate schema IDs across paths and discard old registrations on edits.
+    const ajv = new Ajv2020({ allErrors: true, strict: false });
+    addFormats(ajv);
     const jsonSchema = JSON.parse(raw);
     const validate = ajv.compile(jsonSchema);
+    compiledValidators.set(absolutePath, { content: raw, validate });
     return validate;
   } catch (_err) {
+    compiledValidators.delete(absolutePath);
     return null;
   }
 }
