@@ -21,7 +21,7 @@ import type {
   WorkspaceTreeEntry,
 } from "../shared/api";
 import { ApiError, httpWorkspaceApi, type WorkspaceApi } from "./api";
-import { isJournalPath, isMarkdownPath } from "./CodeEditor";
+import { isJournalPath, isMarkdownPath, isRemindPath } from "./CodeEditor";
 import { CreateSkillModal } from "./CreateSkillModal";
 import { ConfigurationPage } from "./ConfigurationPage";
 import {
@@ -56,7 +56,10 @@ type PendingAction =
   | null;
 
 function defaultView(path?: string): WorkspaceView {
-  return path && !isMarkdownPath(path) && !isJournalPath(path)
+  return path &&
+    !isMarkdownPath(path) &&
+    !isJournalPath(path) &&
+    !isRemindPath(path)
     ? "edit"
     : "preview";
 }
@@ -66,7 +69,13 @@ function viewForPath(
   requested: WorkspaceView | undefined,
 ): WorkspaceView {
   if (requested === "info") return "info";
-  if (path && !isMarkdownPath(path) && !isJournalPath(path)) return "edit";
+  if (
+    path &&
+    !isMarkdownPath(path) &&
+    !isJournalPath(path) &&
+    !isRemindPath(path)
+  )
+    return "edit";
   return requested ?? defaultView(path);
 }
 
@@ -315,6 +324,53 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
   const [diagnostics, setDiagnostics] =
     useState<WorkspaceDiagnosticsResponse | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [otherCalendarFiles, setOtherCalendarFiles] = useState<
+    Array<{ path: string; content: string }>
+  >([]);
+
+  useEffect(() => {
+    if (!file || !isRemindPath(file.path)) {
+      setOtherCalendarFiles([]);
+      return;
+    }
+
+    const siblingRemFiles = tree.filter(
+      (entry): entry is WorkspaceTreeEntry & { kind: "file" } =>
+        entry.kind === "file" &&
+        isRemindPath(entry.path) &&
+        entry.path !== file.path,
+    );
+
+    if (siblingRemFiles.length === 0) {
+      setOtherCalendarFiles([]);
+      return;
+    }
+
+    let cancelled = false;
+    Promise.all(
+      siblingRemFiles.map(async (entry) => {
+        try {
+          const loaded = await api.loadFile(entry.path);
+          return { path: entry.path, content: loaded.content };
+        } catch {
+          return null;
+        }
+      }),
+    ).then((results) => {
+      if (!cancelled) {
+        setOtherCalendarFiles(
+          results.filter(
+            (r): r is { path: string; content: string } => r !== null,
+          ),
+        );
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [file, tree, api]);
+
   const [pendingRename, setPendingRename] = useState<{
     path: string;
     revision?: string | undefined;
@@ -1732,6 +1788,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         git={git}
         onOpenFiles={() => setFilesOpen(true)}
         onOpenDocuments={() => requestOpenFile("")}
+        onOpenCalendar={() => requestOpenFile("calendar/reminders.rem")}
         onOpenGoTo={() => setIsGoToOpen(true)}
         onSignOut={requestSignOut}
         onTabChange={requestTabChange}
@@ -1800,6 +1857,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             draft={draft}
             file={file}
             fileLoading={fileLoading}
+            otherCalendarFiles={otherCalendarFiles}
             onCloseFiles={() => setFilesOpen(true)}
             onDelete={() => requestDelete()}
             onDownload={() => {

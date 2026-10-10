@@ -11,9 +11,15 @@ import type {
   WorkspaceTreeEntry,
 } from "../shared/api";
 import { ActivitySection } from "./ActivitySection";
-import { CodeEditor, isJournalPath, isMarkdownPath } from "./CodeEditor";
+import {
+  CodeEditor,
+  isJournalPath,
+  isMarkdownPath,
+  isRemindPath,
+} from "./CodeEditor";
 import { FrontmatterBlock } from "./FrontmatterBlock";
 import { JournalPreviewPane } from "./journal/JournalPreviewPane";
+import { CalendarPreviewPane } from "./calendar/CalendarPreviewPane";
 import { parseMarkdownFrontmatter } from "./frontmatter";
 import { extractOriginalMessage } from "./markdown";
 import {
@@ -26,7 +32,7 @@ export { ActivitySection } from "./ActivitySection";
 export { GitActivitySection } from "./GitActivitySection";
 export { MoveFileDialog } from "./MoveFileDialog";
 export { RenameFileDialog } from "./RenameFileDialog";
-export { isJournalPath, isMarkdownPath } from "./CodeEditor";
+export { isJournalPath, isMarkdownPath, isRemindPath } from "./CodeEditor";
 
 export type WorkspaceView = "edit" | "preview" | "info";
 
@@ -212,6 +218,7 @@ export function WorkspaceHeader({
   git,
   onOpenFiles,
   onOpenDocuments,
+  onOpenCalendar,
   onOpenGoTo,
   onSignOut,
   onTabChange,
@@ -229,6 +236,7 @@ export function WorkspaceHeader({
   git: WorkspaceGitStatus | null;
   onOpenFiles: () => void;
   onOpenDocuments?: (() => void) | undefined;
+  onOpenCalendar?: (() => void) | undefined;
   onOpenGoTo?: (() => void) | undefined;
   onSignOut: () => void;
   onTabChange?:
@@ -238,6 +246,9 @@ export function WorkspaceHeader({
   const gitText = git?.configured
     ? `${git.branch ?? "Git"}${git.dirty ? " / changes" : " / clean"}`
     : "Version control unavailable";
+
+  const isCalendarActive =
+    activeTab === "documents" && file !== null && isRemindPath(file.path);
 
   return (
     <header className="workspace-header">
@@ -262,9 +273,13 @@ export function WorkspaceHeader({
         >
           {(onOpenDocuments || onTabChange) && (
             <button
-              aria-current={activeTab === "documents" ? "page" : undefined}
+              aria-current={
+                activeTab === "documents" && !isCalendarActive
+                  ? "page"
+                  : undefined
+              }
               className={`btn btn-xs join-item ${
-                activeTab === "documents"
+                activeTab === "documents" && !isCalendarActive
                   ? "btn-primary shadow-xs"
                   : "btn-ghost text-base-content/70"
               }`}
@@ -276,6 +291,21 @@ export function WorkspaceHeader({
               type="button"
             >
               Documents
+            </button>
+          )}
+          {onOpenCalendar && (
+            <button
+              aria-current={isCalendarActive ? "page" : undefined}
+              className={`btn btn-xs join-item ${
+                isCalendarActive
+                  ? "btn-primary shadow-xs"
+                  : "btn-ghost text-base-content/70"
+              }`}
+              onClick={onOpenCalendar}
+              title="Open Calendar (reminders.rem)"
+              type="button"
+            >
+              Calendar
             </button>
           )}
           {onTabChange && (
@@ -1391,6 +1421,7 @@ export function DocumentPane({
   rawUrl,
   downloadUrl,
   totalDocuments,
+  otherCalendarFiles,
 }: {
   conflict: string;
   detailsOpen?: boolean;
@@ -1425,11 +1456,13 @@ export function DocumentPane({
   rawUrl?: ((path: string) => string) | undefined;
   downloadUrl?: ((path: string) => string) | undefined;
   totalDocuments?: number | undefined;
+  otherCalendarFiles?: Array<{ path: string; content: string }> | undefined;
 }) {
   const dirty = file !== null && file.content !== draft;
   const canEdit = Boolean(file?.editable);
   const isMarkdown = file !== null && isMarkdownPath(file.path);
   const isJournal = file !== null && isJournalPath(file.path);
+  const isRemind = file !== null && isRemindPath(file.path);
 
   return (
     <section aria-label="Document workspace" className="workspace-document">
@@ -1484,6 +1517,23 @@ export function DocumentPane({
                     value="preview"
                   >
                     Visual
+                  </ModeButton>
+                  <ModeButton
+                    active={view === "edit"}
+                    onClick={() => onViewChange("edit")}
+                    value="edit"
+                  >
+                    Edit
+                  </ModeButton>
+                </>
+              ) : isRemind ? (
+                <>
+                  <ModeButton
+                    active={view === "preview"}
+                    onClick={() => onViewChange("preview")}
+                    value="preview"
+                  >
+                    Calendar
                   </ModeButton>
                   <ModeButton
                     active={view === "edit"}
@@ -1781,6 +1831,29 @@ export function DocumentPane({
                   content={draft}
                   filePath={file.path}
                   onSwitchToEdit={() => onViewChange("edit")}
+                />
+              </section>
+            ) : (
+              <EditorPane
+                draft={draft}
+                file={file}
+                fileLoading={fileLoading}
+                onDraftChange={onDraftChange}
+              />
+            )
+          ) : isRemind ? (
+            view === "preview" ? (
+              <section
+                aria-label="Visual Calendar View"
+                className="workspace-preview-pane flex-1 overflow-hidden p-0"
+              >
+                <CalendarPreviewPane
+                  content={draft}
+                  filePath={file.path}
+                  onDraftChange={onDraftChange}
+                  onSwitchToEdit={() => onViewChange("edit")}
+                  onNavigateLink={onNavigateLink}
+                  otherCalendarFiles={otherCalendarFiles}
                 />
               </section>
             ) : (
