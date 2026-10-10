@@ -1727,14 +1727,11 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         activeTab={activeTab}
         authRequired={authRequired}
         currentLink={currentLink}
-        dirty={dirty}
-        exporting={exporting}
         file={activeTab === "documents" ? (file ?? artifact) : null}
         filesButtonRef={filesButtonRef}
         git={git}
-        onExport={activeTab === "configuration" ? undefined : handleExport}
         onOpenFiles={() => setFilesOpen(true)}
-        onOpenGitActivity={() => requestTabChange("git-activity")}
+        onOpenDocuments={() => requestOpenFile("")}
         onOpenGoTo={() => setIsGoToOpen(true)}
         onSignOut={requestSignOut}
         onTabChange={requestTabChange}
@@ -1781,7 +1778,6 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             onFilterChange={handleFilterChange}
             onMoveFile={(path) => requestMove(path)}
             onOpenFile={requestOpenFile}
-            onOpenActivity={() => requestOpenFile("")}
             onRenameFile={(path) => requestRename(path)}
             onRetry={() => void loadWorkspace()}
             rawUrl={api.rawUrl}

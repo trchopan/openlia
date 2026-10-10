@@ -109,16 +109,6 @@ function matchedFiles(nodes: TreeNode[], query: string): number {
   }, 0);
 }
 
-function StatusBadge({
-  children,
-  tone = "neutral",
-}: {
-  children: string;
-  tone?: "neutral" | "success" | "warning" | "error";
-}) {
-  return <span className={`badge badge-${tone} gap-1.5`}>{children}</span>;
-}
-
 export function CopyLinkButton({
   link,
   label = "Copy Link",
@@ -217,14 +207,11 @@ export function WorkspaceHeader({
   activeTab = "documents",
   authRequired,
   currentLink,
-  dirty,
-  exporting = false,
   filesButtonRef,
   file,
   git,
-  onExport,
   onOpenFiles,
-  onOpenGitActivity,
+  onOpenDocuments,
   onOpenGoTo,
   onSignOut,
   onTabChange,
@@ -237,21 +224,17 @@ export function WorkspaceHeader({
     | undefined;
   authRequired: boolean;
   currentLink?: string | undefined;
-  dirty: boolean;
-  exporting?: boolean | undefined;
   filesButtonRef: RefObject<HTMLButtonElement | null>;
   file: (WorkspaceFile | WorkspaceFileMetadata) | null;
   git: WorkspaceGitStatus | null;
-  onExport?: (() => void) | undefined;
   onOpenFiles: () => void;
-  onOpenGitActivity?: (() => void) | undefined;
+  onOpenDocuments?: (() => void) | undefined;
   onOpenGoTo?: (() => void) | undefined;
   onSignOut: () => void;
   onTabChange?:
     | ((tab: "documents" | "skills" | "git-activity" | "configuration") => void)
     | undefined;
 }) {
-  const hasDocumentContent = file !== null && "content" in file;
   const gitText = git?.configured
     ? `${git.branch ?? "Git"}${git.dirty ? " / changes" : " / clean"}`
     : "Version control unavailable";
@@ -260,6 +243,9 @@ export function WorkspaceHeader({
     <header className="workspace-header">
       {activeTab !== "configuration" && (
         <button
+          aria-label={
+            activeTab === "skills" ? "Open skills drawer" : "Open files drawer"
+          }
           className="btn btn-ghost btn-sm xl:hidden"
           ref={filesButtonRef}
           onClick={onOpenFiles}
@@ -269,53 +255,58 @@ export function WorkspaceHeader({
         </button>
       )}
 
-      {onTabChange && (
-        <div className="join border border-base-content/15 rounded-lg bg-base-200/60 p-0.5 mr-2">
-          <button
-            className={`btn btn-xs join-item ${
-              activeTab === "documents"
-                ? "btn-primary shadow-xs"
-                : "btn-ghost text-base-content/70"
-            }`}
-            onClick={() => onTabChange("documents")}
-            type="button"
-          >
-            Documents
-          </button>
-          <button
-            className={`btn btn-xs join-item ${
-              activeTab === "skills"
-                ? "btn-primary shadow-xs"
-                : "btn-ghost text-base-content/70"
-            }`}
-            onClick={() => onTabChange("skills")}
-            type="button"
-          >
-            Skills
-          </button>
-          <button
-            className={`btn btn-xs join-item ${
-              activeTab === "git-activity"
-                ? "btn-primary shadow-xs"
-                : "btn-ghost text-base-content/70"
-            }`}
-            onClick={() => onTabChange("git-activity")}
-            type="button"
-          >
-            Git Activity
-          </button>
-          <button
-            className={`btn btn-xs join-item ${
-              activeTab === "configuration"
-                ? "btn-primary shadow-xs"
-                : "btn-ghost text-base-content/70"
-            }`}
-            onClick={() => onTabChange("configuration")}
-            type="button"
-          >
-            Configuration
-          </button>
-        </div>
+      {(onTabChange || onOpenDocuments) && (
+        <nav
+          aria-label="Workspace navigation"
+          className="join shrink-0 border border-base-content/15 rounded-lg bg-base-200/60 p-0.5 mr-2"
+        >
+          {(onOpenDocuments || onTabChange) && (
+            <button
+              aria-current={activeTab === "documents" ? "page" : undefined}
+              className={`btn btn-xs join-item ${
+                activeTab === "documents"
+                  ? "btn-primary shadow-xs"
+                  : "btn-ghost text-base-content/70"
+              }`}
+              onClick={() => {
+                if (onOpenDocuments) onOpenDocuments();
+                else onTabChange?.("documents");
+              }}
+              title={`View recent workspace changes (${gitText})`}
+              type="button"
+            >
+              Documents
+            </button>
+          )}
+          {onTabChange && (
+            <button
+              aria-current={activeTab === "skills" ? "page" : undefined}
+              className={`btn btn-xs join-item ${
+                activeTab === "skills"
+                  ? "btn-primary shadow-xs"
+                  : "btn-ghost text-base-content/70"
+              }`}
+              onClick={() => onTabChange("skills")}
+              type="button"
+            >
+              Skills
+            </button>
+          )}
+          {onTabChange && (
+            <button
+              aria-current={activeTab === "git-activity" ? "page" : undefined}
+              className={`btn btn-xs join-item ${
+                activeTab === "git-activity"
+                  ? "btn-primary shadow-xs"
+                  : "btn-ghost text-base-content/70"
+              }`}
+              onClick={() => onTabChange("git-activity")}
+              type="button"
+            >
+              Git
+            </button>
+          )}
+        </nav>
       )}
 
       <div className="min-w-0 flex-1">
@@ -358,7 +349,7 @@ export function WorkspaceHeader({
           </p>
         )}
       </div>
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+      <div className="workspace-header-actions flex shrink-0 flex-wrap items-center justify-end gap-2">
         {onOpenGoTo && (
           <button
             aria-label="Go to document or skill (Cmd+P or Ctrl+P)"
@@ -387,58 +378,15 @@ export function WorkspaceHeader({
             </kbd>
           </button>
         )}
-        {onExport && (
+        {onTabChange && (
           <button
-            aria-label="Export workspace and skills to ZIP"
-            className="btn btn-ghost btn-sm gap-1.5 text-base-content/80 hover:text-base-content"
-            disabled={exporting}
-            onClick={onExport}
-            title="Export workspace and skills to ZIP"
+            aria-current={activeTab === "configuration" ? "page" : undefined}
+            className={`btn btn-sm ${activeTab === "configuration" ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => onTabChange("configuration")}
             type="button"
           >
-            {exporting ? (
-              <span className="loading loading-spinner loading-xs" />
-            ) : (
-              <svg
-                className="h-3.5 w-3.5 opacity-70"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                viewBox="0 0 24 24"
-              >
-                <title>Export icon</title>
-                <path
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            )}
-            <span className="hidden sm:inline">
-              {exporting ? "Exporting..." : "Export"}
-            </span>
+            Configuration
           </button>
-        )}
-        <StatusBadge tone={dirty ? "warning" : "success"}>
-          {dirty ? "Unsaved" : hasDocumentContent ? "Saved" : "Ready"}
-        </StatusBadge>
-        {onTabChange || onOpenGitActivity ? (
-          <button
-            aria-label="View Git activity"
-            className="workspace-git-status btn btn-ghost btn-xs normal-case font-normal p-0 h-auto hover:bg-transparent"
-            onClick={() => {
-              if (onOpenGitActivity) onOpenGitActivity();
-              else if (onTabChange) onTabChange("git-activity");
-            }}
-            title="Open Git activity"
-            type="button"
-          >
-            <StatusBadge>{gitText}</StatusBadge>
-          </button>
-        ) : (
-          <span className="workspace-git-status">
-            <StatusBadge>{gitText}</StatusBadge>
-          </span>
         )}
         {authRequired && (
           <button
@@ -462,7 +410,6 @@ export function FileNavigator({
   onClose,
   onFilterChange,
   onOpenFile,
-  onOpenActivity,
   onRenameFile,
   onMoveFile,
   onDeleteFile,
@@ -481,7 +428,6 @@ export function FileNavigator({
   onClose: () => void;
   onFilterChange: (value: string) => void;
   onOpenFile: (path: string) => void;
-  onOpenActivity?: (() => void) | undefined;
   onRenameFile?: ((path: string) => void) | undefined;
   onMoveFile?: ((path: string) => void) | undefined;
   onDeleteFile?: ((path: string) => void) | undefined;
@@ -889,40 +835,7 @@ export function FileNavigator({
               </p>
             </div>
           ) : (
-            <div className="mt-4">
-              {!query && (
-                <div className="mb-2 border-b border-base-content/10 pb-2">
-                  <button
-                    aria-current={!selectedPath ? "page" : undefined}
-                    className={`workspace-tree-row workspace-tree-activity px-2.5 ${
-                      !selectedPath ? "workspace-tree-file-selected" : ""
-                    }`}
-                    onClick={() => {
-                      if (onOpenActivity) onOpenActivity();
-                      else onOpenFile("");
-                    }}
-                    type="button"
-                  >
-                    <svg
-                      aria-hidden="true"
-                      className="h-3.5 w-3.5 opacity-70 shrink-0"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        d="M13 10V3L4 14h7v7l9-11h-7z"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                    <span className="font-semibold truncate">Activity</span>
-                  </button>
-                </div>
-              )}
-              {renderNodes(nodes)}
-            </div>
+            <div className="mt-4">{renderNodes(nodes)}</div>
           )}
         </div>
       </aside>
