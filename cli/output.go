@@ -102,6 +102,8 @@ Usage:
   openlia backup create|push|status|list|keygen|schedule install|remove
   openlia backup restore [--archive PATH.age|--from NAME --latest|--object NAME]
   openlia backup rollback-restore --archive PATH
+  openlia workspace serve [<path>] [--port 8089] [--bind 127.0.0.1] [--open] [--skills PATH]
+  openlia workspace export [PATH.zip]
   openlia workspace git setup|status
   openlia workspace migrate [<path>|upload <path>|status [id]|merge [id]|list] [--dry-run]
   openlia instructions status [NAME]

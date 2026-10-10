@@ -166,6 +166,7 @@ func TestOperatorArgumentsMapAllOperationScripts(t *testing.T) {
 		"ops/workspace-git.sh",
 		"ops/uninstall.sh",
 		"workspace-migrate",
+		"workspace-export",
 		"instructions",
 	} {
 		if _, ok := operatorArguments(script, []string{"--json"}); !ok {
