@@ -11,6 +11,11 @@ const skillsRoot = resolve(
 const backendPort = process.env.OPENLIA_WORKSPACE_UI_PORT ?? "8089";
 const frontendPort = process.env.OPENLIA_WORKSPACE_UI_DEV_PORT ?? "5173";
 const backendUrl = `http://127.0.0.1:${backendPort}`;
+const ingestionRoot =
+  process.env.OPENLIA_INGESTION_ROOT ??
+  (process.env.HERMES_HOME
+    ? join(process.env.HERMES_HOME, "ingestion")
+    : undefined);
 
 mkdirSync(workspaceRoot, { recursive: true });
 const examplePath = join(workspaceRoot, "notes.md");
@@ -34,6 +39,7 @@ if (!existsSync(sampleSkillMd)) {
 const environment = {
   ...process.env,
   OPENLIA_SKILLS_ROOT: skillsRoot,
+  ...(ingestionRoot ? { OPENLIA_INGESTION_ROOT: ingestionRoot } : {}),
   OPENLIA_WORKSPACE_ROOT: workspaceRoot,
   OPENLIA_WORKSPACE_UI_AUTH_REQUIRED: "false",
   OPENLIA_WORKSPACE_UI_BIND: "127.0.0.1",

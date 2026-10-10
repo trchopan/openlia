@@ -681,6 +681,31 @@ class IngestionTests(unittest.TestCase):
         self.assertTrue(complete_resp["ok"])
         self.assertTrue(complete_resp["completed"])
 
+    def test_runtime_publishes_sanitized_live_status_snapshot(self):
+        runtime = self.runtime_mod.IngestionRuntime(MockHermesContext())
+        capture_resp = json.loads(
+            runtime.capture(
+                {
+                    "kind": "text",
+                    "content": "status snapshot",
+                    "next_action": "private-follow-up",
+                    "request_ref": "private-request",
+                }
+            )
+        )
+        runtime._publish_status()
+
+        snapshot_path = self.ingestion_dir / "status.json"
+        self.assertTrue(snapshot_path.exists())
+        snapshot_text = snapshot_path.read_text(encoding="utf-8")
+        snapshot = json.loads(snapshot_text)
+        self.assertEqual(snapshot["schema"], 1)
+        self.assertEqual(snapshot["job_counts"]["queued"], 1)
+        self.assertEqual(snapshot["jobs"][0]["intake_id"], capture_resp["intake_id"])
+        self.assertNotIn("continuation", snapshot_text)
+        self.assertNotIn("private-follow-up", snapshot_text)
+        self.assertNotIn("private-request", snapshot_text)
+
     def test_runtime_password_management_tools(self):
         ctx = MockHermesContext()
         runtime = self.runtime_mod.IngestionRuntime(ctx)

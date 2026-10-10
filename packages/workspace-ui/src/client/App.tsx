@@ -11,6 +11,8 @@ import type {
   SkillFileEntry,
   SkillFileResponse,
   SkillSummary,
+  IngestionDetailResponse,
+  IngestionOverviewResponse,
   WorkspaceActivityResponse,
   WorkspaceDiagnosticsResponse,
   WorkspaceFile,
@@ -31,6 +33,7 @@ import {
   DocumentPane,
   FileNavigator,
   GitActivitySection,
+  IngestionSection,
   MoveFileDialog,
   RenameFileDialog,
   WorkspaceHeader,
@@ -51,7 +54,7 @@ import "./styles.css";
 type PendingAction =
   | { kind: "open"; path: string; view?: WorkspaceView | undefined }
   | { kind: "openSkill"; id: string; skillFile?: string | undefined }
-  | { kind: "switchTab"; tab: MainTab }
+  | { kind: "switchTab"; tab: MainTab; ingestionId?: string | undefined }
   | { kind: "signout" }
   | null;
 
@@ -281,6 +284,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           skill: undefined,
           skillFile: undefined,
           tab: undefined,
+          ingestionId: undefined,
           view: undefined,
         },
   );
@@ -310,6 +314,13 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     null,
   );
   const [activityLoading, setActivityLoading] = useState(false);
+  const [ingestion, setIngestion] = useState<IngestionOverviewResponse | null>(
+    null,
+  );
+  const [ingestionDetail, setIngestionDetail] =
+    useState<IngestionDetailResponse | null>(null);
+  const [ingestionLoading, setIngestionLoading] = useState(false);
+  const [ingestionDetailLoading, setIngestionDetailLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [settings, setSettings] = useState<WorkspaceSettings>({
     hide_configuration_files: true,
@@ -507,6 +518,21 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
     view,
   };
 
+  const loadIngestionDetail = useCallback(
+    async (intakeId: string) => {
+      setIngestionDetailLoading(true);
+      try {
+        const nextDetail = await api.loadIngestionDetail(intakeId);
+        setIngestionDetail(nextDetail);
+      } catch {
+        setIngestionDetail(null);
+      } finally {
+        setIngestionDetailLoading(false);
+      }
+    },
+    [api],
+  );
+
   const loadWorkspace = useCallback(
     async (isActive?: () => boolean) => {
       setAuthReady(false);
@@ -531,6 +557,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           diagnosticsResponse,
           settingsResponse,
           systemInfoResponse,
+          ingestionResponse,
         ] = await Promise.all([
           api.loadTree(),
           api.loadGitStatus().catch(() => null),
@@ -543,6 +570,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           api.loadDiagnostics().catch(() => null),
           api.loadSettings().catch(() => null),
           api.loadSystemInfo().catch(() => null),
+          api.loadIngestion().catch(() => null),
         ]);
         if (isActive && !isActive()) return;
 
@@ -555,6 +583,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         setDiagnostics(diagnosticsResponse);
         if (settingsResponse) setSettings(settingsResponse);
         setSystemInfo(systemInfoResponse);
+        setIngestion(ingestionResponse);
         setNeedsLogin(false);
         setAuthReady(true);
 
@@ -572,6 +601,9 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             }
           } else if (route.tab === "configuration") {
             setActiveTab("configuration");
+          } else if (route.tab === "ingestion" || route.ingestionId) {
+            setActiveTab("ingestion");
+            if (route.ingestionId) void loadIngestionDetail(route.ingestionId);
           } else if (route.path) {
             void appStateRef.current.openFile(route.path, {
               requestedView: route.view,
@@ -590,7 +622,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         }
       }
     },
-    [api],
+    [api, loadIngestionDetail],
   );
 
   const syncWorkspace = useCallback(async () => {
@@ -675,6 +707,19 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
               }
             }
           }
+        }
+      } else if (activeTab === "ingestion") {
+        const nextIngestion = await api.loadIngestion().catch(() => null);
+        if (nextIngestion) setIngestion(nextIngestion);
+        const selectedId =
+          typeof window !== "undefined"
+            ? parseRoute(window.location).ingestionId
+            : undefined;
+        if (selectedId) {
+          const nextDetail = await api
+            .loadIngestionDetail(selectedId)
+            .catch(() => null);
+          if (nextDetail) setIngestionDetail(nextDetail);
         }
       }
     } finally {
@@ -795,6 +840,12 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
             kind: "switchTab",
             tab: "git-activity",
           });
+        } else if (route.tab === "ingestion" || route.ingestionId) {
+          setPendingAction({
+            ingestionId: route.ingestionId,
+            kind: "switchTab",
+            tab: "ingestion",
+          });
         } else if (route.tab === "configuration") {
           setPendingAction({ kind: "switchTab", tab: "configuration" });
         } else {
@@ -831,6 +882,14 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         setDraft("");
         setConflict("");
         setDocumentError("");
+      } else if (route.tab === "ingestion" || route.ingestionId) {
+        setActiveTab("ingestion");
+        setFile(null);
+        setArtifact(null);
+        setDraft("");
+        setConflict("");
+        setDocumentError("");
+        if (route.ingestionId) void loadIngestionDetail(route.ingestionId);
       } else if (route.tab === "configuration") {
         setActiveTab("configuration");
       } else if (route.path) {
@@ -852,7 +911,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  }, [loadIngestionDetail]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -862,6 +921,8 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         : "Skills - OpenLia Workspace";
     } else if (activeTab === "git-activity") {
       document.title = "Git Activity - OpenLia Workspace";
+    } else if (activeTab === "ingestion") {
+      document.title = "Ingestion - OpenLia Workspace";
     } else if (activeTab === "configuration") {
       document.title = "Configuration - OpenLia Workspace";
     } else {
@@ -902,6 +963,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         diagnosticsResponse,
         settingsResponse,
         systemInfoResponse,
+        ingestionResponse,
       ] = await Promise.all([
         api.loadTree(),
         api.loadGitStatus().catch(() => null),
@@ -912,6 +974,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
         api.loadDiagnostics().catch(() => null),
         api.loadSettings().catch(() => null),
         api.loadSystemInfo().catch(() => null),
+        api.loadIngestion().catch(() => null),
       ]);
       setTree(treeResponse.entries);
       setTreeTruncated(treeResponse.truncated);
@@ -922,6 +985,7 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       setDiagnostics(diagnosticsResponse);
       if (settingsResponse) setSettings(settingsResponse);
       setSystemInfo(systemInfoResponse);
+      setIngestion(ingestionResponse);
       setWorkspaceError("");
 
       if (!initialPathOpened.current) {
@@ -937,6 +1001,9 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           }
         } else if (route.tab === "configuration") {
           setActiveTab("configuration");
+        } else if (route.tab === "ingestion" || route.ingestionId) {
+          setActiveTab("ingestion");
+          if (route.ingestionId) void loadIngestionDetail(route.ingestionId);
         } else if (route.path) {
           void openFile(route.path, {
             requestedView: route.view,
@@ -1029,7 +1096,28 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
           nextTab === "skills" ? (selectedSkillId ?? undefined) : undefined,
         tab: nextTab,
       });
+      if (nextTab === "ingestion") {
+        setIngestionDetail(null);
+      }
     }
+  }
+
+  function requestIngestion(intakeId?: string) {
+    if (dirty) {
+      setPendingAction({
+        ingestionId: intakeId,
+        kind: "switchTab",
+        tab: "ingestion",
+      });
+      return;
+    }
+    setActiveTab("ingestion");
+    setFile(null);
+    setArtifact(null);
+    setDraft("");
+    setIngestionDetail(null);
+    navigateRoute({ tab: "ingestion", ingestionId: intakeId });
+    if (intakeId) void loadIngestionDetail(intakeId);
   }
 
   async function openFile(
@@ -1595,7 +1683,9 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       void openSkill(action.id, action.skillFile);
     } else if (action.kind === "switchTab") {
       setActiveTab(action.tab);
-      navigateRoute({ tab: action.tab });
+      setIngestionDetail(null);
+      navigateRoute({ ingestionId: action.ingestionId, tab: action.tab });
+      if (action.ingestionId) void loadIngestionDetail(action.ingestionId);
     } else {
       void performSignOut();
     }
@@ -1625,7 +1715,9 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
       void openSkill(action.id, action.skillFile);
     } else if (action.kind === "switchTab") {
       setActiveTab(action.tab);
-      navigateRoute({ tab: action.tab });
+      setIngestionDetail(null);
+      navigateRoute({ ingestionId: action.ingestionId, tab: action.tab });
+      if (action.ingestionId) void loadIngestionDetail(action.ingestionId);
     } else {
       void performSignOut();
     }
@@ -2003,6 +2095,33 @@ export function App({ api = httpWorkspaceApi }: { api?: WorkspaceApi } = {}) {
               </div>
             </div>
           )}
+        </div>
+      ) : activeTab === "ingestion" ? (
+        <div className="workspace-layout xl:grid-cols-1">
+          <IngestionSection
+            detail={ingestionDetail}
+            detailLoading={ingestionDetailLoading}
+            loading={ingestionLoading}
+            onOpenFile={requestOpenFile}
+            onRefresh={() => {
+              setIngestionLoading(true);
+              Promise.all([
+                api
+                  .loadIngestion()
+                  .then(setIngestion)
+                  .catch(() => {}),
+                ingestionDetail?.intake.intake_id
+                  ? api
+                      .loadIngestionDetail(ingestionDetail.intake.intake_id)
+                      .then(setIngestionDetail)
+                      .catch(() => {})
+                  : Promise.resolve(),
+              ]).finally(() => setIngestionLoading(false));
+            }}
+            onSelect={requestIngestion}
+            overview={ingestion}
+            rawUrl={api.rawUrl}
+          />
         </div>
       ) : (
         <div className="workspace-layout xl:grid-cols-1">
