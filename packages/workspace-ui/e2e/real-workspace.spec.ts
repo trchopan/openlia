@@ -4,7 +4,13 @@ import { captureScreenshot } from "./screenshot";
 const realWorkspace = process.env.WORKSPACE_UI_E2E_MODE === "real";
 
 async function openFiles(page: Page) {
-  const filesButton = page.getByRole("button", { exact: true, name: "Files" });
+  await expect(
+    page.getByRole("navigation", { name: "Workspace navigation" }),
+  ).toBeVisible();
+  const filesButton = page.getByRole("button", {
+    exact: true,
+    name: "Open files drawer",
+  });
   if (await filesButton.isVisible()) {
     await filesButton.click();
     await expect(
