@@ -234,7 +234,10 @@ describe("workspace application", () => {
     expect(
       await screen.findByRole("button", { name: "notes.md" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Version control unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Documents" })).toHaveAttribute(
+      "title",
+      "View recent workspace changes (Version control unavailable)",
+    );
   });
 
   test("automatically loads document from route path on initial load/reload", async () => {
@@ -654,13 +657,36 @@ messages:
       await screen.findByRole("article", { name: "Markdown preview" }),
     ).toBeInTheDocument();
 
-    // Now click the Activity button in FileNavigator to return to Activity
-    const activityButton = screen.getByRole("button", { name: "Activity" });
+    // Documents returns to the root Recent Changes page.
+    expect(screen.getByRole("button", { name: "Documents" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    const activityButton = screen.getByRole("button", { name: "Documents" });
     fireEvent.click(activityButton);
 
     expect(
       await screen.findByRole("heading", { name: "Recent Changes" }),
     ).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/");
+    expect(screen.getByRole("button", { name: "Documents" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Documents", "Skills", "Git"]);
+
+    for (const tab of ["Skills", "Configuration"]) {
+      fireEvent.click(screen.getByRole("button", { name: tab }));
+      fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+      expect(
+        await screen.findByRole("heading", { name: "Recent Changes" }),
+      ).toBeInTheDocument();
+      expect(window.location.pathname).toBe("/");
+    }
   });
 
   test("navigates to Git Activity tab and displays commit history", async () => {
@@ -671,7 +697,7 @@ messages:
     ).toBeInTheDocument();
 
     // Click the Git Activity tab button in header
-    const gitTabButton = screen.getByRole("button", { name: "Git Activity" });
+    const gitTabButton = screen.getByRole("button", { name: "Git" });
     fireEvent.click(gitTabButton);
 
     expect(
@@ -696,7 +722,7 @@ messages:
     ).toBeInTheDocument();
   });
 
-  test("triggers export when clicking Export button in header", async () => {
+  test("triggers export from Configuration", async () => {
     let exportCalled = false;
     const customApi = createMockWorkspaceApi();
     customApi.downloadWorkspaceExport = async () => {
@@ -705,8 +731,11 @@ messages:
 
     render(<App api={customApi} />);
 
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Configuration" }),
+    );
     const exportBtn = await screen.findByRole("button", {
-      name: "Export workspace and skills to ZIP",
+      name: "Export Workspace",
     });
     expect(exportBtn).toBeInTheDocument();
 
@@ -724,8 +753,11 @@ messages:
 
     render(<App api={customApi} />);
 
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Configuration" }),
+    );
     const exportBtn = await screen.findByRole("button", {
-      name: "Export workspace and skills to ZIP",
+      name: "Export Workspace",
     });
     fireEvent.click(exportBtn);
 

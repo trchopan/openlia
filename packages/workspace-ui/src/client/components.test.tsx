@@ -186,12 +186,7 @@ The **original** message.
     const treeButtons = within(navigator)
       .getAllByRole("button")
       .map((button) => button.textContent?.replace(/[▾▸]/, ""));
-    expect(treeButtons).toEqual(["Close", "Activity", "alpha", "root.md"]);
-    const activityBtn = within(navigator).getByRole("button", {
-      name: "Activity",
-    });
-    expect(activityBtn).toHaveClass("workspace-tree-activity");
-    expect(activityBtn).not.toHaveClass("workspace-tree-file");
+    expect(treeButtons).toEqual(["Close", "alpha", "root.md"]);
     expect(screen.getByLabelText("zeta, empty folder")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "alpha" }));
@@ -277,7 +272,6 @@ describe("CopyLinkButton and document copy integration", () => {
       <WorkspaceHeader
         authRequired={false}
         currentLink={expectedLink}
-        dirty={false}
         file={{
           content: "hello",
           editable: true,
@@ -302,49 +296,27 @@ describe("CopyLinkButton and document copy integration", () => {
     expect(copied).toBe(expectedLink);
   });
 
-  test("WorkspaceHeader renders export button and calls onExport on click", () => {
-    let exported = false;
-    const { rerender } = render(
+  test("WorkspaceHeader opens Documents without an export button", () => {
+    let opened = false;
+    render(
       <WorkspaceHeader
         authRequired={false}
-        dirty={false}
-        exporting={false}
         file={null}
         filesButtonRef={{ current: null }}
         git={null}
-        onExport={() => {
-          exported = true;
+        onOpenDocuments={() => {
+          opened = true;
         }}
         onOpenFiles={() => undefined}
         onSignOut={() => undefined}
       />,
     );
 
-    const exportBtn = screen.getByRole("button", {
-      name: "Export workspace and skills to ZIP",
-    });
-    expect(exportBtn).toBeInTheDocument();
-    expect(exportBtn).toBeEnabled();
-    expect(exportBtn).toHaveTextContent("Export");
-
-    fireEvent.click(exportBtn);
-    expect(exported).toBe(true);
-
-    rerender(
-      <WorkspaceHeader
-        authRequired={false}
-        dirty={false}
-        exporting={true}
-        file={null}
-        filesButtonRef={{ current: null }}
-        git={null}
-        onExport={() => undefined}
-        onOpenFiles={() => undefined}
-        onSignOut={() => undefined}
-      />,
-    );
-    expect(exportBtn).toBeDisabled();
-    expect(exportBtn).toHaveTextContent("Exporting...");
+    expect(
+      screen.queryByRole("button", { name: /Export/ }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+    expect(opened).toBe(true);
   });
 
   test("DocumentPane renders copy link button in toolbar", async () => {
