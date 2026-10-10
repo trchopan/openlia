@@ -4,12 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/term"
@@ -21,7 +19,6 @@ const (
 	workspaceUIPasswordParallel  = 1
 	workspaceUIPasswordSaltBytes = 16
 	workspaceUIPasswordKeyBytes  = 32
-	workspaceUIPasswordMinRunes  = 12
 )
 
 func validateWorkspaceUIPasswordHash(value string) error {
@@ -55,9 +52,6 @@ func validateWorkspaceUIPasswordHash(value string) error {
 }
 
 func hashWorkspaceUIPassword(value string) (string, error) {
-	if utf8.RuneCountInString(value) < workspaceUIPasswordMinRunes {
-		return "", fmt.Errorf("workspace-ui password must be at least %d characters", workspaceUIPasswordMinRunes)
-	}
 	salt := make([]byte, workspaceUIPasswordSaltBytes)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("generate workspace-ui password salt: %w", err)
@@ -118,37 +112,12 @@ func workspaceUIPasswordRequired(config Config) bool {
 	return config.WorkspaceUIHost == "0.0.0.0" || config.LochoHostEnabled
 }
 
-func rollbackWorkspaceUIPassword(ctx context.Context, deployment deployment, config Config, previousHash string) {
-	if previousHash != "" {
-		config.WorkspaceUIPasswordHash = previousHash
-		if err := provisionWorkspaceUIPassword(ctx, deployment, config); err != nil {
-			return
-		}
-		if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
-			return
-		}
-		_, _ = deployment.deploy(ctx, "deploy", false, "workspace-ui")
-		return
-	}
-	_ = deployment.removeFile(ctx, deployment.rootPath("runtime", "secrets", "workspace-ui-password.hash"))
-}
-
 func commandWorkspaceUI(options Options, args []string) int {
 	if len(args) != 1 || args[0] != "password" {
 		return fail(options, ExitUsage, "workspace-ui requires the password subcommand", nil)
 	}
 	if options.NonInteractive {
 		return fail(options, ExitUsage, "workspace-ui password requires an interactive terminal", nil)
-	}
-	config, err := loadConfigUnchecked()
-	if errors.Is(err, os.ErrNotExist) {
-		return fail(options, ExitPrereq, "workspace-ui password requires an existing config.toml", nil)
-	}
-	if err != nil {
-		return fail(options, ExitFailure, err.Error(), nil)
-	}
-	if config.WorkspaceUIHost == "" {
-		return fail(options, ExitUsage, "workspace-ui must be enabled before setting a password", nil)
 	}
 	first, err := readWorkspaceUIPassword("New workspace-ui password: ")
 	if err != nil {
@@ -165,29 +134,9 @@ func commandWorkspaceUI(options Options, args []string) int {
 	if err != nil {
 		return fail(options, ExitUsage, err.Error(), nil)
 	}
-	previousHash := config.WorkspaceUIPasswordHash
-	config.WorkspaceUIPasswordHash = hash
-	if err := validateConfig(config); err != nil {
-		return fail(options, ExitUsage, err.Error(), nil)
+	// This command intentionally prints the verifier without the usual output redaction.
+	if _, err := fmt.Fprintln(os.Stdout, hash); err != nil {
+		return fail(options, ExitFailure, "write workspace-ui password hash: "+err.Error(), nil)
 	}
-	ctx, cancel := remoteContext()
-	defer cancel()
-	deployment := newDeployment(config)
-	if err := provisionWorkspaceUIPassword(ctx, deployment, config); err != nil {
-		return fail(options, ExitFailure, "workspace-ui password provisioning failed: "+err.Error(), nil)
-	}
-	if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
-		rollbackWorkspaceUIPassword(ctx, deployment, config, previousHash)
-		return fail(options, ExitFailure, "workspace-ui Compose generation failed: "+err.Error(), nil)
-	}
-	raw, err := deployment.deploy(ctx, "deploy", false, "workspace-ui")
-	if err != nil {
-		rollbackWorkspaceUIPassword(ctx, deployment, config, previousHash)
-		return fail(options, ExitFailure, "workspace-ui restart failed: "+err.Error(), nil)
-	}
-	if err := saveConfig(config); err != nil {
-		rollbackWorkspaceUIPassword(ctx, deployment, config, previousHash)
-		return fail(options, ExitFailure, "workspace-ui password was deployed but config.toml could not be saved: "+err.Error(), nil)
-	}
-	return renderRemote(options, raw, "workspace-ui password updated; the previous password is no longer valid")
+	return ExitOK
 }

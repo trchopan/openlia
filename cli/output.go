@@ -114,5 +114,8 @@ Usage:
 
 Global flags: --json, --non-interactive, --version, --help
 
+workspace-ui password prompts without echo and prints only an Argon2id hash.
+Copy it into [workspace-ui].password_hash in config.toml, then run openlia deploy.
+
 Secrets are accepted only through protected files or Hermes' configured secret source.`)
 }

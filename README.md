@@ -632,16 +632,27 @@ isolated between projects.
 
 Add a `[workspace-ui]` section with `host = "127.0.0.1"` to keep the Workspace
 Editor private, or use `host = "0.0.0.0"` to publish it on all interfaces. A
-public binding requires an Argon2id `password_hash`; create or rotate it with:
+public binding requires an Argon2id `password_hash`; generate one with:
 
 ```sh
 ./openlia workspace-ui password
 ```
 
-The command prompts without echo and never accepts a password as an argument.
-The hash is stored in the mode-`0600` operator config and is mounted into only
-the Workspace UI container. Omit the section to disable the UI. For a remote
-target, use an SSH tunnel with the loopback setting:
+The command prompts for the password twice without echo and prints only the
+hash to stdout; prompts go to stderr. Passwords have no minimum length, and the
+command never accepts a password as an argument. It works without an existing
+configuration. Copy the output into your `config.toml`:
+
+```toml
+[workspace-ui]
+host = "0.0.0.0"
+password_hash = "$argon2id$..."
+```
+
+Run `openlia deploy` to apply the configured hash. To rotate the password,
+generate a new hash, replace `password_hash`, and deploy again. The hash is
+mounted into only the Workspace UI container. Omit the section to disable the
+UI. For a remote target, use an SSH tunnel with the loopback setting:
 
 ```sh
 ssh -L 8089:127.0.0.1:8089 user@host
