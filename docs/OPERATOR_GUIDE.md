@@ -214,13 +214,74 @@ openlia backup schedule --cron "0 2 * * *" --retention 14
 ```
 
 ### Remote Backup Storage (S3 / SSH)
-In `config.toml`, configure a remote storage destination:
+S3 destinations can use separate reader credentials on the operator machine and
+writer credentials on the deployment target. Credential paths are resolved
+relative to the directory containing the selected profile's `config.toml`.
+
 ```toml
-[backup.remote]
+[[backup.destinations]]
+name = "archive"
+type = "s3"
+endpoint = "https://s3.example.test"
+bucket = "my-openlia-backups"
+region = "us-east-1"
+path_style = true
+reader_credentials_file = "s3-reader-credentials"
+reader_aws_profile = "reader"
+writer_credentials_file = "s3-writer-credentials"
+writer_aws_profile = "writer"
+```
+
+The credential files use the standard AWS shared-credentials format. Keep them
+outside the OpenLia checkout with mode `0600`:
+
+```ini
+[reader]
+aws_access_key_id = ...
+aws_secret_access_key = ...
+```
+
+Each configured AWS profile must be paired with its credentials file; omit all
+four fields to use the existing AWS SDK discovery behavior.
+
+The writer file may contain multiple profiles, but OpenLia deploys only the
+configured writer profile to the target. It is stored below the target's
+runtime directory with mode `0600`. The scheduler mounts that directory
+read-only and copies the writer file into private tmpfs before running as the
+runtime user. Re-run `openlia deploy`, `openlia update openlia`, or
+`openlia backup push` after rotating the local writer file.
+
+Reader credentials are used only for local `backup list`, `backup restore`, and
+remote downloads. Writer credentials are used only for target uploads and
+remote retention. The private age recovery identity is never deployed.
+
+Credential precedence is:
+
+1. An explicitly configured credentials file and profile (the profile defaults to `default`).
+2. Existing AWS SDK discovery through environment variables and shared files.
+
+When explicit references are absent, existing AWS behavior is unchanged. A
+configured credentials file must be a regular mode-`0600` file. Missing files,
+profiles, or incomplete access keys stop the operation with an error that does
+not include secret values.
+
+For an existing destination, migrate by adding the reader and writer fields,
+creating the two protected files, and running deployment once. The writer file
+is filtered during deployment, so reader credentials and unrelated profiles are
+not sent to the target.
+
+For SSH destinations, continue to use the existing `identity_file` and
+`operator_identity_file` fields. S3 credential fields are not accepted on SSH
+destinations.
+
+Example legacy form:
+```toml
+[[backup.destinations]]
+name = "archive"
 type = "s3"
 bucket = "my-openlia-backups"
 region = "us-east-1"
-prefix = "backups/"
+prefix = "backups"
 ```
 When configured, encrypted backups are automatically synchronized to offsite storage.
 

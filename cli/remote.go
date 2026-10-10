@@ -192,7 +192,7 @@ func (remote Remote) operationCommandForRoot(operationRoot, operation string, ar
 		"OPENLIA_WORKSPACE_GIT_SCHEDULE=" + shellQuote(remote.Config.WorkspaceGitSchedule),
 		"OPENLIA_WORKSPACE_GIT_ENABLED=" + shellQuote(strconv.FormatBool(remote.Config.WorkspaceGitEnabled)),
 		"OPENLIA_BACKUP_REMOTE_RETENTION=" + shellQuote(strconv.Itoa(remote.Config.BackupRemoteRetention)),
-		"OPENLIA_BACKUP_DESTINATIONS=" + shellQuote(renderBackupDestinationsJSON(remote.Config.BackupDestinations)),
+		"OPENLIA_BACKUP_DESTINATIONS=" + shellQuote(renderBackupDestinationsJSON(remote.Config.BackupDestinations, remote.Config.InstallRoot)),
 		"OPENLIA_COMPOSE_FILE=" + shellQuote(filepath.Join(operationRoot, "docker", "compose.yaml")),
 		"OPENLIA_COMPOSE_PROJECT_DIR=" + shellQuote(filepath.Join(operationRoot, "docker")),
 		"OPENLIA_GENERATED_COMPOSE=" + shellQuote(filepath.Join(operationRoot, "docker", "compose.generated.yaml")),
@@ -639,7 +639,7 @@ func operationEnvironment(config Config, operationRoot string) []string {
 		"OPENLIA_WORKSPACE_GIT_SCHEDULE=" + config.WorkspaceGitSchedule,
 		"OPENLIA_WORKSPACE_GIT_ENABLED=" + strconv.FormatBool(config.WorkspaceGitEnabled),
 		"OPENLIA_BACKUP_REMOTE_RETENTION=" + strconv.Itoa(config.BackupRemoteRetention),
-		"OPENLIA_BACKUP_DESTINATIONS=" + renderBackupDestinationsJSON(config.BackupDestinations),
+		"OPENLIA_BACKUP_DESTINATIONS=" + renderBackupDestinationsJSON(config.BackupDestinations, config.InstallRoot),
 		"OPENLIA_META_ROOT=" + filepath.Join(config.InstallRoot, "runtime", "meta"),
 		"OPENLIA_COMPOSE_FILE=" + filepath.Join(operationRoot, "docker", "compose.yaml"),
 		"OPENLIA_COMPOSE_PROJECT_DIR=" + filepath.Join(operationRoot, "docker"),
@@ -652,20 +652,25 @@ func operationEnvironment(config Config, operationRoot string) []string {
 	}
 }
 
-func renderBackupDestinationsJSON(values []BackupDestinationConfig) string {
+func renderBackupDestinationsJSON(values []BackupDestinationConfig, installRoot string) string {
 	destinations := make([]operator.BackupDestination, 0, len(values))
 	for _, value := range values {
-		destinations = append(destinations, operator.BackupDestination{
-			Name:         value.Name,
-			Type:         value.Type,
-			Endpoint:     value.Endpoint,
-			Bucket:       value.Bucket,
-			Prefix:       value.Prefix,
-			Region:       value.Region,
-			PathStyle:    value.PathStyle,
-			RsyncTarget:  value.RsyncTarget,
-			IdentityFile: value.IdentityFile,
-		})
+		destination := operator.BackupDestination{
+			Name:               value.Name,
+			Type:               value.Type,
+			Endpoint:           value.Endpoint,
+			Bucket:             value.Bucket,
+			Prefix:             value.Prefix,
+			Region:             value.Region,
+			PathStyle:          value.PathStyle,
+			RsyncTarget:        value.RsyncTarget,
+			IdentityFile:       value.IdentityFile,
+			CredentialsProfile: value.WriterAWSProfile,
+		}
+		if value.WriterCredentialsFile != "" {
+			destination.CredentialsFile = filepath.Join(installRoot, "runtime", "backup-credentials", value.Name, "credentials")
+		}
+		destinations = append(destinations, destination)
 	}
 	data, err := json.Marshal(destinations)
 	if err != nil {

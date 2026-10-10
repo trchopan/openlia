@@ -87,18 +87,20 @@ type Config struct {
 }
 
 // BackupDestination describes a target-side remote backup store. Credentials
-// are intentionally resolved by the target's normal credential mechanisms and
+// are represented only by a protected file path and profile name; secret values
 // are never embedded in this structure.
 type BackupDestination struct {
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	Endpoint     string `json:"endpoint,omitempty"`
-	Bucket       string `json:"bucket,omitempty"`
-	Prefix       string `json:"prefix,omitempty"`
-	Region       string `json:"region,omitempty"`
-	PathStyle    bool   `json:"path_style,omitempty"`
-	RsyncTarget  string `json:"rsync_target,omitempty"`
-	IdentityFile string `json:"identity_file,omitempty"`
+	Name               string `json:"name"`
+	Type               string `json:"type"`
+	Endpoint           string `json:"endpoint,omitempty"`
+	Bucket             string `json:"bucket,omitempty"`
+	Prefix             string `json:"prefix,omitempty"`
+	Region             string `json:"region,omitempty"`
+	PathStyle          bool   `json:"path_style,omitempty"`
+	RsyncTarget        string `json:"rsync_target,omitempty"`
+	IdentityFile       string `json:"identity_file,omitempty"`
+	CredentialsFile    string `json:"credentials_file,omitempty"`
+	CredentialsProfile string `json:"credentials_profile,omitempty"`
 }
 
 type FallbackProviderConfig struct {
@@ -501,6 +503,10 @@ func (c Config) ValidatePaths() error {
 		if destination.IdentityFile != "" && (identityPath == filepath.Clean(c.SecretDir) || identityPath == filepath.Clean(c.DataRoot) || within(destination.IdentityFile, c.SecretDir) || within(destination.IdentityFile, c.DataRoot)) {
 			return fmt.Errorf("rsync identity files must not be inside Hermes data or mounted runtime secrets")
 		}
+		credentialsPath := filepath.Clean(destination.CredentialsFile)
+		if destination.CredentialsFile != "" && (credentialsPath == filepath.Clean(c.SecretDir) || credentialsPath == filepath.Clean(c.DataRoot) || within(destination.CredentialsFile, c.SecretDir) || within(destination.CredentialsFile, c.DataRoot)) {
+			return fmt.Errorf("S3 credentials files must not be inside Hermes data or mounted runtime secrets")
+		}
 	}
 	if err := ValidateAbsolutePath(c.RuntimeRoot, "runtime-root"); err != nil {
 		return err
@@ -670,6 +676,16 @@ func validateBackupDestinations(destinations []BackupDestination) error {
 			}
 			if strings.HasPrefix(destination.Prefix, "/") || strings.Contains(destination.Prefix, "..") || strings.ContainsAny(destination.Prefix, "\\\r\n") {
 				return fmt.Errorf("S3 backup destination %s has an unsafe prefix", destination.Name)
+			}
+			if destination.CredentialsFile != "" {
+				if err := ValidateAbsolutePath(destination.CredentialsFile, "backup-S3-credentials-file"); err != nil {
+					return err
+				}
+			}
+			if destination.CredentialsProfile != "" {
+				if err := validateAWSProfile(destination.CredentialsProfile); err != nil {
+					return fmt.Errorf("S3 backup destination %s: %w", destination.Name, err)
+				}
 			}
 		case "rsync":
 			if destination.RsyncTarget == "" || strings.ContainsAny(destination.RsyncTarget, " \t\r\n;$&|()<>`'") {

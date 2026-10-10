@@ -313,6 +313,9 @@ func commandInit(options Options, args []string, assets fs.FS) int {
 	if _, err := deployment.bootstrap(ctx); err != nil {
 		return fail(options, ExitFailure, err.Error(), nil)
 	}
+	if err := syncBackupWriterCredentials(ctx, deployment, config); err != nil {
+		return fail(options, ExitFailure, "could not stage backup writer credentials: "+err.Error(), nil)
+	}
 	// Generate the Compose sidecar file before the full deploy so Hermes starts
 	// with the correct Locho gateway endpoint.
 	if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
@@ -430,6 +433,11 @@ func commandLifecycle(options Options, action string, args []string) int {
 	ctx, cancel := remoteContext()
 	defer cancel()
 	deployment := newDeployment(config)
+	if action == "deploy" || action == "start" || action == "restart" {
+		if err := syncBackupWriterCredentials(ctx, deployment, config); err != nil {
+			return fail(options, ExitFailure, "could not stage backup writer credentials: "+err.Error(), nil)
+		}
+	}
 	if workspaceUIPasswordRequired(config) {
 		if err := provisionWorkspaceUIPassword(ctx, deployment, config); err != nil {
 			return fail(options, ExitFailure, "workspace-ui password provisioning failed: "+err.Error(), nil)
@@ -746,6 +754,9 @@ func commandUpdate(options Options, args []string, assets fs.FS) int {
 	ctx, cancel := remoteContext()
 	defer cancel()
 	deployment := newDeployment(config)
+	if err := syncBackupWriterCredentials(ctx, deployment, config); err != nil {
+		return fail(options, ExitFailure, "could not stage backup writer credentials: "+err.Error(), nil)
+	}
 	if workspaceUIPasswordRequired(config) {
 		if err := provisionWorkspaceUIPassword(ctx, deployment, config); err != nil {
 			return fail(options, ExitFailure, "workspace-ui password provisioning failed: "+err.Error(), nil)
@@ -1353,7 +1364,23 @@ func commandBackup(options Options, args []string) int {
 			return failWithPayload(options, ExitFailure, err.Error(), map[string]any{"archives": archives})
 		}
 		return writeResult(options, map[string]any{"schema": 1, "ok": true, "archives": archives}, formatRemoteBackupList(archives))
-	case "push":
+	case "push", "tick":
+		if err := syncBackupWriterCredentials(ctx, deployment, config); err != nil {
+			return fail(options, ExitFailure, "could not stage backup writer credentials: "+err.Error(), nil)
+		}
+		if action == "tick" {
+			if len(args) != 0 {
+				return fail(options, ExitUsage, "backup tick takes no arguments", nil)
+			}
+			if err := validateBackupIdentity(config.BackupIdentityFile, config.BackupRecipient); err != nil {
+				return fail(options, ExitPrereq, "operator recovery identity is not ready: "+err.Error(), nil)
+			}
+			raw, err := deployment.operation(ctx, "backup", nil, "tick", "--json")
+			if err != nil {
+				return fail(options, ExitFailure, err.Error(), nil)
+			}
+			return renderRemote(options, raw, redact(string(raw)))
+		}
 		archiveName := ""
 		if len(args) == 2 && args[0] == "--archive" {
 			archiveName = args[1]
@@ -1383,6 +1410,9 @@ func commandBackup(options Options, args []string) int {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
 		if config.BackupScheduleEnabled {
+			if err := syncBackupWriterCredentials(ctx, deployment, config); err != nil {
+				return fail(options, ExitFailure, "backup key saved but writer credentials could not be staged: "+err.Error(), nil)
+			}
 			if _, err := deployment.operation(ctx, "backup", nil, "schedule-install", "--json"); err != nil {
 				return fail(options, ExitFailure, "backup key saved but schedule installation failed: "+err.Error(), nil)
 			}
@@ -1395,18 +1425,6 @@ func commandBackup(options Options, args []string) int {
 			return fail(options, ExitUsage, "backup status takes no arguments", nil)
 		}
 		raw, err := deployment.operation(ctx, "backup", nil, "status", "--json")
-		if err != nil {
-			return fail(options, ExitFailure, err.Error(), nil)
-		}
-		return renderRemote(options, raw, redact(string(raw)))
-	case "tick":
-		if len(args) != 0 {
-			return fail(options, ExitUsage, "backup tick takes no arguments", nil)
-		}
-		if err := validateBackupIdentity(config.BackupIdentityFile, config.BackupRecipient); err != nil {
-			return fail(options, ExitPrereq, "operator recovery identity is not ready: "+err.Error(), nil)
-		}
-		raw, err := deployment.operation(ctx, "backup", nil, "tick", "--json")
 		if err != nil {
 			return fail(options, ExitFailure, err.Error(), nil)
 		}
@@ -1432,6 +1450,9 @@ func commandBackupSchedule(options Options, args []string, config Config, ctx co
 	}
 	deployment := newDeployment(config)
 	if action == "schedule-install" {
+		if err := syncBackupWriterCredentials(ctx, deployment, config); err != nil {
+			return fail(options, ExitFailure, "could not stage backup writer credentials: "+err.Error(), nil)
+		}
 		if _, err := deployment.operation(ctx, "attachments", nil, "generate", "--json"); err != nil {
 			return fail(options, ExitFailure, "backup scheduler mount generation failed: "+err.Error(), nil)
 		}

@@ -99,6 +99,30 @@ func TestPushBackupS3UploadsCiphertextAndMetadata(t *testing.T) {
 	}
 }
 
+func TestLoadS3BackupConfigUsesExplicitProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials")
+	contents := "[reader]\naws_access_key_id = reader-key\naws_secret_access_key = reader-secret\n"
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AWS_ACCESS_KEY_ID", "ambient-key")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "ambient-secret")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	config, err := loadS3BackupConfig(context.Background(), BackupDestination{
+		Name: "archive", Type: "s3", Region: "us-east-1", CredentialsFile: path, CredentialsProfile: "reader",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := config.Credentials.Retrieve(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credentials.AccessKeyID != "reader-key" || credentials.SecretAccessKey != "reader-secret" {
+		t.Fatalf("credentials = %#v, want reader profile", credentials)
+	}
+}
+
 func TestRsyncBackupListCommandIsPortableAndFilenameOrdered(t *testing.T) {
 	command := rsyncBackupListCommand("/srv/openlia/backups")
 	if strings.Contains(command, "-printf") || strings.Contains(command, "-maxdepth") {

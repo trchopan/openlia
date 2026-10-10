@@ -11,6 +11,24 @@ fi
 
 touch /run/openlia/last-tick
 
+# Writer credential directories are mounted read-only so credential rotation
+# can replace the source file without recreating the scheduler container. Copy
+# each current file into tmpfs before dropping privileges.
+for source in /run/openlia-destinations/*/credentials; do
+    [ -f "$source" ] || continue
+    name=${source%/*}
+    name=${name##*/}
+    destination=/tmp/openlia-backup/$name/credentials
+    mkdir -p "${destination%/*}"
+    chown "$OPENLIA_RUNTIME_UID:$OPENLIA_RUNTIME_GID" "${destination%/*}"
+    chmod 0700 "${destination%/*}"
+    temporary="$destination.tmp"
+    cp "$source" "$temporary"
+    chown "$OPENLIA_RUNTIME_UID:$OPENLIA_RUNTIME_GID" "$temporary"
+    chmod 0600 "$temporary"
+    mv -f "$temporary" "$destination"
+done
+
 # The host operator may protect this mounted configuration with mode 0600.
 # Copying it as root into tmpfs lets the operator run as the runtime identity.
 config_copy=/tmp/openlia-backup/schedule-config.json

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
@@ -55,7 +54,7 @@ func listRemoteBackupDestination(ctx context.Context, config Config, destination
 }
 
 func listS3BackupArchives(ctx context.Context, config Config, destination BackupDestinationConfig) ([]remoteBackupArchive, error) {
-	awsConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(destination.Region))
+	awsConfig, err := loadS3AWSConfig(ctx, destination.Region, destination.ReaderCredentialsFile, destination.ReaderAWSProfile, "reader")
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +134,7 @@ func fetchRemoteBackup(ctx context.Context, config Config, destination BackupDes
 }
 
 func fetchS3Backup(ctx context.Context, config Config, destination BackupDestinationConfig, name, output string) error {
-	awsConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(destination.Region))
+	awsConfig, err := loadS3AWSConfig(ctx, destination.Region, destination.ReaderCredentialsFile, destination.ReaderAWSProfile, "reader")
 	if err != nil {
 		return err
 	}

@@ -255,6 +255,7 @@ func backupScheduleInstalled(config Config) bool {
 }
 
 func scheduleRuntimeConfig(config Config) Config {
+	config.BackupDestinations = append([]BackupDestination(nil), config.BackupDestinations...)
 	config.BackupNamespaceRoot = config.InstallRoot
 	config.RepositoryRoot = "/opt/openlia/current"
 	config.RuntimeRoot = "/runtime"
@@ -285,6 +286,9 @@ func scheduleRuntimeConfig(config Config) Config {
 	for index := range config.BackupDestinations {
 		if config.BackupDestinations[index].IdentityFile != "" {
 			config.BackupDestinations[index].IdentityFile = "/run/openlia-destinations/" + config.BackupDestinations[index].Name
+		}
+		if config.BackupDestinations[index].CredentialsFile != "" {
+			config.BackupDestinations[index].CredentialsFile = "/tmp/openlia-backup/" + config.BackupDestinations[index].Name + "/credentials"
 		}
 	}
 	return config

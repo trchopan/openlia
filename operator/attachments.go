@@ -275,7 +275,7 @@ func generateAttachmentsFile(config Config) error {
 
 	var builder strings.Builder
 	hasHermesEnv := config.APIEnabled || config.OpenWebUIHost != "" || config.ExternalNetwork != "" || browserURL != "" || config.WorkspaceUIPublicOrigin != "" || len(allServices) > 0
-	schedulerVolumes := backupSchedulerIdentityVolumes(config)
+	schedulerVolumes := append(backupSchedulerIdentityVolumes(config), backupSchedulerCredentialVolumes(config)...)
 	hasGeneratedServices := hasHermesEnv || config.WorkspaceUIHost != "" || config.OpenWebUIHost != "" || len(hosts.Hosts) > 0 || len(schedulerVolumes) > 0
 	if !hasGeneratedServices {
 		builder.WriteString("services: {}\n")
@@ -456,6 +456,27 @@ func backupSchedulerIdentityVolumes(config Config) []backupSchedulerIdentityVolu
 			continue
 		}
 		source, err := json.Marshal(destination.IdentityFile)
+		if err != nil {
+			continue
+		}
+		volumes = append(volumes, backupSchedulerIdentityVolume{
+			source: string(source),
+			target: "/run/openlia-destinations/" + destination.Name,
+		})
+	}
+	return volumes
+}
+
+func backupSchedulerCredentialVolumes(config Config) []backupSchedulerIdentityVolume {
+	if !config.BackupScheduleEnabled {
+		return nil
+	}
+	volumes := make([]backupSchedulerIdentityVolume, 0)
+	for _, destination := range config.BackupDestinations {
+		if destination.Type != "s3" || destination.CredentialsFile == "" {
+			continue
+		}
+		source, err := json.Marshal(filepath.Dir(destination.CredentialsFile))
 		if err != nil {
 			continue
 		}

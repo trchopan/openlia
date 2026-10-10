@@ -33,6 +33,29 @@ func TestOperationCommandPropagatesBackupCredentialInputs(t *testing.T) {
 	}
 }
 
+func TestOperationCommandTransportsOnlyTargetWriterCredentialReference(t *testing.T) {
+	config := defaultConfig()
+	config.Target = "operator@example.test"
+	config.InstallRoot = "/srv/openlia"
+	config.BackupDestinations = []BackupDestinationConfig{{
+		Name:                  "archive",
+		Type:                  "s3",
+		Bucket:                "backups",
+		Region:                "us-east-1",
+		ReaderCredentialsFile: "/Users/me/.config/openlia/prod/reader",
+		ReaderAWSProfile:      "reader",
+		WriterCredentialsFile: "/Users/me/.config/openlia/prod/writer",
+		WriterAWSProfile:      "writer",
+	}}
+	command := (Remote{Config: config}).operationCommand("backup", "push", "--json")
+	if !strings.Contains(command, "/srv/openlia/runtime/backup-credentials/archive/credentials") || !strings.Contains(command, `"credentials_profile":"writer"`) {
+		t.Fatalf("target writer reference missing: %s", command)
+	}
+	if strings.Contains(command, "/Users/me/.config/openlia/prod/") || strings.Contains(command, "reader-secret") {
+		t.Fatalf("local reader or writer source leaked into remote command: %s", command)
+	}
+}
+
 func TestOperationCommandUsesPrivilegedAndUnprivilegedRuntimeIdentities(t *testing.T) {
 	config := defaultConfig()
 	config.Target = "operator@example.test"
