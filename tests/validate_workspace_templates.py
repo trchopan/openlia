@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLE_ROOT = ROOT / "workspace-template"
 SKILLS_ROOT = ROOT / "profile" / "skills"
 CLAIM_TEMPLATE = BUNDLE_ROOT / "knowledge" / "claims" / "claim-template.md"
+MONITOR_TEMPLATE = BUNDLE_ROOT / "monitors" / "monitor-template.md"
 RUNTIME_VALIDATOR = (
     ROOT
     / "profile"
@@ -59,6 +60,30 @@ def _claim_schema_errors() -> list[str]:
     unsupported["legacy_field"] = "not allowed"
     if not validator.validate_frontmatter(unsupported, schema):
         errors.append("claim schema accepted an unsupported frontmatter field")
+    return errors
+
+
+def _monitor_schema_errors() -> list[str]:
+    errors: list[str] = []
+    try:
+        metadata, _ = validator.parse_frontmatter(MONITOR_TEMPLATE.read_text(encoding="utf-8"))
+        schema_path = validator._resolve_template_schema(
+            metadata.get("$schema"), MONITOR_TEMPLATE, BUNDLE_ROOT
+        )
+        schema = validator.load_schema(schema_path)
+    except (OSError, ValueError) as exc:
+        return [f"monitors/monitor-template.md: {exc}"]
+
+    for frequency in ("hourly", "daily", "weekly", "monthly"):
+        candidate = validator._without_schema_directive(metadata)
+        candidate["check_frequency"] = frequency
+        if validator.validate_frontmatter(candidate, schema):
+            errors.append(f"monitor schema rejected check_frequency: {frequency}")
+
+    unsupported = validator._without_schema_directive(metadata)
+    unsupported["check_frequency"] = "yearly"
+    if not validator.validate_frontmatter(unsupported, schema):
+        errors.append("monitor schema accepted unsupported check_frequency: yearly")
     return errors
 
 
@@ -168,6 +193,7 @@ def validate_bundle() -> list[str]:
             )
 
     errors.extend(_claim_schema_errors())
+    errors.extend(_monitor_schema_errors())
     return sorted(set(errors))
 
 

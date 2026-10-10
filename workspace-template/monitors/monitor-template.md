@@ -2,7 +2,7 @@
 $schema: ./monitor-template.schema.json
 status: null # active | paused | triggered | retired
 source: null # source URL or other stable reference
-check_frequency: null # hourly | daily | weekly
+check_frequency: null # hourly | daily | weekly | monthly
 alert_channel: null # e.g. Telegram or Daily Briefing
 ---
 
