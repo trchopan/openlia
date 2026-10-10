@@ -11,7 +11,7 @@
     "source": {"type": ["string", "null"], "minLength": 1},
     "check_frequency": {
       "type": ["string", "null"],
-      "enum": [null, "hourly", "daily", "weekly"]
+      "enum": [null, "hourly", "daily", "weekly", "monthly"]
     },
     "alert_channel": {"type": ["string", "null"], "minLength": 1}
   },
