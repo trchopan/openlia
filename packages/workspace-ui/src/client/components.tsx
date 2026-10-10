@@ -1508,13 +1508,6 @@ export function DocumentPane({
                 <p className="workspace-document-name" title={file.path}>
                   {file.path}
                 </p>
-                <CopyLinkButton
-                  className="btn btn-ghost btn-xs btn-square text-base-content/60 hover:text-base-content"
-                  iconOnly
-                  link={buildWorkspaceLink(file.path)}
-                  size="xs"
-                  title={`Copy link: ${buildWorkspaceLink(file.path)}`}
-                />
               </div>
               {!canEdit && <p className="text-xs text-warning">Read only</p>}
             </div>

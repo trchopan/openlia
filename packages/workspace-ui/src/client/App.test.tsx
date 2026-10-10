@@ -10,7 +10,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
 import { ApiError, type WorkspaceApi } from "./api";
 import { createMockWorkspaceApi } from "./mockApi";
-import { buildWorkspaceLink } from "./openliaLinks";
+import { buildCanonicalWorkspaceUri } from "./openliaLinks";
 
 afterEach(() => {
   cleanup();
@@ -504,15 +504,17 @@ messages:
     render(<App api={createMockWorkspaceApi()} />);
     fireEvent.click(await screen.findByRole("button", { name: "notes.md" }));
 
-    const expectedLink = buildWorkspaceLink("notes.md");
-    // Document toolbar should have the Copy Link button
+    const expectedUri = buildCanonicalWorkspaceUri("notes.md");
     const copyButton = await screen.findByRole("button", {
-      name: `Copy link (${expectedLink})`,
+      name: `Copy link: ${expectedUri}`,
     });
     expect(copyButton).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Copy link:/ })).toHaveLength(
+      1,
+    );
 
     fireEvent.click(copyButton);
-    expect(copiedText).toBe(expectedLink);
+    expect(copiedText).toBe(expectedUri);
   });
 
   test("clicking Reveal in Tree clears filter and focuses the file", async () => {
