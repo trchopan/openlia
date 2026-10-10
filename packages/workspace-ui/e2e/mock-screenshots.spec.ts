@@ -4,7 +4,13 @@ import { captureScreenshot } from "./screenshot";
 const realWorkspace = process.env.WORKSPACE_UI_E2E_MODE === "real";
 
 async function openFiles(page: Page) {
-  const filesButton = page.getByRole("button", { exact: true, name: "Files" });
+  await expect(
+    page.getByRole("navigation", { name: "Workspace navigation" }),
+  ).toBeVisible();
+  const filesButton = page.getByRole("button", {
+    exact: true,
+    name: "Open files drawer",
+  });
   if (await filesButton.isVisible()) {
     await filesButton.click();
     await expect(
@@ -26,11 +32,9 @@ test.describe("mock visual catalog", () => {
 
   test("workspace overview", async ({ page }, testInfo) => {
     await page.goto("/");
-    if (
-      await page.getByRole("button", { exact: true, name: "Files" }).isVisible()
-    )
+    if (testInfo.project.name === "mobile")
       await expect(
-        page.getByRole("button", { exact: true, name: "Files" }),
+        page.getByRole("button", { exact: true, name: "Open files drawer" }),
       ).toBeVisible();
     else
       await expect(
@@ -110,11 +114,9 @@ test.describe("mock visual catalog", () => {
     await page.goto("/?scenario=auth");
     await page.getByLabel("Password").fill("local-playwright-password");
     await page.getByRole("button", { name: "Sign in" }).click();
-    if (
-      await page.getByRole("button", { exact: true, name: "Files" }).isVisible()
-    )
+    if (testInfo.project.name === "mobile")
       await expect(
-        page.getByRole("button", { exact: true, name: "Files" }),
+        page.getByRole("button", { exact: true, name: "Open files drawer" }),
       ).toBeVisible();
     else
       await expect(
@@ -163,12 +165,9 @@ test.describe("mock visual catalog", () => {
   test("skills catalog overview", async ({ page }, testInfo) => {
     await page.goto("/skills");
     if (testInfo.project.name === "mobile") {
-      const drawerBtn = page
-        .getByRole("button", { exact: true, name: "Skills" })
-        .first();
-      if (await drawerBtn.isVisible()) {
-        await drawerBtn.click();
-      }
+      await page
+        .getByRole("button", { exact: true, name: "Open skills drawer" })
+        .click();
     }
     await expect(page.getByText(/Skills \(/)).toBeVisible();
     await captureScreenshot(page, testInfo, "skills-overview");

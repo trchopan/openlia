@@ -20,7 +20,11 @@ textarea {
 }
 
 .workspace-app {
+  display: flex;
+  height: 100dvh;
   min-height: 100dvh;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--color-base-300);
   color: var(--color-base-content);
 }
@@ -77,9 +81,11 @@ textarea {
 
 .workspace-layout {
   display: grid;
-  min-height: calc(100dvh - 4.5rem);
+  flex: 1 1 0%;
+  min-height: 0;
   min-width: 0;
   gap: 0;
+  overflow: hidden;
 }
 
 .workspace-navigator,
@@ -109,7 +115,13 @@ textarea {
   min-width: 0;
   min-height: 0;
   flex-direction: column;
+  overflow: hidden;
   background: var(--color-base-100);
+}
+
+.workspace-document > .workspace-inspector {
+  height: auto;
+  flex: 1 1 0%;
 }
 
 .workspace-document-toolbar {
@@ -228,6 +240,7 @@ textarea {
 .workspace-editor-pane,
 .workspace-preview-pane {
   display: flex;
+  flex: 1 1 0%;
   min-width: 0;
   min-height: 0;
   flex-direction: column;
@@ -497,7 +510,7 @@ textarea {
   }
 
   .workspace-layout {
-    min-height: calc(100dvh - 4rem);
+    min-height: 0;
   }
 
   .workspace-document-toolbar {
