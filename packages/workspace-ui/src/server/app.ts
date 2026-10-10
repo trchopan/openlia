@@ -16,11 +16,13 @@ import type {
 } from "../shared/api";
 import { Authenticator } from "./auth";
 import { exportArchive } from "./export";
+import { IngestionService } from "./ingestion";
 import { SkillService } from "./skills";
 import { WorkspaceError, WorkspaceService } from "./workspace";
 
 export interface WorkspaceHandlerOptions {
   workspaceRoot: string;
+  ingestionRoot?: string;
   skillsRoot?: string;
   staticRoot?: string;
   maxEditableBytes?: number;
@@ -233,6 +235,7 @@ export function createWorkspaceHandler(
   options: WorkspaceHandlerOptions,
 ): (request: Request, clientKey?: string) => Promise<Response> {
   const service = new WorkspaceService(options);
+  const ingestionService = new IngestionService(options);
   const systemInfo: WorkspaceSystemInfo = {
     hermes_version: options.systemInfo?.hermes_version ?? "Unavailable",
     locho_version: options.systemInfo?.locho_version ?? "Unavailable",
@@ -282,6 +285,8 @@ export function createWorkspaceHandler(
           url.pathname === "/file" ||
           url.pathname.startsWith("/skills/") ||
           url.pathname === "/skills" ||
+          url.pathname.startsWith("/ingestion/") ||
+          url.pathname === "/ingestion" ||
           url.pathname.startsWith("/git-activity/") ||
           url.pathname === "/git-activity" ||
           url.pathname === "/configuration")
@@ -461,6 +466,46 @@ export function createWorkspaceHandler(
           ? Math.max(1, Math.min(100, Number(limitParam) || 20))
           : 20;
         return json(await service.activity(limit));
+      }
+      if (
+        request.method === "GET" &&
+        url.pathname === "/api/workspace/ingestion"
+      ) {
+        const limit = Math.max(
+          1,
+          Math.min(100, Number(url.searchParams.get("limit") ?? "50") || 50),
+        );
+        const offset = Math.max(
+          0,
+          Math.min(100_000, Number(url.searchParams.get("offset") ?? "0") || 0),
+        );
+        return json(
+          ingestionService.overview(
+            url.searchParams.get("q") ?? undefined,
+            url.searchParams.get("status") ?? undefined,
+            offset,
+            limit,
+          ),
+        );
+      }
+      if (
+        request.method === "GET" &&
+        url.pathname.startsWith("/api/workspace/ingestion/")
+      ) {
+        try {
+          const intakeId = decodeURIComponent(
+            url.pathname.slice("/api/workspace/ingestion/".length),
+          );
+          return json(ingestionService.detail(intakeId));
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("not found")) {
+            return json({ schema: 1, ok: false, error: "not_found" }, 404);
+          }
+          return json(
+            { schema: 1, ok: false, error: "invalid_ingestion" },
+            400,
+          );
+        }
       }
       if (request.method === "PUT" && url.pathname === "/api/workspace/file") {
         if (!sameOrigin(request, url, publicOrigin))

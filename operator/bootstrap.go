@@ -65,6 +65,12 @@ func BootstrapContext(ctx context.Context, config Config, checkOnly bool, now ti
 	if err := ensureSecretDirectory(config); err != nil {
 		return BootstrapResult{}, err
 	}
+	if err := EnsureDir(filepath.Join(config.DataRoot, "ingestion"), 0o700); err != nil {
+		return BootstrapResult{}, err
+	}
+	if err := ensureRuntimeOwner(filepath.Join(config.DataRoot, "ingestion"), config.RuntimeUID, config.RuntimeGID, 0o700); err != nil {
+		return BootstrapResult{}, err
+	}
 	if config.WorkspaceUIAuthRequired {
 		sessionDir := filepath.Join(config.RuntimeRoot, "workspace-ui")
 		if err := EnsureDir(sessionDir, 0o700); err != nil {

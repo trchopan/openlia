@@ -55,6 +55,7 @@ class IngestionRuntime:
         self.stop_event = threading.Event()
         self.threads: list[threading.Thread] = []
         self.worker_lock = None
+        self.instance_id = uuid.uuid4().hex
         try:
             configured = int(ctx.get_config("max_concurrent_jobs", 1))
         except (TypeError, ValueError):
@@ -89,6 +90,7 @@ class IngestionRuntime:
 
     def start(self):
         self.queue.recover()
+        self._publish_status()
         if os.environ.get("HERMES_CONTAINER") != "1":
             return
         self.runtime_root.mkdir(parents=True, exist_ok=True)
@@ -333,7 +335,33 @@ class IngestionRuntime:
         while not self.stop_event.is_set():
             for event in self.queue.due_events():
                 self._deliver(event)
+            self._publish_status()
             self.stop_event.wait(2)
+
+    def _publish_status(self):
+        """Publish live queue state without exposing queue payloads or secrets."""
+        try:
+            self.runtime_root.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "schema": 1,
+                "generated_at": time.time(),
+                "instance_id": self.instance_id,
+                **self.queue.live_status(),
+            }
+            temporary = self.runtime_root / f".status-{uuid.uuid4().hex}.tmp"
+            with temporary.open("w", encoding="utf-8") as output:
+                json.dump(payload, output, ensure_ascii=False, sort_keys=True)
+                output.write("\n")
+                output.flush()
+                os.fsync(output.fileno())
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, self.runtime_root / "status.json")
+        except Exception:
+            LOGGER.warning("could not publish ingestion status snapshot", exc_info=True)
+            try:
+                temporary.unlink()
+            except (NameError, OSError):
+                pass
 
     def _deliver(self, event: dict):
         payload = event.get("payload") or {}

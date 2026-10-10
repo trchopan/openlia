@@ -14,6 +14,8 @@ import type {
   WorkspaceFile,
   WorkspaceFileMetadata,
   WorkspaceGitStatus,
+  IngestionDetailResponse,
+  IngestionOverviewResponse,
   WorkspaceMoveResponse,
   WorkspaceRenameResponse,
   WorkspaceSettings,
@@ -67,6 +69,10 @@ export interface WorkspaceApi {
   loadSystemInfo(): Promise<WorkspaceSystemInfo>;
   loadGitStatus(): Promise<WorkspaceGitStatus>;
   loadActivity(): Promise<WorkspaceActivityResponse>;
+  loadIngestion(
+    options?: { query?: string; status?: string; limit?: number } | undefined,
+  ): Promise<IngestionOverviewResponse>;
+  loadIngestionDetail(intakeId: string): Promise<IngestionDetailResponse>;
   downloadUrl(path: string): string;
   rawUrl(path: string): string;
   exportWorkspaceUrl(): string;
@@ -283,6 +289,38 @@ function isWorkspaceActivityResponse(
   );
 }
 
+function isIngestionOverviewResponse(
+  value: unknown,
+): value is IngestionOverviewResponse {
+  return (
+    isObject(value) &&
+    value.schema === 1 &&
+    typeof value.live_available === "boolean" &&
+    typeof value.live_stale === "boolean" &&
+    isObject(value.counts) &&
+    isObject(value.queue_counts) &&
+    Array.isArray(value.intakes) &&
+    typeof value.total === "number" &&
+    typeof value.offset === "number" &&
+    typeof value.limit === "number" &&
+    typeof value.truncated === "boolean"
+  );
+}
+
+function isIngestionDetailResponse(
+  value: unknown,
+): value is IngestionDetailResponse {
+  return (
+    isObject(value) &&
+    value.schema === 1 &&
+    typeof value.live_available === "boolean" &&
+    typeof value.live_stale === "boolean" &&
+    isObject(value.intake) &&
+    isObject(value.source) &&
+    Array.isArray(value.artifacts)
+  );
+}
+
 function isWorkspaceSettings(value: unknown): value is WorkspaceSettings {
   return (
     isObject(value) &&
@@ -466,6 +504,22 @@ export const httpWorkspaceApi: WorkspaceApi = {
     requestJson<WorkspaceActivityResponse>(
       "/api/workspace/activity",
       isWorkspaceActivityResponse,
+    ),
+  loadIngestion: (options) => {
+    const params = new URLSearchParams();
+    if (options?.query) params.set("q", options.query);
+    if (options?.status) params.set("status", options.status);
+    if (options?.limit) params.set("limit", String(options.limit));
+    const query = params.toString();
+    return requestJson<IngestionOverviewResponse>(
+      `/api/workspace/ingestion${query ? `?${query}` : ""}`,
+      isIngestionOverviewResponse,
+    );
+  },
+  loadIngestionDetail: (intakeId) =>
+    requestJson<IngestionDetailResponse>(
+      `/api/workspace/ingestion/${encodeURIComponent(intakeId)}`,
+      isIngestionDetailResponse,
     ),
   downloadUrl: (path) =>
     `/api/workspace/download?${new URLSearchParams({ path })}`,

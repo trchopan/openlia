@@ -17,12 +17,16 @@ const workspaceRoot = resolve(
 const skillsRoot = process.env.OPENLIA_SKILLS_ROOT
   ? resolve(process.env.OPENLIA_SKILLS_ROOT)
   : resolve(workspaceRoot, "..", "skills");
+const ingestionRoot = process.env.OPENLIA_INGESTION_ROOT
+  ? resolve(process.env.OPENLIA_INGESTION_ROOT)
+  : undefined;
 const bind = process.env.OPENLIA_WORKSPACE_UI_BIND ?? "127.0.0.1";
 const port = portFromEnvironment(process.env.OPENLIA_WORKSPACE_UI_PORT);
 const authRequired = process.env.OPENLIA_WORKSPACE_UI_AUTH_REQUIRED === "true";
 const passwordHashFile = process.env.OPENLIA_WORKSPACE_UI_PASSWORD_HASH_FILE;
 const handler = createWorkspaceHandler({
   authRequired,
+  ...(ingestionRoot ? { ingestionRoot } : {}),
   passwordHashFile,
   publicOrigin: process.env.OPENLIA_WORKSPACE_UI_PUBLIC_ORIGIN,
   sessionDatabasePath:

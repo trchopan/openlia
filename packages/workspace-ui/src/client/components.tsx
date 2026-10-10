@@ -30,6 +30,7 @@ import {
 
 export { ActivitySection } from "./ActivitySection";
 export { GitActivitySection } from "./GitActivitySection";
+export { IngestionSection } from "./IngestionSection";
 export { MoveFileDialog } from "./MoveFileDialog";
 export { RenameFileDialog } from "./RenameFileDialog";
 export { isJournalPath, isMarkdownPath, isRemindPath } from "./CodeEditor";
@@ -226,6 +227,7 @@ export function WorkspaceHeader({
   activeTab?:
     | "documents"
     | "skills"
+    | "ingestion"
     | "git-activity"
     | "configuration"
     | undefined;
@@ -240,7 +242,14 @@ export function WorkspaceHeader({
   onOpenGoTo?: (() => void) | undefined;
   onSignOut: () => void;
   onTabChange?:
-    | ((tab: "documents" | "skills" | "git-activity" | "configuration") => void)
+    | ((
+        tab:
+          | "documents"
+          | "skills"
+          | "ingestion"
+          | "git-activity"
+          | "configuration",
+      ) => void)
     | undefined;
 }) {
   const gitText = git?.configured
@@ -310,6 +319,20 @@ export function WorkspaceHeader({
           )}
           {onTabChange && (
             <button
+              aria-current={activeTab === "ingestion" ? "page" : undefined}
+              className={`btn btn-xs join-item ${
+                activeTab === "ingestion"
+                  ? "btn-primary shadow-xs"
+                  : "btn-ghost text-base-content/70"
+              }`}
+              onClick={() => onTabChange("ingestion")}
+              type="button"
+            >
+              Ingestion
+            </button>
+          )}
+          {onTabChange && (
+            <button
               aria-current={activeTab === "skills" ? "page" : undefined}
               className={`btn btn-xs join-item ${
                 activeTab === "skills"
@@ -346,11 +369,13 @@ export function WorkspaceHeader({
             ? "SKILLS"
             : activeTab === "git-activity"
               ? "GIT ACTIVITY"
-              : activeTab === "configuration"
-                ? "CONFIGURATION"
-                : file
-                  ? "WORKSPACE"
-                  : "ACTIVITY"}
+              : activeTab === "ingestion"
+                ? "INGESTION RUNTIME"
+                : activeTab === "configuration"
+                  ? "CONFIGURATION"
+                  : file
+                    ? "WORKSPACE"
+                    : "ACTIVITY"}
         </p>
         <div className="flex items-center gap-1.5">
           <h1 className="workspace-title" title={file?.path}>
@@ -359,9 +384,11 @@ export function WorkspaceHeader({
                 ? "Skills"
                 : activeTab === "git-activity"
                   ? "Git Activity"
-                  : activeTab === "configuration"
-                    ? "Configuration"
-                    : "Activity")}
+                  : activeTab === "ingestion"
+                    ? "Ingestion"
+                    : activeTab === "configuration"
+                      ? "Configuration"
+                      : "Activity")}
           </h1>
           {currentLink && (
             <CopyLinkButton

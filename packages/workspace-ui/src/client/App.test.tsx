@@ -677,7 +677,7 @@ messages:
       within(screen.getByRole("navigation", { name: "Workspace navigation" }))
         .getAllByRole("button")
         .map((btn) => btn.textContent?.trim()),
-    ).toEqual(["Documents", "Calendar", "Skills", "Git"]);
+    ).toEqual(["Documents", "Calendar", "Ingestion", "Skills", "Git"]);
 
     for (const tab of ["Skills", "Configuration"]) {
       fireEvent.click(screen.getByRole("button", { name: tab }));

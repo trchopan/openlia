@@ -1,7 +1,12 @@
 import type { WorkspaceView } from "./components";
 import { parseSkillRemainder } from "./openliaLinks";
 
-export type MainTab = "documents" | "skills" | "git-activity" | "configuration";
+export type MainTab =
+  | "documents"
+  | "skills"
+  | "ingestion"
+  | "git-activity"
+  | "configuration";
 
 export interface WorkspaceRoute {
   tab?: MainTab | undefined;
@@ -11,6 +16,7 @@ export interface WorkspaceRoute {
   scenario?: string | undefined;
   skill?: string | undefined;
   skillFile?: string | undefined;
+  ingestionId?: string | undefined;
 }
 
 const validViews: ReadonlySet<string> = new Set(["edit", "preview", "info"]);
@@ -44,6 +50,7 @@ export function parseRoute(
   let skill: string | undefined;
   let tab: MainTab | undefined;
   let parsedSkillFile: string | undefined;
+  let ingestionId: string | undefined;
 
   if (url.protocol === "openlia:") {
     const host = url.host.toLowerCase();
@@ -61,6 +68,9 @@ export function parseRoute(
       tab = "skills";
     } else if (host === "git-activity") {
       tab = "git-activity";
+    } else if (host === "ingestion") {
+      if (raw) ingestionId = safeDecodeURIComponent(raw);
+      tab = "ingestion";
     } else if (host === "configuration") {
       tab = "configuration";
     }
@@ -85,6 +95,12 @@ export function parseRoute(
   } else if (pathname === "/skills") {
     skill = undefined;
     tab = "skills";
+  } else if (pathname.startsWith("/ingestion/")) {
+    const raw = pathname.slice("/ingestion/".length);
+    if (raw) ingestionId = safeDecodeURIComponent(raw);
+    tab = "ingestion";
+  } else if (pathname === "/ingestion") {
+    tab = "ingestion";
   } else if (
     pathname === "/git-activity" ||
     pathname.startsWith("/git-activity/")
@@ -98,6 +114,7 @@ export function parseRoute(
   if (
     tabParam === "skills" ||
     tabParam === "documents" ||
+    tabParam === "ingestion" ||
     tabParam === "git-activity" ||
     tabParam === "configuration"
   ) {
@@ -112,6 +129,9 @@ export function parseRoute(
 
   const skillFileParam = url.searchParams.get("skillFile");
   const skillFile = skillFileParam ? skillFileParam.trim() : parsedSkillFile;
+
+  const ingestionParam = url.searchParams.get("ingestion");
+  if (ingestionParam) ingestionId = ingestionParam.trim();
 
   if (!path) {
     const fallbackPath =
@@ -137,6 +157,7 @@ export function parseRoute(
 
   return {
     filter,
+    ingestionId: ingestionId || undefined,
     path: path || undefined,
     scenario,
     skill: skill || undefined,
@@ -162,6 +183,10 @@ export function buildRouteUrl(route: WorkspaceRoute): string {
     } else {
       pathname = "/skills";
     }
+  } else if (route.tab === "ingestion") {
+    pathname = route.ingestionId
+      ? `/ingestion/${encodeURIComponent(route.ingestionId)}`
+      : "/ingestion";
   } else if (route.path) {
     const segments = route.path
       .replace(/^\/+/, "")
@@ -182,6 +207,9 @@ export function buildRouteUrl(route: WorkspaceRoute): string {
   }
   if (route.skillFile) {
     params.set("skillFile", route.skillFile);
+  }
+  if (route.ingestionId && pathname === "/ingestion") {
+    params.set("ingestion", route.ingestionId);
   }
 
   const query = params.toString();

@@ -16,6 +16,8 @@ import type {
   WorkspaceTreeEntry,
   WorkspaceTreeResponse,
   WorkspaceWriteResponse,
+  IngestionDetailResponse,
+  IngestionOverviewResponse,
 } from "../shared/api";
 import { ApiError, type WorkspaceApi } from "./api";
 
@@ -743,6 +745,96 @@ REM 2026-10-31 TAG social MSG Halloween Celebration
     },
     async downloadWorkspaceExport() {
       requireAuthentication();
+    },
+    async loadIngestion(): Promise<IngestionOverviewResponse> {
+      requireAuthentication();
+      const intake = {
+        action: undefined,
+        callback: {
+          acknowledged_at: null,
+          attempts: 1,
+          delivered_at: 1_758_700_000,
+          delivery_state: "awaiting_ack",
+          durable_status: "pending",
+          event_id: "evt_mock",
+          last_error: null,
+        },
+        captured_at: modifiedAt,
+        durable_status: "processing",
+        intake_id: "intake_mock",
+        intake_record_path: "inbox/ingestion/intake_mock.md",
+        job: {
+          attempts: 1,
+          created_at: 1_758_700_000,
+          error_code: null,
+          error_summary: null,
+          heartbeat_at: 1_758_700_030,
+          intake_id: "intake_mock",
+          job_id: "job_mock",
+          lease_expires_at: 1_758_700_090,
+          next_attempt_at: null,
+          operation: "extract",
+          requested_outputs: ["text"],
+          source_id: "src_mock",
+          state: "running",
+          updated_at: 1_758_700_030,
+          version_id: "ver_mock",
+        },
+        kind: "pdf",
+        operation: "extract",
+        requested_outputs: ["text"],
+        source_id: "src_mock",
+        source_record_path: "sources/records/src_mock.md",
+        source_status: "captured",
+        source_title: "Quarterly statement",
+        source_url: null,
+        status: "processing",
+        version_id: "ver_mock",
+      };
+      return {
+        counts: { processing: 1 },
+        intakes: [intake],
+        limit: 50,
+        live_age_seconds: 1,
+        live_available: true,
+        live_generated_at: 1_758_700_030,
+        live_stale: false,
+        offset: 0,
+        queue_counts: { running: 1 },
+        schema: 1,
+        total: 1,
+        truncated: false,
+      };
+    },
+    async loadIngestionDetail(): Promise<IngestionDetailResponse> {
+      requireAuthentication();
+      const overview = await this.loadIngestion();
+      const intake = overview.intakes[0];
+      if (!intake) throw error(404, "not_found");
+      return {
+        artifacts: [
+          {
+            path: "sources/artifacts/src_mock/ver_mock/original.pdf",
+            role: "original",
+            warnings: [],
+          },
+        ],
+        intake,
+        live_age_seconds: overview.live_age_seconds,
+        live_available: overview.live_available,
+        live_generated_at: overview.live_generated_at,
+        live_stale: overview.live_stale,
+        schema: 1,
+        source: {
+          captured_at: modifiedAt,
+          id: "src_mock",
+          kind: "pdf",
+          origin: { channel: "chat" },
+          status: "captured",
+          title: "Quarterly statement",
+          versions: [],
+        },
+      };
     },
 
     async loadSkills() {

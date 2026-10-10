@@ -155,6 +155,93 @@ class IngestionQueue:
             row = db.execute("SELECT * FROM jobs WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
         return self._decode_job(dict(row)) if row is not None else None
 
+    def live_status(self, job_limit: int = 200, event_limit: int = 400, action_limit: int = 400) -> dict:
+        """Return a sanitized, bounded view for the workspace UI snapshot."""
+        job_limit = max(1, min(job_limit, 1000))
+        event_limit = max(1, min(event_limit, 2000))
+        action_limit = max(1, min(action_limit, 2000))
+        with self._database() as db:
+            counts = {
+                row["state"]: int(row["count"])
+                for row in db.execute("SELECT state, COUNT(*) AS count FROM jobs GROUP BY state")
+            }
+            jobs = [
+                {
+                    "job_id": row["job_id"],
+                    "intake_id": row["intake_id"],
+                    "source_id": row["source_id"],
+                    "version_id": row["version_id"],
+                    "operation": row["operation"],
+                    "requested_outputs": _decode_json(row["requested_outputs"], []),
+                    "state": row["state"],
+                    "attempts": row["attempts"],
+                    "error_code": row["error_code"],
+                    "error_summary": row["error_summary"],
+                    "next_attempt_at": row["next_attempt_at"],
+                    "heartbeat_at": row["heartbeat_at"],
+                    "lease_expires_at": row["lease_expires_at"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+                for row in db.execute(
+                    """SELECT job_id, intake_id, source_id, version_id, operation,
+                              requested_outputs, state, attempts, error_code,
+                              error_summary, next_attempt_at, heartbeat_at,
+                              lease_expires_at, created_at, updated_at
+                         FROM jobs ORDER BY updated_at DESC LIMIT ?""",
+                    (job_limit,),
+                ).fetchall()
+            ]
+            events = [
+                {
+                    "event_id": row["event_id"],
+                    "job_id": row["job_id"],
+                    "event_type": row["event_type"],
+                    "delivery_state": row["delivery_state"],
+                    "attempts": row["attempts"],
+                    "last_error": row["last_error"],
+                    "delivered_at": row["delivered_at"],
+                    "acknowledged_at": row["acknowledged_at"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+                for row in db.execute(
+                    """SELECT event_id, job_id, event_type, delivery_state,
+                              attempts, last_error, delivered_at, acknowledged_at,
+                              created_at, updated_at
+                         FROM events ORDER BY updated_at DESC LIMIT ?""",
+                    (event_limit,),
+                ).fetchall()
+            ]
+            actions = [
+                {
+                    "action_id": row["action_id"],
+                    "event_id": row["event_id"],
+                    "intake_id": row["intake_id"],
+                    "status": row["status"],
+                    "record_refs": _decode_json(row["record_refs"], []),
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+                for row in db.execute(
+                    """SELECT action_id, event_id, intake_id, status,
+                              record_refs, created_at, updated_at
+                         FROM actions ORDER BY updated_at DESC LIMIT ?""",
+                    (action_limit,),
+                ).fetchall()
+            ]
+        return {
+            "job_counts": counts,
+            "jobs": jobs,
+            "events": events,
+            "actions": actions,
+            "truncated": {
+                "jobs": len(jobs) >= job_limit,
+                "events": len(events) >= event_limit,
+                "actions": len(actions) >= action_limit,
+            },
+        }
+
     def claim(self, owner: str) -> dict | None:
         timestamp = now()
         with self._database() as db:
@@ -347,3 +434,10 @@ class IngestionQueue:
         except (KeyError, TypeError, json.JSONDecodeError):
             event["payload"] = {}
         return event
+
+
+def _decode_json(value: object, fallback: object) -> object:
+    try:
+        return json.loads(value) if value else fallback
+    except (TypeError, json.JSONDecodeError):
+        return fallback

@@ -149,6 +149,124 @@ export interface WorkspaceSystemInfo {
   locho_version: string;
 }
 
+export interface IngestionLiveJob {
+  job_id: string;
+  intake_id: string;
+  source_id: string;
+  version_id?: string | null;
+  operation: string;
+  requested_outputs: string[];
+  state: string;
+  attempts: number;
+  error_code?: string | null;
+  error_summary?: string | null;
+  next_attempt_at?: number | null;
+  heartbeat_at?: number | null;
+  lease_expires_at?: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface IngestionLiveEvent {
+  event_id: string;
+  job_id: string;
+  event_type: string;
+  delivery_state: string;
+  attempts: number;
+  last_error?: string | null;
+  delivered_at?: number | null;
+  acknowledged_at?: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface IngestionLiveAction {
+  action_id: string;
+  event_id: string;
+  intake_id: string;
+  status: string;
+  record_refs: string[];
+  created_at: number;
+  updated_at: number;
+}
+
+export interface IngestionCallbackStatus {
+  event_id?: string | null;
+  durable_status?: string | null;
+  delivery_state?: string | null;
+  attempts?: number | undefined;
+  last_error?: string | null;
+  delivered_at?: number | null;
+  acknowledged_at?: number | null;
+}
+
+export interface IngestionArtifact {
+  artifact_id?: string | undefined;
+  path: string;
+  role: string;
+  manifest_path?: string | undefined;
+  size_bytes?: number | undefined;
+  complete?: boolean | undefined;
+  warnings: string[];
+}
+
+export interface IngestionListItem {
+  intake_id: string;
+  source_id: string;
+  version_id: string;
+  captured_at: string;
+  kind: string;
+  operation: string;
+  requested_outputs: string[];
+  status: string;
+  durable_status: string | null;
+  source_title: string;
+  source_status: string | null;
+  source_url?: string | null;
+  source_record_path: string;
+  intake_record_path: string;
+  job?: IngestionLiveJob | undefined;
+  event?: IngestionLiveEvent | undefined;
+  action?: IngestionLiveAction | undefined;
+  callback: IngestionCallbackStatus;
+}
+
+export interface IngestionOverviewResponse {
+  schema: 1;
+  live_available: boolean;
+  live_stale: boolean;
+  live_generated_at?: number | undefined;
+  live_age_seconds?: number | undefined;
+  live_error?: string | undefined;
+  counts: Record<string, number>;
+  queue_counts: Record<string, number>;
+  intakes: IngestionListItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  truncated: boolean;
+}
+
+export interface IngestionDetailResponse {
+  schema: 1;
+  live_available: boolean;
+  live_stale: boolean;
+  live_generated_at?: number | undefined;
+  live_age_seconds?: number | undefined;
+  live_error?: string | undefined;
+  intake: IngestionListItem;
+  source: {
+    id: string;
+    title: string;
+    kind: string;
+    status: string | null;
+    captured_at: string | null;
+    origin: Record<string, unknown>;
+    versions: Array<Record<string, unknown>>;
+  };
+  artifacts: IngestionArtifact[];
+}
+
 export interface AuthSessionResponse {
   schema: 1;
   auth_required: boolean;

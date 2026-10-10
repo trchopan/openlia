@@ -297,4 +297,18 @@ describe("route helpers", () => {
     });
     expect(buildRouteUrl({ tab: "configuration" })).toBe("/configuration");
   });
+
+  test("parses and builds ingestion routes", () => {
+    expect(parseRoute("/ingestion/intake_123")).toMatchObject({
+      ingestionId: "intake_123",
+      tab: "ingestion",
+    });
+    expect(parseRoute("openlia://ingestion/intake_123")).toMatchObject({
+      ingestionId: "intake_123",
+      tab: "ingestion",
+    });
+    expect(buildRouteUrl({ ingestionId: "intake_123", tab: "ingestion" })).toBe(
+      "/ingestion/intake_123",
+    );
+  });
 });
